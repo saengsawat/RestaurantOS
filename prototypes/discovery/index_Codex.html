@@ -1,0 +1,1577 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RestaurantOS POS — Concept Prototype</title>
+  <style>
+    :root {
+      --bg: #f3f4f6;
+      --panel: #ffffff;
+      --panel-2: #f8fafc;
+      --text: #172033;
+      --muted: #667085;
+      --line: #dfe3ea;
+      --nav: #16202f;
+      --nav-2: #233249;
+      --accent: #d64933;
+      --accent-dark: #b93827;
+      --green: #237a57;
+      --yellow: #a76b00;
+      --red: #b42318;
+      --blue: #275dad;
+      --shadow: 0 8px 24px rgba(18, 28, 45, 0.08);
+      --radius: 14px;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      overflow: hidden;
+    }
+
+    button, input, textarea, select { font: inherit; }
+    button { cursor: pointer; }
+
+    .app-shell {
+      height: 100vh;
+      min-width: 980px;
+      display: grid;
+      grid-template-rows: 72px 1fr;
+    }
+
+    .topbar {
+      background: var(--nav);
+      color: white;
+      display: flex;
+      align-items: center;
+      padding: 0 22px;
+      gap: 20px;
+      box-shadow: 0 2px 10px rgba(0,0,0,.14);
+      z-index: 5;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 260px;
+    }
+
+    .brand-mark {
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      background: var(--accent);
+      display: grid;
+      place-items: center;
+      font-weight: 800;
+      letter-spacing: -0.04em;
+    }
+
+    .brand h1 {
+      font-size: 18px;
+      line-height: 1.05;
+      margin: 0;
+    }
+
+    .brand small {
+      display: block;
+      color: #b7c0ce;
+      margin-top: 3px;
+      font-size: 12px;
+    }
+
+    .concept-badge {
+      background: #f6e6e2;
+      color: #8a2b1f;
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .top-meta {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-left: auto;
+      font-size: 13px;
+    }
+
+    .meta-pill {
+      background: rgba(255,255,255,.09);
+      border: 1px solid rgba(255,255,255,.12);
+      padding: 8px 10px;
+      border-radius: 10px;
+      min-width: 90px;
+    }
+
+    .meta-pill strong { display:block; font-size: 13px; }
+    .meta-pill span { color:#bdc7d6; font-size: 11px; }
+
+    .main {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 92px 1fr;
+    }
+
+    .side-nav {
+      background: #202c3d;
+      padding: 12px 9px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .nav-btn {
+      min-height: 68px;
+      border: 0;
+      border-radius: 12px;
+      background: transparent;
+      color: #cbd3df;
+      font-weight: 700;
+      display: grid;
+      place-items: center;
+      gap: 3px;
+      padding: 8px 4px;
+    }
+
+    .nav-btn .icon { font-size: 21px; }
+    .nav-btn.active { background: var(--nav-2); color: white; box-shadow: inset 3px 0 0 var(--accent); }
+
+    .view { display:none; min-height:0; height:100%; }
+    .view.active { display:block; }
+
+    /* POS */
+    .pos-layout {
+      height: 100%;
+      display: grid;
+      grid-template-columns: minmax(0, 1.5fr) minmax(380px, .8fr);
+      gap: 12px;
+      padding: 12px;
+      min-height: 0;
+    }
+
+    .menu-panel, .order-panel, .workspace-panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      min-height: 0;
+    }
+
+    .menu-panel {
+      display:grid;
+      grid-template-rows: auto 1fr;
+      overflow:hidden;
+    }
+
+    .category-strip {
+      display:flex;
+      gap:8px;
+      padding: 12px;
+      border-bottom:1px solid var(--line);
+      overflow-x:auto;
+      background: var(--panel-2);
+    }
+
+    .category-btn {
+      flex: 0 0 auto;
+      min-height:48px;
+      padding: 0 17px;
+      border-radius:11px;
+      border:1px solid var(--line);
+      background:white;
+      color:var(--text);
+      font-weight:700;
+    }
+
+    .category-btn.active { background: var(--nav); color:white; border-color:var(--nav); }
+
+    .menu-grid {
+      padding: 14px;
+      display:grid;
+      grid-template-columns: repeat(3, minmax(150px, 1fr));
+      align-content:start;
+      gap:12px;
+      overflow:auto;
+    }
+
+    .menu-item {
+      min-height: 108px;
+      border:1px solid #d6dbe3;
+      background:white;
+      border-radius:13px;
+      text-align:left;
+      padding:14px;
+      display:flex;
+      flex-direction:column;
+      justify-content:space-between;
+      box-shadow: 0 3px 8px rgba(16,24,40,.04);
+    }
+
+    .menu-item:hover { border-color:#9da8b8; }
+    .menu-item .name { font-weight:800; font-size:16px; }
+    .menu-item .price { color:var(--accent); font-weight:800; font-size:15px; }
+    .menu-item .hint { color:var(--muted); font-size:11px; margin-top:4px; }
+
+    .order-panel {
+      display:grid;
+      grid-template-rows: auto auto 1fr auto auto;
+      overflow:hidden;
+    }
+
+    .order-header { padding:14px; border-bottom:1px solid var(--line); }
+    .order-title-row { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+    .order-title-row h2 { margin:0; font-size:18px; }
+    .status-badge {
+      padding: 6px 10px;
+      border-radius:999px;
+      background:#edf2f7;
+      color:#475467;
+      font-size:12px;
+      font-weight:800;
+    }
+    .status-badge.sent { background:#e7f4ee; color:#176241; }
+    .status-badge.held { background:#fff4df; color:#855700; }
+
+    .order-type-row {
+      padding:10px 12px;
+      display:grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap:8px;
+      border-bottom:1px solid var(--line);
+      background: var(--panel-2);
+    }
+
+    .order-type-btn {
+      min-height:44px;
+      border:1px solid var(--line);
+      background:white;
+      border-radius:10px;
+      font-weight:800;
+    }
+    .order-type-btn.active { border-color:var(--accent); color:var(--accent); background:#fff7f5; }
+
+    .order-lines { overflow:auto; padding:8px 10px; }
+    .empty-order {
+      height:100%; display:grid; place-items:center; color:var(--muted); text-align:center; padding:30px;
+    }
+    .empty-order strong { display:block; color:#344054; margin-bottom:5px; }
+
+    .order-line {
+      display:grid;
+      grid-template-columns: 1fr auto;
+      gap:8px;
+      padding:11px 5px;
+      border-bottom:1px solid #edf0f4;
+    }
+    .order-line.voided { opacity:.56; }
+    .order-line.voided .line-name { text-decoration: line-through; }
+    .line-name { font-weight:800; }
+    .line-mods { color:var(--muted); font-size:12px; line-height:1.45; margin-top:3px; }
+    .line-price { font-weight:800; text-align:right; white-space:nowrap; }
+    .line-controls { display:flex; align-items:center; gap:5px; margin-top:8px; flex-wrap:wrap; }
+    .mini-btn {
+      border:1px solid var(--line);
+      background:#fff;
+      min-width:34px;
+      height:32px;
+      border-radius:8px;
+      font-weight:800;
+    }
+    .mini-btn.text { padding:0 9px; color:#475467; font-size:12px; }
+    .qty-display { min-width:28px; text-align:center; font-weight:800; }
+
+    .totals {
+      padding: 12px 14px;
+      border-top:1px solid var(--line);
+      background:#fbfcfd;
+    }
+    .total-row { display:flex; justify-content:space-between; margin:5px 0; font-size:14px; }
+    .total-row.discount { color:var(--green); }
+    .total-row.grand { font-size:19px; font-weight:900; margin-top:9px; padding-top:9px; border-top:1px solid var(--line); }
+    .demo-tax-note { color:var(--muted); font-size:10px; margin-top:5px; }
+
+    .action-grid {
+      padding:10px;
+      display:grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap:8px;
+      border-top:1px solid var(--line);
+      background:white;
+    }
+
+    .action-btn {
+      min-height:50px;
+      border-radius:10px;
+      border:1px solid var(--line);
+      background:white;
+      font-weight:850;
+      color:#344054;
+    }
+    .action-btn.primary { background:var(--accent); color:white; border-color:var(--accent); }
+    .action-btn.dark { background:var(--nav); color:white; border-color:var(--nav); }
+    .action-btn.danger { color:var(--red); border-color:#efc5c1; }
+
+    /* Tables / Kitchen */
+    .workspace {
+      height:100%;
+      padding:12px;
+    }
+    .workspace-panel { height:100%; display:grid; grid-template-rows:auto 1fr; overflow:hidden; }
+    .workspace-header { padding:16px 18px; border-bottom:1px solid var(--line); display:flex; align-items:center; justify-content:space-between; }
+    .workspace-header h2 { margin:0; font-size:21px; }
+    .workspace-header p { margin:4px 0 0; color:var(--muted); font-size:12px; }
+
+    .tables-grid {
+      padding:18px;
+      display:grid;
+      grid-template-columns: repeat(4, minmax(160px,1fr));
+      gap:16px;
+      align-content:start;
+      overflow:auto;
+    }
+    .table-card {
+      min-height:140px;
+      border-radius:16px;
+      border:2px solid #d8dee7;
+      background:white;
+      padding:16px;
+      text-align:left;
+      display:flex;
+      flex-direction:column;
+      justify-content:space-between;
+    }
+    .table-card .table-no { font-size:19px; font-weight:900; }
+    .table-card .table-status { font-size:13px; font-weight:800; }
+    .table-card .table-amount { font-size:20px; font-weight:900; }
+    .table-card.available { border-color:#b9dfce; background:#f4fbf8; }
+    .table-card.occupied { border-color:#f0c4bc; background:#fff8f6; }
+    .table-card.requested { border-color:#f1d69f; background:#fffbf1; }
+    .table-card.open { border-color:#b9cceb; background:#f6f9ff; }
+
+    .kitchen-board {
+      padding:16px;
+      overflow:auto;
+      display:grid;
+      grid-template-columns: repeat(3, minmax(260px,1fr));
+      gap:14px;
+      align-content:start;
+    }
+    .ticket {
+      border:1px solid var(--line);
+      border-top:6px solid #7b8798;
+      border-radius:12px;
+      background:white;
+      padding:14px;
+      box-shadow: 0 4px 12px rgba(16,24,40,.05);
+    }
+    .ticket.cooking { border-top-color:#d98a16; }
+    .ticket.ready { border-top-color:var(--green); opacity:.78; }
+    .ticket-head { display:flex; justify-content:space-between; gap:10px; border-bottom:1px solid var(--line); padding-bottom:9px; margin-bottom:9px; }
+    .ticket-table { font-weight:900; font-size:17px; }
+    .ticket-meta { color:var(--muted); font-size:12px; text-align:right; }
+    .ticket-item { margin:9px 0; }
+    .ticket-item strong { display:block; }
+    .ticket-mod { margin-left:10px; color:#4d5b6f; font-size:12px; line-height:1.4; }
+    .ticket-actions { display:flex; gap:8px; margin-top:12px; }
+    .ticket-actions button { flex:1; min-height:42px; border-radius:9px; border:1px solid var(--line); background:white; font-weight:800; }
+    .ticket-actions .start { background:#fff6e8; color:#8a5b08; border-color:#f0d19a; }
+    .ticket-actions .ready { background:#eef9f4; color:#176241; border-color:#bde1d1; }
+
+    /* Modal */
+    .modal-backdrop {
+      position:fixed;
+      inset:0;
+      background:rgba(12,20,31,.55);
+      display:none;
+      align-items:center;
+      justify-content:center;
+      padding:24px;
+      z-index:50;
+    }
+    .modal-backdrop.show { display:flex; }
+    .modal {
+      width:min(760px, 95vw);
+      max-height:90vh;
+      overflow:auto;
+      background:white;
+      border-radius:16px;
+      box-shadow:0 24px 70px rgba(0,0,0,.28);
+    }
+    .modal.large { width:min(900px, 96vw); }
+    .modal-head { padding:18px 20px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:flex-start; gap:14px; }
+    .modal-head h3 { margin:0; font-size:22px; }
+    .modal-head p { margin:4px 0 0; color:var(--muted); font-size:12px; }
+    .close-btn { border:0; background:#eef1f5; width:38px; height:38px; border-radius:10px; font-size:20px; }
+    .modal-body { padding:18px 20px; }
+    .modal-foot { padding:14px 20px 18px; display:flex; justify-content:flex-end; gap:10px; border-top:1px solid var(--line); }
+    .modal-foot button { min-height:46px; padding:0 18px; border-radius:10px; border:1px solid var(--line); font-weight:850; background:white; }
+    .modal-foot .primary { background:var(--accent); color:white; border-color:var(--accent); }
+
+    .field-group { margin-bottom:18px; }
+    .field-group h4 { margin:0 0 9px; font-size:14px; }
+    .choice-grid { display:grid; grid-template-columns: repeat(3,1fr); gap:8px; }
+    .choice-grid.two { grid-template-columns: repeat(2,1fr); }
+    .choice-btn {
+      min-height:48px;
+      border:1px solid var(--line);
+      border-radius:10px;
+      background:white;
+      text-align:left;
+      padding:9px 11px;
+      font-weight:700;
+    }
+    .choice-btn.selected { border-color:var(--accent); color:var(--accent); background:#fff7f5; box-shadow: inset 0 0 0 1px var(--accent); }
+    .choice-btn small { color:var(--muted); font-weight:600; }
+    textarea, input[type="text"], input[type="number"], select {
+      width:100%;
+      border:1px solid #cfd6df;
+      border-radius:10px;
+      padding:11px 12px;
+      background:white;
+      color:var(--text);
+    }
+    textarea { min-height:84px; resize:vertical; }
+
+    .table-select-grid { display:grid; grid-template-columns: repeat(4,1fr); gap:8px; }
+    .table-select-btn { min-height:54px; border:1px solid var(--line); border-radius:10px; background:white; font-weight:850; }
+    .table-select-btn.selected { background:var(--nav); color:white; border-color:var(--nav); }
+
+    .payment-summary { background:#f8fafc; border:1px solid var(--line); border-radius:12px; padding:14px; margin-bottom:16px; }
+    .pay-options { display:grid; grid-template-columns:repeat(4,1fr); gap:9px; }
+    .pay-option { min-height:70px; border:1px solid var(--line); border-radius:12px; background:white; font-weight:850; }
+    .pay-option.selected { border-color:var(--accent); color:var(--accent); background:#fff7f5; }
+    .tip-row { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-top:9px; }
+    .tip-btn { min-height:46px; border:1px solid var(--line); background:white; border-radius:10px; font-weight:850; }
+    .tip-btn.selected { background:var(--nav); color:white; border-color:var(--nav); }
+    .split-panel { margin-top:14px; padding:14px; border:1px dashed #b8c0cc; border-radius:12px; background:#fafbfc; display:none; }
+    .split-panel.show { display:block; }
+    .split-buttons { display:flex; gap:8px; }
+    .split-buttons button { flex:1; min-height:46px; border:1px solid var(--line); border-radius:10px; background:white; font-weight:800; }
+    .split-result { margin-top:10px; color:#475467; font-size:13px; }
+    .payment-result { margin-top:14px; padding:14px; border-radius:12px; background:#edf8f3; color:#176241; font-weight:850; display:none; }
+    .payment-result.show { display:block; }
+
+    .discount-list { display:grid; gap:9px; }
+    .discount-choice { min-height:52px; border:1px solid var(--line); border-radius:10px; background:white; text-align:left; padding:10px 12px; font-weight:800; }
+    .discount-choice.selected { border-color:var(--green); background:#f3fbf7; color:#176241; }
+    .custom-discount-row { display:none; margin-top:10px; }
+    .custom-discount-row.show { display:block; }
+
+    .toast {
+      position:fixed;
+      right:22px;
+      bottom:22px;
+      background:#172033;
+      color:white;
+      padding:13px 16px;
+      border-radius:11px;
+      box-shadow:0 12px 32px rgba(0,0,0,.2);
+      transform:translateY(20px);
+      opacity:0;
+      pointer-events:none;
+      transition:.18s ease;
+      z-index:100;
+      font-weight:750;
+      max-width:340px;
+    }
+    .toast.show { opacity:1; transform:translateY(0); }
+
+    .muted { color:var(--muted); }
+    .hidden { display:none !important; }
+
+    @media (max-width: 1200px) {
+      .menu-grid { grid-template-columns:repeat(2, minmax(150px,1fr)); }
+      .top-meta .employee-pill { display:none; }
+      .tables-grid { grid-template-columns:repeat(3, minmax(160px,1fr)); }
+      .kitchen-board { grid-template-columns:repeat(2,minmax(260px,1fr)); }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark">R</div>
+        <div>
+          <h1>RestaurantOS POS</h1>
+          <small>Nine Thai Kitchen</small>
+        </div>
+      </div>
+      <span class="concept-badge">Concept Prototype</span>
+
+      <div class="top-meta">
+        <div class="meta-pill employee-pill"><span>Employee</span><strong>Maya</strong></div>
+        <div class="meta-pill"><span>Order Type</span><strong id="topOrderType">Dine In</strong></div>
+        <div class="meta-pill"><span>Table</span><strong id="topTable">Table 4</strong></div>
+        <div class="meta-pill"><span>Time</span><strong id="clock">8:14 PM</strong></div>
+      </div>
+    </header>
+
+    <div class="main">
+      <nav class="side-nav">
+        <button class="nav-btn active" data-view="pos"><span class="icon">▦</span><span>POS</span></button>
+        <button class="nav-btn" data-view="tables"><span class="icon">◫</span><span>Tables</span></button>
+        <button class="nav-btn" data-view="kitchen"><span class="icon">▤</span><span>Kitchen</span></button>
+      </nav>
+
+      <section class="view active" id="view-pos">
+        <div class="pos-layout">
+          <div class="menu-panel">
+            <div class="category-strip" id="categoryStrip"></div>
+            <div class="menu-grid" id="menuGrid"></div>
+          </div>
+
+          <aside class="order-panel">
+            <div class="order-header">
+              <div class="order-title-row">
+                <div>
+                  <h2 id="checkTitle">Table 4</h2>
+                  <div class="muted" id="checkSubtext" style="font-size:12px;margin-top:3px;">Dine In · Check #1042</div>
+                </div>
+                <span class="status-badge" id="orderStatus">Open</span>
+              </div>
+            </div>
+
+            <div class="order-type-row">
+              <button class="order-type-btn active" data-type="Dine In">Dine In</button>
+              <button class="order-type-btn" data-type="Takeout">Takeout</button>
+              <button class="order-type-btn" data-type="Delivery">Delivery</button>
+            </div>
+
+            <div class="order-lines" id="orderLines"></div>
+
+            <div class="totals" id="totalsPanel"></div>
+
+            <div class="action-grid">
+              <button class="action-btn" id="holdBtn">Hold</button>
+              <button class="action-btn dark" id="sendBtn">Send</button>
+              <button class="action-btn primary" id="payBtn">Pay</button>
+              <button class="action-btn" id="discountBtn">Discount</button>
+              <button class="action-btn danger" id="voidBtn">Void</button>
+              <button class="action-btn" id="moreBtn">More</button>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="view" id="view-tables">
+        <div class="workspace">
+          <div class="workspace-panel">
+            <div class="workspace-header">
+              <div>
+                <h2>Tables</h2>
+                <p>Simple floor view for product discovery — not a full floor-plan editor.</p>
+              </div>
+              <button class="action-btn" style="padding:0 16px;" id="newOrderFromTables">+ New Order</button>
+            </div>
+            <div class="tables-grid" id="tablesGrid"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="view-kitchen">
+        <div class="workspace">
+          <div class="workspace-panel">
+            <div class="workspace-header">
+              <div>
+                <h2>Kitchen</h2>
+                <p>Basic kitchen ticket simulation. No routing, printers, stations, or timing logic.</p>
+              </div>
+              <span class="status-badge" id="kitchenCount">0 active tickets</span>
+            </div>
+            <div class="kitchen-board" id="kitchenBoard"></div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- Modifier Modal -->
+  <div class="modal-backdrop" id="modifierModal">
+    <div class="modal large">
+      <div class="modal-head">
+        <div>
+          <h3 id="modifierTitle">Pad Thai</h3>
+          <p id="modifierBasePrice">Base price $18.00</p>
+        </div>
+        <button class="close-btn" data-close="modifierModal">×</button>
+      </div>
+      <div class="modal-body" id="modifierBody"></div>
+      <div class="modal-foot">
+        <button data-close="modifierModal">Cancel</button>
+        <button class="primary" id="addModifierBtn">Add to Order</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Table Select Modal -->
+  <div class="modal-backdrop" id="tableModal">
+    <div class="modal">
+      <div class="modal-head">
+        <div>
+          <h3>Select Table</h3>
+          <p>Demo dine-in table assignment.</p>
+        </div>
+        <button class="close-btn" data-close="tableModal">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="table-select-grid" id="tableSelectGrid"></div>
+      </div>
+      <div class="modal-foot">
+        <button data-close="tableModal">Cancel</button>
+        <button class="primary" id="confirmTableBtn">Use Table</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Discount Modal -->
+  <div class="modal-backdrop" id="discountModal">
+    <div class="modal">
+      <div class="modal-head">
+        <div><h3>Discount</h3><p>Demo only — no manager security or approval workflow.</p></div>
+        <button class="close-btn" data-close="discountModal">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="discount-list" id="discountList">
+          <button class="discount-choice" data-discount="manager10">Manager 10%</button>
+          <button class="discount-choice" data-discount="employee20">Employee 20%</button>
+          <button class="discount-choice" data-discount="compItem">Comp Item <small class="muted">(last active item)</small></button>
+          <button class="discount-choice" data-discount="custom">Custom Discount</button>
+        </div>
+        <div class="custom-discount-row" id="customDiscountRow">
+          <label style="font-weight:800;font-size:13px;">Custom discount %</label>
+          <input id="customDiscountInput" type="number" min="0" max="100" step="1" placeholder="e.g. 15" style="margin-top:6px;" />
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button id="clearDiscountBtn">Clear Discount</button>
+        <button data-close="discountModal">Cancel</button>
+        <button class="primary" id="applyDiscountBtn">Apply</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Void Modal -->
+  <div class="modal-backdrop" id="voidModal">
+    <div class="modal">
+      <div class="modal-head">
+        <div><h3>Void Item</h3><p>Demo reason capture. Voided items remain visible but are removed from totals.</p></div>
+        <button class="close-btn" data-close="voidModal">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="field-group">
+          <h4>Item</h4>
+          <select id="voidItemSelect"></select>
+        </div>
+        <div class="field-group">
+          <h4>Reason</h4>
+          <div class="choice-grid two" id="voidReasonGrid">
+            <button class="choice-btn" data-reason="Customer changed mind">Customer changed mind</button>
+            <button class="choice-btn" data-reason="Kitchen mistake">Kitchen mistake</button>
+            <button class="choice-btn" data-reason="Wrong item entered">Wrong item entered</button>
+            <button class="choice-btn" data-reason="Manager comp">Manager comp</button>
+            <button class="choice-btn" data-reason="Other">Other</button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button data-close="voidModal">Cancel</button>
+        <button class="primary" id="confirmVoidBtn">Void Item</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Payment Modal -->
+  <div class="modal-backdrop" id="paymentModal">
+    <div class="modal large">
+      <div class="modal-head">
+        <div><h3>Payment</h3><p>Simulation only — no card reader, gateway, or real transaction.</p></div>
+        <button class="close-btn" data-close="paymentModal">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="payment-summary" id="paymentSummary"></div>
+
+        <div class="field-group">
+          <h4>Payment Method</h4>
+          <div class="pay-options" id="payOptions">
+            <button class="pay-option" data-method="Credit Card">Credit Card</button>
+            <button class="pay-option" data-method="Cash">Cash</button>
+            <button class="pay-option" data-method="Gift Card">Gift Card</button>
+            <button class="pay-option" data-method="Split Check">Split Check</button>
+          </div>
+        </div>
+
+        <div class="field-group" id="tipGroup">
+          <h4>Tip</h4>
+          <div class="tip-row" id="tipRow">
+            <button class="tip-btn" data-tip="18">18%</button>
+            <button class="tip-btn" data-tip="20">20%</button>
+            <button class="tip-btn" data-tip="22">22%</button>
+            <button class="tip-btn" data-tip="custom">Custom</button>
+          </div>
+          <div id="customTipWrap" class="hidden" style="margin-top:9px;">
+            <input type="number" id="customTipInput" min="0" step="0.01" placeholder="Custom tip amount" />
+          </div>
+        </div>
+
+        <div class="split-panel" id="splitPanel">
+          <strong>Simple split-check demo</strong>
+          <div class="split-buttons" style="margin-top:10px;">
+            <button id="splitEqualBtn">Split Equally</button>
+            <button id="splitItemBtn">Split by Item</button>
+          </div>
+          <div class="split-result" id="splitResult">Choose a split method to demonstrate the workflow.</div>
+        </div>
+
+        <div class="payment-result" id="paymentResult"></div>
+      </div>
+      <div class="modal-foot" id="paymentFoot">
+        <button data-close="paymentModal">Cancel</button>
+        <button class="primary" id="processPaymentBtn">Simulate Payment</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    // ================================================================
+    // Demo Data
+    // ================================================================
+    const TAX_RATE = 0.08875; // Demo NYC-style combined sales tax rate (8.875%).
+
+    const menuData = {
+      "Appetizers": [
+        { id:"spring-rolls", name:"Spring Rolls", price:9, profile:"simple" },
+        { id:"chicken-satay", name:"Chicken Satay", price:12, profile:"simple" },
+        { id:"crab-rangoon", name:"Crab Rangoon", price:11, profile:"simple" },
+        { id:"thai-wings", name:"Thai Wings", price:13, profile:"simple" }
+      ],
+      "Noodles": [
+        { id:"pad-thai", name:"Pad Thai", price:18, profile:"entree" },
+        { id:"pad-see-ew", name:"Pad See Ew", price:18, profile:"entree" },
+        { id:"drunken-noodles", name:"Drunken Noodles", price:19, profile:"entree" }
+      ],
+      "Fried Rice": [
+        { id:"thai-fried-rice", name:"Thai Fried Rice", price:18, profile:"entree" },
+        { id:"basil-fried-rice", name:"Basil Fried Rice", price:19, profile:"entree" },
+        { id:"pineapple-fried-rice", name:"Pineapple Fried Rice", price:20, profile:"entree" }
+      ],
+      "Curry": [
+        { id:"green-curry", name:"Green Curry", price:20, profile:"entree" },
+        { id:"red-curry", name:"Red Curry", price:20, profile:"entree" },
+        { id:"panang-curry", name:"Panang Curry", price:21, profile:"entree" },
+        { id:"massaman-curry", name:"Massaman Curry", price:22, profile:"entree" }
+      ],
+      "Stir Fry": [
+        { id:"pad-kra-pao", name:"Pad Kra Pao", price:20, profile:"entree" },
+        { id:"cashew-chicken", name:"Cashew Chicken", price:21, profile:"entree" },
+        { id:"garlic-pepper", name:"Garlic & Pepper", price:20, profile:"entree" }
+      ],
+      "Soup": [
+        { id:"tom-yum", name:"Tom Yum Soup", price:12, profile:"simple" },
+        { id:"tom-kha", name:"Tom Kha Soup", price:13, profile:"simple" }
+      ],
+      "Drinks": [
+        { id:"thai-tea", name:"Thai Iced Tea", price:6, profile:"drink" },
+        { id:"thai-coffee", name:"Thai Iced Coffee", price:6, profile:"drink" },
+        { id:"coke", name:"Coke", price:4, profile:"drink" },
+        { id:"sparkling-water", name:"Sparkling Water", price:5, profile:"drink" }
+      ],
+      "Desserts": [
+        { id:"mango-sticky-rice", name:"Mango Sticky Rice", price:11, profile:"simple" },
+        { id:"coconut-ice-cream", name:"Coconut Ice Cream", price:8, profile:"simple" }
+      ]
+    };
+
+    const proteinOptions = [
+      { label:"Chicken", price:0 }, { label:"Tofu", price:0 }, { label:"Beef", price:2 },
+      { label:"Shrimp", price:3 }, { label:"Pork Belly", price:3 }, { label:"Duck", price:5 }
+    ];
+    const spiceOptions = ["No Spice","Mild","Medium","Hot","Thai Hot"];
+    const entreeExtras = [
+      { label:"No Peanuts", price:0 }, { label:"No Egg", price:0 }, { label:"No Bean Sprouts", price:0 },
+      { label:"Extra Vegetables", price:2 }, { label:"Extra Noodles", price:3 }, { label:"Extra Protein", price:5 }
+    ];
+
+    const demoTableOrders = {
+      2: [
+        demoLine("spring-rolls", [], 1),
+        demoLine("pad-see-ew", ["Chicken", "Mild"], 2),
+        demoLine("thai-tea", [], 2),
+        demoLine("coke", [], 1)
+      ],
+      3: [
+        demoLine("green-curry", ["Beef +$2", "Hot"], 2),
+        demoLine("pad-kra-pao", ["Chicken", "Medium"], 2),
+        demoLine("crab-rangoon", [], 1),
+        demoLine("thai-tea", [], 3)
+      ],
+      4: [
+        demoLine("pad-thai", ["Shrimp +$3", "Medium", "No Peanuts"], 1),
+        demoLine("green-curry", ["Beef +$2", "Hot"], 1),
+        demoLine("thai-tea", [], 1)
+      ],
+      7: [
+        demoLine("drunken-noodles", ["Pork Belly +$3", "Thai Hot"], 1),
+        demoLine("thai-wings", [], 1)
+      ],
+      9: [
+        demoLine("massaman-curry", ["Chicken", "Mild"], 1),
+        demoLine("pineapple-fried-rice", ["Shrimp +$3", "Medium"], 1),
+        demoLine("sparkling-water", [], 2)
+      ]
+    };
+
+    const tableMetaSeed = {
+      1:{status:"Open"}, 2:{status:"Occupied"}, 3:{status:"Occupied"}, 4:{status:"Check Requested"},
+      5:{status:"Available"}, 6:{status:"Available"}, 7:{status:"Occupied"}, 8:{status:"Available"},
+      9:{status:"Occupied"}, 10:{status:"Available"}, 11:{status:"Available"}, 12:{status:"Available"}
+    };
+
+    function demoLine(itemId, displayMods, qty) {
+      const item = findMenuItem(itemId);
+      let modifierTotal = 0;
+      displayMods.forEach(m => {
+        const match = /\+\$(\d+(?:\.\d+)?)/.exec(m);
+        if (match) modifierTotal += Number(match[1]);
+      });
+      return {
+        lineId: uid(), itemId, name:item.name, basePrice:item.price, modifierTotal,
+        modifiers: displayMods, qty, notes:"", voided:false, voidReason:""
+      };
+    }
+
+    // ================================================================
+    // App State
+    // ================================================================
+    const state = {
+      activeView:"pos",
+      activeCategory:"Appetizers",
+      orderType:"Dine In",
+      table:4,
+      orderNumber:1042,
+      orderStatus:"Open",
+      order: cloneLines(demoTableOrders[4]),
+      discount:null,
+      modifierDraft:null,
+      editingLineId:null,
+      pendingTable:4,
+      selectedDiscount:null,
+      selectedVoidReason:null,
+      selectedPaymentMethod:null,
+      selectedTip:null,
+      kitchenTickets:[
+        {
+          id:"kt-101", label:"TABLE 6", time:"8:10 PM", status:"new",
+          items:[
+            { name:"Pad Thai", mods:["Shrimp","Medium","No Peanuts"] },
+            { name:"Green Curry", mods:["Chicken","Hot"] },
+            { name:"Spring Rolls", mods:[] }
+          ]
+        },
+        {
+          id:"kt-102", label:"TAKEOUT #87", time:"8:12 PM", status:"cooking",
+          items:[
+            { name:"Drunken Noodles", mods:["Beef","Hot"] },
+            { name:"Thai Iced Tea", mods:[] }
+          ]
+        }
+      ],
+      tables: buildTables()
+    };
+
+    // ================================================================
+    // Menu Rendering
+    // ================================================================
+    function renderCategories() {
+      const strip = document.getElementById("categoryStrip");
+      strip.innerHTML = Object.keys(menuData).map(cat => `
+        <button class="category-btn ${cat===state.activeCategory?'active':''}" data-category="${cat}">${cat}</button>
+      `).join("");
+      strip.querySelectorAll("[data-category]").forEach(btn => {
+        btn.addEventListener("click", () => {
+          state.activeCategory = btn.dataset.category;
+          renderCategories();
+          renderMenu();
+        });
+      });
+    }
+
+    function renderMenu() {
+      const grid = document.getElementById("menuGrid");
+      const items = menuData[state.activeCategory] || [];
+      grid.innerHTML = items.map(item => `
+        <button class="menu-item" data-item-id="${item.id}">
+          <span>
+            <span class="name">${escapeHtml(item.name)}</span>
+            <span class="hint">${item.profile==='entree' ? 'Protein · spice · options' : 'Tap to add / customize'}</span>
+          </span>
+          <span class="price">${money(item.price)}</span>
+        </button>
+      `).join("");
+      grid.querySelectorAll("[data-item-id]").forEach(btn => btn.addEventListener("click", () => openModifier(btn.dataset.itemId)));
+    }
+
+    // ================================================================
+    // Order Management
+    // ================================================================
+    function renderOrder() {
+      document.getElementById("checkTitle").textContent = state.orderType === "Dine In" ? `Table ${state.table}` : state.orderType;
+      document.getElementById("checkSubtext").textContent = `${state.orderType} · Check #${state.orderNumber}`;
+      document.getElementById("topOrderType").textContent = state.orderType;
+      document.getElementById("topTable").textContent = state.orderType === "Dine In" ? `Table ${state.table}` : "—";
+
+      const status = document.getElementById("orderStatus");
+      status.textContent = state.orderStatus;
+      status.className = `status-badge ${state.orderStatus.toLowerCase()}`;
+
+      document.querySelectorAll(".order-type-btn").forEach(btn => btn.classList.toggle("active", btn.dataset.type === state.orderType));
+
+      const lines = document.getElementById("orderLines");
+      if (!state.order.length) {
+        lines.innerHTML = `<div class="empty-order"><div><strong>No items yet</strong>Tap a menu item to start the check.</div></div>`;
+      } else {
+        lines.innerHTML = state.order.map(line => {
+          const lineTotal = (line.basePrice + line.modifierTotal) * line.qty;
+          const mods = [...line.modifiers];
+          if (line.notes) mods.push(`Note: ${line.notes}`);
+          if (line.voided && line.voidReason) mods.push(`VOID: ${line.voidReason}`);
+          return `
+            <div class="order-line ${line.voided?'voided':''}">
+              <div>
+                <div class="line-name">${escapeHtml(line.name)}</div>
+                <div class="line-mods">${mods.length ? mods.map(escapeHtml).join("<br>") : "No modifiers"}</div>
+                <div class="line-controls">
+                  <button class="mini-btn" data-action="minus" data-line="${line.lineId}" ${line.voided?'disabled':''}>−</button>
+                  <span class="qty-display">${line.qty}</span>
+                  <button class="mini-btn" data-action="plus" data-line="${line.lineId}" ${line.voided?'disabled':''}>+</button>
+                  <button class="mini-btn text" data-action="edit" data-line="${line.lineId}" ${line.voided?'disabled':''}>Edit</button>
+                  <button class="mini-btn text" data-action="remove" data-line="${line.lineId}">Remove</button>
+                </div>
+              </div>
+              <div class="line-price">${line.voided ? 'VOID' : money(lineTotal)}</div>
+            </div>`;
+        }).join("");
+      }
+
+      lines.querySelectorAll("[data-action]").forEach(btn => {
+        btn.addEventListener("click", () => handleLineAction(btn.dataset.action, btn.dataset.line));
+      });
+
+      renderTotals();
+    }
+
+    function handleLineAction(action, lineId) {
+      const line = state.order.find(x => x.lineId === lineId);
+      if (!line) return;
+      if (action === "plus") line.qty++;
+      if (action === "minus") line.qty = Math.max(1, line.qty - 1);
+      if (action === "remove") state.order = state.order.filter(x => x.lineId !== lineId);
+      if (action === "edit") return openModifier(line.itemId, lineId);
+      state.orderStatus = "Open";
+      syncCurrentTable();
+      renderOrder();
+      renderTables();
+    }
+
+    function addOrUpdateLine() {
+      const draft = state.modifierDraft;
+      if (!draft) return;
+      const item = findMenuItem(draft.itemId);
+      const modifiers = [];
+      let modifierTotal = 0;
+
+      if (item.profile === "entree") {
+        if (draft.protein) {
+          const p = proteinOptions.find(x => x.label === draft.protein);
+          modifierTotal += p ? p.price : 0;
+          modifiers.push(p && p.price ? `${p.label} +$${p.price}` : draft.protein);
+        }
+        if (draft.spice) modifiers.push(draft.spice);
+        draft.extras.forEach(label => {
+          const e = entreeExtras.find(x => x.label === label);
+          modifierTotal += e ? e.price : 0;
+          modifiers.push(e && e.price ? `${e.label} +$${e.price}` : label);
+        });
+      } else if (draft.simpleOptions.length) {
+        modifiers.push(...draft.simpleOptions);
+      }
+
+      const payload = {
+        itemId:item.id,
+        name:item.name,
+        basePrice:item.price,
+        modifierTotal,
+        modifiers,
+        qty:1,
+        notes:draft.notes.trim(),
+        voided:false,
+        voidReason:""
+      };
+
+      if (state.editingLineId) {
+        const line = state.order.find(x => x.lineId === state.editingLineId);
+        if (line) Object.assign(line, payload, { qty: line.qty });
+      } else {
+        state.order.push({ lineId:uid(), ...payload });
+      }
+
+      state.orderStatus = "Open";
+      closeModal("modifierModal");
+      syncCurrentTable();
+      renderOrder();
+      renderTables();
+      showToast(state.editingLineId ? "Item updated." : `${item.name} added to order.`);
+    }
+
+    function renderTotals() {
+      const totals = calculateTotals();
+      document.getElementById("totalsPanel").innerHTML = `
+        <div class="total-row"><span>Subtotal</span><strong>${money(totals.subtotal)}</strong></div>
+        ${totals.discountAmount > 0 ? `<div class="total-row discount"><span>${escapeHtml(totals.discountLabel)}</span><strong>−${money(totals.discountAmount)}</strong></div>` : ''}
+        <div class="total-row"><span>Tax</span><strong>${money(totals.tax)}</strong></div>
+        <div class="total-row grand"><span>Total</span><strong>${money(totals.total)}</strong></div>
+        <div class="demo-tax-note">Demo tax: 8.875% NYC-style rate. All prices and calculations are prototype data.</div>
+      `;
+    }
+
+    function calculateTotals() {
+      const subtotal = state.order.filter(x => !x.voided).reduce((sum, line) => sum + (line.basePrice + line.modifierTotal) * line.qty, 0);
+      let discountAmount = 0;
+      let discountLabel = "Discount";
+      if (state.discount) {
+        discountLabel = state.discount.label;
+        if (state.discount.type === "percent") discountAmount = subtotal * (state.discount.value / 100);
+        if (state.discount.type === "fixed") discountAmount = Math.min(subtotal, state.discount.value);
+      }
+      const taxable = Math.max(0, subtotal - discountAmount);
+      const tax = taxable * TAX_RATE;
+      return { subtotal, discountAmount, discountLabel, tax, total:taxable + tax };
+    }
+
+    function setOrderType(type) {
+      state.orderType = type;
+      if (type === "Dine In") {
+        state.pendingTable = state.table || 1;
+        renderTableSelect();
+        openModal("tableModal");
+      } else {
+        renderOrder();
+      }
+    }
+
+    function newOrder(type="Dine In") {
+      state.orderType = type;
+      state.table = type === "Dine In" ? 1 : null;
+      state.orderNumber++;
+      state.orderStatus = "Open";
+      state.order = [];
+      state.discount = null;
+      if (type === "Dine In") {
+        state.pendingTable = 1;
+        renderTableSelect();
+        openModal("tableModal");
+      }
+      renderOrder();
+    }
+
+    // ================================================================
+    // Modifiers
+    // ================================================================
+    function openModifier(itemId, editLineId=null) {
+      const item = findMenuItem(itemId);
+      if (!item) return;
+      state.editingLineId = editLineId;
+      const existing = editLineId ? state.order.find(x => x.lineId === editLineId) : null;
+      state.modifierDraft = {
+        itemId,
+        protein:null,
+        spice:null,
+        extras:[],
+        simpleOptions:[],
+        notes: existing ? existing.notes : ""
+      };
+
+      if (existing && item.profile === "entree") {
+        existing.modifiers.forEach(m => {
+          const clean = m.replace(/ \+\$\d+(?:\.\d+)?$/, "");
+          if (proteinOptions.some(x => x.label===clean)) state.modifierDraft.protein = clean;
+          else if (spiceOptions.includes(clean)) state.modifierDraft.spice = clean;
+          else if (entreeExtras.some(x => x.label===clean)) state.modifierDraft.extras.push(clean);
+        });
+      } else if (existing) {
+        state.modifierDraft.simpleOptions = [...existing.modifiers];
+      }
+
+      document.getElementById("modifierTitle").textContent = item.name;
+      document.getElementById("modifierBasePrice").textContent = `Base price ${money(item.price)}${editLineId ? ' · Editing existing item' : ''}`;
+      document.getElementById("addModifierBtn").textContent = editLineId ? "Save Changes" : "Add to Order";
+      renderModifierBody(item);
+      openModal("modifierModal");
+    }
+
+    function renderModifierBody(item) {
+      const body = document.getElementById("modifierBody");
+      const draft = state.modifierDraft;
+
+      if (item.profile === "entree") {
+        body.innerHTML = `
+          <div class="field-group">
+            <h4>Choose Protein</h4>
+            <div class="choice-grid" id="proteinGrid">
+              ${proteinOptions.map(p => `<button class="choice-btn ${draft.protein===p.label?'selected':''}" data-protein="${p.label}">${p.label}${p.price?` <small>+$${p.price}</small>`:' <small>+$0</small>'}</button>`).join("")}
+            </div>
+          </div>
+          <div class="field-group">
+            <h4>Spice Level</h4>
+            <div class="choice-grid" id="spiceGrid">
+              ${spiceOptions.map(s => `<button class="choice-btn ${draft.spice===s?'selected':''}" data-spice="${s}">${s}</button>`).join("")}
+            </div>
+          </div>
+          <div class="field-group">
+            <h4>Options</h4>
+            <div class="choice-grid" id="extraGrid">
+              ${entreeExtras.map(e => `<button class="choice-btn ${draft.extras.includes(e.label)?'selected':''}" data-extra="${e.label}">${e.label}${e.price?` <small>+$${e.price}</small>`:''}</button>`).join("")}
+            </div>
+          </div>
+          <div class="field-group">
+            <h4>Special Instructions</h4>
+            <textarea id="specialInstructions" placeholder="e.g. Sauce on side, allergy note...">${escapeHtml(draft.notes)}</textarea>
+          </div>`;
+
+        body.querySelectorAll("[data-protein]").forEach(btn => btn.addEventListener("click", () => {
+          draft.protein = btn.dataset.protein;
+          renderModifierBody(item);
+        }));
+        body.querySelectorAll("[data-spice]").forEach(btn => btn.addEventListener("click", () => {
+          draft.spice = btn.dataset.spice;
+          renderModifierBody(item);
+        }));
+        body.querySelectorAll("[data-extra]").forEach(btn => btn.addEventListener("click", () => {
+          const label = btn.dataset.extra;
+          draft.extras = draft.extras.includes(label) ? draft.extras.filter(x=>x!==label) : [...draft.extras,label];
+          renderModifierBody(item);
+        }));
+      } else {
+        const simpleChoices = item.profile === "drink" ? ["No Ice","Light Ice","Extra Ice"] : ["No Sauce","Sauce on Side","Extra Crispy"];
+        body.innerHTML = `
+          <div class="field-group">
+            <h4>Options</h4>
+            <div class="choice-grid">
+              ${simpleChoices.map(s => `<button class="choice-btn ${draft.simpleOptions.includes(s)?'selected':''}" data-simple="${s}">${s}</button>`).join("")}
+            </div>
+          </div>
+          <div class="field-group">
+            <h4>Special Instructions</h4>
+            <textarea id="specialInstructions" placeholder="Optional note...">${escapeHtml(draft.notes)}</textarea>
+          </div>`;
+        body.querySelectorAll("[data-simple]").forEach(btn => btn.addEventListener("click", () => {
+          const label = btn.dataset.simple;
+          draft.simpleOptions = draft.simpleOptions.includes(label) ? draft.simpleOptions.filter(x=>x!==label) : [...draft.simpleOptions,label];
+          renderModifierBody(item);
+        }));
+      }
+
+      const textarea = document.getElementById("specialInstructions");
+      if (textarea) textarea.addEventListener("input", e => draft.notes = e.target.value);
+    }
+
+    // ================================================================
+    // Tables
+    // ================================================================
+    function buildTables() {
+      return Array.from({length:12}, (_,i) => {
+        const number = i+1;
+        return {
+          number,
+          status: tableMetaSeed[number].status,
+          order: demoTableOrders[number] ? cloneLines(demoTableOrders[number]) : []
+        };
+      });
+    }
+
+    function renderTables() {
+      const grid = document.getElementById("tablesGrid");
+      grid.innerHTML = state.tables.map(table => {
+        const amount = table.order.length ? calculateLinesTotal(table.order) : 0;
+        const statusClass = table.status === "Available" ? "available" : table.status === "Occupied" ? "occupied" : table.status === "Check Requested" ? "requested" : "open";
+        return `
+          <button class="table-card ${statusClass}" data-table="${table.number}">
+            <div><div class="table-no">Table ${table.number}</div><div class="table-status">${table.status}</div></div>
+            <div class="table-amount">${amount ? money(amount) : '—'}</div>
+          </button>`;
+      }).join("");
+      grid.querySelectorAll("[data-table]").forEach(btn => btn.addEventListener("click", () => openTable(Number(btn.dataset.table))));
+    }
+
+    function openTable(number) {
+      const table = state.tables.find(t => t.number===number);
+      state.orderType = "Dine In";
+      state.table = number;
+      state.order = cloneLines(table.order || []);
+      state.discount = null;
+      state.orderStatus = table.status === "Check Requested" ? "Sent" : "Open";
+      if (table.status === "Available") table.status = "Open";
+      switchView("pos");
+      renderOrder();
+      showToast(`Opened Table ${number}.`);
+    }
+
+    function renderTableSelect() {
+      const grid = document.getElementById("tableSelectGrid");
+      grid.innerHTML = state.tables.map(t => `<button class="table-select-btn ${state.pendingTable===t.number?'selected':''}" data-select-table="${t.number}">Table ${t.number}<br><small>${t.status}</small></button>`).join("");
+      grid.querySelectorAll("[data-select-table]").forEach(btn => btn.addEventListener("click", () => {
+        state.pendingTable = Number(btn.dataset.selectTable);
+        renderTableSelect();
+      }));
+    }
+
+    function confirmTable() {
+      state.table = state.pendingTable;
+      state.orderType = "Dine In";
+      const table = state.tables.find(t => t.number===state.table);
+      if (table && table.status === "Available") table.status = "Open";
+      closeModal("tableModal");
+      renderOrder();
+      renderTables();
+    }
+
+    function syncCurrentTable() {
+      if (state.orderType !== "Dine In" || !state.table) return;
+      const table = state.tables.find(t => t.number===state.table);
+      if (!table) return;
+      table.order = cloneLines(state.order);
+      if (!state.order.length) table.status = "Open";
+      else if (table.status !== "Check Requested") table.status = "Occupied";
+    }
+
+    // ================================================================
+    // Kitchen
+    // ================================================================
+    function sendToKitchen() {
+      const active = state.order.filter(x => !x.voided);
+      if (!active.length) return showToast("Add at least one item before sending.");
+      state.orderStatus = "Sent";
+      syncCurrentTable();
+
+      const label = state.orderType === "Dine In" ? `TABLE ${state.table}` : `${state.orderType.toUpperCase()} #${state.orderNumber}`;
+      const ticket = {
+        id:uid(), label, time:formatTime(new Date()), status:"new",
+        items: active.map(line => ({
+          name: line.qty > 1 ? `${line.qty}× ${line.name}` : line.name,
+          mods:[...line.modifiers, ...(line.notes ? [`Note: ${line.notes}`] : [])]
+        }))
+      };
+      state.kitchenTickets.unshift(ticket);
+      renderOrder();
+      renderKitchen();
+      showToast("Order sent to kitchen.");
+    }
+
+    function renderKitchen() {
+      const board = document.getElementById("kitchenBoard");
+      const activeCount = state.kitchenTickets.filter(t => t.status!=="ready").length;
+      document.getElementById("kitchenCount").textContent = `${activeCount} active ticket${activeCount===1?'':'s'}`;
+
+      if (!state.kitchenTickets.length) {
+        board.innerHTML = `<div class="empty-order"><div><strong>No kitchen tickets</strong>Send an order from the POS to create one.</div></div>`;
+        return;
+      }
+
+      board.innerHTML = state.kitchenTickets.map(ticket => `
+        <div class="ticket ${ticket.status}">
+          <div class="ticket-head">
+            <div class="ticket-table">${escapeHtml(ticket.label)}</div>
+            <div class="ticket-meta">${escapeHtml(ticket.time)}<br>${ticket.items.length} item${ticket.items.length===1?'':'s'}</div>
+          </div>
+          ${ticket.items.map(item => `
+            <div class="ticket-item"><strong>${escapeHtml(item.name)}</strong>${item.mods.map(m=>`<div class="ticket-mod">- ${escapeHtml(m)}</div>`).join("")}</div>
+          `).join("")}
+          <div class="ticket-actions">
+            <button class="start" data-ticket-action="start" data-ticket="${ticket.id}" ${ticket.status==='ready'?'disabled':''}>${ticket.status==='cooking'?'In Progress':'Start'}</button>
+            <button class="ready" data-ticket-action="ready" data-ticket="${ticket.id}" ${ticket.status==='ready'?'disabled':''}>${ticket.status==='ready'?'Ready ✓':'Ready'}</button>
+          </div>
+        </div>
+      `).join("");
+
+      board.querySelectorAll("[data-ticket-action]").forEach(btn => btn.addEventListener("click", () => {
+        const ticket = state.kitchenTickets.find(t => t.id===btn.dataset.ticket);
+        if (!ticket) return;
+        ticket.status = btn.dataset.ticketAction === "start" ? "cooking" : "ready";
+        renderKitchen();
+        showToast(ticket.status === "ready" ? `${ticket.label} marked ready.` : `${ticket.label} started.`);
+      }));
+    }
+
+    // ================================================================
+    // Discounts
+    // ================================================================
+    function openDiscount() {
+      state.selectedDiscount = null;
+      document.getElementById("customDiscountInput").value = "";
+      document.getElementById("customDiscountRow").classList.remove("show");
+      document.querySelectorAll(".discount-choice").forEach(x => x.classList.remove("selected"));
+      openModal("discountModal");
+    }
+
+    function selectDiscount(key) {
+      state.selectedDiscount = key;
+      document.querySelectorAll(".discount-choice").forEach(x => x.classList.toggle("selected", x.dataset.discount===key));
+      document.getElementById("customDiscountRow").classList.toggle("show", key==="custom");
+    }
+
+    function applyDiscount() {
+      const key = state.selectedDiscount;
+      if (!key) return showToast("Choose a discount first.");
+      if (key === "manager10") state.discount = {type:"percent", value:10, label:"Manager 10%"};
+      if (key === "employee20") state.discount = {type:"percent", value:20, label:"Employee 20%"};
+      if (key === "custom") {
+        const value = Number(document.getElementById("customDiscountInput").value);
+        if (!(value > 0 && value <= 100)) return showToast("Enter a custom discount from 1% to 100%.");
+        state.discount = {type:"percent", value, label:`Custom ${value}%`};
+      }
+      if (key === "compItem") {
+        const line = [...state.order].reverse().find(x => !x.voided);
+        if (!line) return showToast("There is no active item to comp.");
+        state.discount = {type:"fixed", value:(line.basePrice+line.modifierTotal)*line.qty, label:`Comp Item — ${line.name}`};
+      }
+      closeModal("discountModal");
+      renderOrder();
+      showToast("Discount applied.");
+    }
+
+    function clearDiscount() {
+      state.discount = null;
+      closeModal("discountModal");
+      renderOrder();
+      showToast("Discount cleared.");
+    }
+
+    // ================================================================
+    // Void
+    // ================================================================
+    function openVoid() {
+      const active = state.order.filter(x => !x.voided);
+      if (!active.length) return showToast("There is no active item to void.");
+      document.getElementById("voidItemSelect").innerHTML = active.map(x => `<option value="${x.lineId}">${escapeHtml(x.name)} × ${x.qty}</option>`).join("");
+      state.selectedVoidReason = null;
+      document.querySelectorAll("[data-reason]").forEach(x => x.classList.remove("selected"));
+      openModal("voidModal");
+    }
+
+    function confirmVoid() {
+      const lineId = document.getElementById("voidItemSelect").value;
+      const line = state.order.find(x => x.lineId===lineId);
+      if (!line) return;
+      if (!state.selectedVoidReason) return showToast("Choose a void reason.");
+      line.voided = true;
+      line.voidReason = state.selectedVoidReason;
+      closeModal("voidModal");
+      state.orderStatus = "Open";
+      syncCurrentTable();
+      renderOrder();
+      renderTables();
+      showToast(`${line.name} voided.`);
+    }
+
+    // ================================================================
+    // Payment
+    // ================================================================
+    function openPayment() {
+      const totals = calculateTotals();
+      if (totals.total <= 0) return showToast("There is no balance to pay.");
+      state.selectedPaymentMethod = null;
+      state.selectedTip = null;
+      document.querySelectorAll(".pay-option,.tip-btn").forEach(x => x.classList.remove("selected"));
+      document.getElementById("splitPanel").classList.remove("show");
+      document.getElementById("paymentResult").classList.remove("show");
+      document.getElementById("paymentResult").innerHTML = "";
+      document.getElementById("customTipWrap").classList.add("hidden");
+      document.getElementById("customTipInput").value = "";
+      document.getElementById("splitResult").textContent = "Choose a split method to demonstrate the workflow.";
+      document.getElementById("processPaymentBtn").textContent = "Simulate Payment";
+      renderPaymentSummary();
+      openModal("paymentModal");
+    }
+
+    function renderPaymentSummary() {
+      const totals = calculateTotals();
+      const tip = getTipAmount(totals.total);
+      const withTip = totals.total + tip;
+      document.getElementById("paymentSummary").innerHTML = `
+        <div class="total-row"><span>Subtotal</span><strong>${money(totals.subtotal)}</strong></div>
+        ${totals.discountAmount ? `<div class="total-row discount"><span>${escapeHtml(totals.discountLabel)}</span><strong>−${money(totals.discountAmount)}</strong></div>` : ''}
+        <div class="total-row"><span>Tax</span><strong>${money(totals.tax)}</strong></div>
+        <div class="total-row"><span>Tip</span><strong>${money(tip)}</strong></div>
+        <div class="total-row grand"><span>Total</span><strong>${money(withTip)}</strong></div>`;
+    }
+
+    function selectPaymentMethod(method) {
+      state.selectedPaymentMethod = method;
+      document.querySelectorAll(".pay-option").forEach(x => x.classList.toggle("selected", x.dataset.method===method));
+      document.getElementById("splitPanel").classList.toggle("show", method==="Split Check");
+    }
+
+    function selectTip(value) {
+      state.selectedTip = value;
+      document.querySelectorAll(".tip-btn").forEach(x => x.classList.toggle("selected", x.dataset.tip===String(value)));
+      document.getElementById("customTipWrap").classList.toggle("hidden", value!=="custom");
+      renderPaymentSummary();
+    }
+
+    function getTipAmount(base) {
+      if (!state.selectedTip) return 0;
+      if (state.selectedTip === "custom") return Math.max(0, Number(document.getElementById("customTipInput").value || 0));
+      return base * (Number(state.selectedTip)/100);
+    }
+
+    function splitEqual() {
+      const total = calculateTotals().total + getTipAmount(calculateTotals().total);
+      const half = total / 2;
+      document.getElementById("splitResult").innerHTML = `Demo: 2 equal payments of <strong>${money(half)}</strong> each.`;
+    }
+
+    function splitByItem() {
+      const active = state.order.filter(x=>!x.voided);
+      if (!active.length) return;
+      const midpoint = Math.ceil(active.length/2);
+      const first = active.slice(0,midpoint).map(x=>x.name).join(", ");
+      const second = active.slice(midpoint).map(x=>x.name).join(", ") || "No additional items";
+      document.getElementById("splitResult").innerHTML = `Demo grouping:<br><strong>Guest A:</strong> ${escapeHtml(first)}<br><strong>Guest B:</strong> ${escapeHtml(second)}<br><span class="muted">No tax/discount allocation logic is implemented here.</span>`;
+    }
+
+    function processPayment() {
+      if (!state.selectedPaymentMethod) return showToast("Choose a payment method.");
+      if (state.selectedPaymentMethod === "Split Check" && document.getElementById("splitResult").textContent.startsWith("Choose")) {
+        return showToast("Choose a split method first.");
+      }
+      const totals = calculateTotals();
+      const tip = getTipAmount(totals.total);
+      const finalTotal = totals.total + tip;
+      const result = document.getElementById("paymentResult");
+      const approval = state.selectedPaymentMethod === "Credit Card" ? "Demo Payment Approved" : `${state.selectedPaymentMethod} accepted (demo)`;
+      result.innerHTML = `<div>${approval}</div><div style="margin-top:4px;font-size:20px;">Payment Complete — ${money(finalTotal)}</div><div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;"><button class="mini-btn text" onclick="showToast('Receipt printing simulated.')">Print Receipt</button><button class="mini-btn text" onclick="showToast('Email receipt simulated.')">Email Receipt</button><button class="mini-btn text" onclick="finishPaymentNewOrder()">New Order</button></div>`;
+      result.classList.add("show");
+      document.getElementById("processPaymentBtn").textContent = "Payment Complete";
+    }
+
+    function finishPaymentNewOrder() {
+      if (state.orderType === "Dine In" && state.table) {
+        const table = state.tables.find(t=>t.number===state.table);
+        if (table) { table.order=[]; table.status="Available"; }
+      }
+      closeModal("paymentModal");
+      newOrder("Dine In");
+      renderTables();
+      showToast("Payment complete. New order started.");
+    }
+
+    // ================================================================
+    // Navigation
+    // ================================================================
+    function switchView(view) {
+      state.activeView = view;
+      document.querySelectorAll(".view").forEach(v => v.classList.toggle("active", v.id === `view-${view}`));
+      document.querySelectorAll(".nav-btn").forEach(b => b.classList.toggle("active", b.dataset.view===view));
+      if (view === "tables") renderTables();
+      if (view === "kitchen") renderKitchen();
+    }
+
+    // ================================================================
+    // Utilities
+    // ================================================================
+    function findMenuItem(id) {
+      for (const items of Object.values(menuData)) {
+        const item = items.find(x => x.id===id);
+        if (item) return item;
+      }
+      return null;
+    }
+
+    function calculateLinesTotal(lines) {
+      const subtotal = lines.filter(x=>!x.voided).reduce((sum,line)=>sum + (line.basePrice+line.modifierTotal)*line.qty,0);
+      return subtotal * (1+TAX_RATE);
+    }
+
+    function cloneLines(lines=[]) {
+      return lines.map(x => ({...x, lineId:uid(), modifiers:[...(x.modifiers||[])]}));
+    }
+
+    function uid() { return "id-" + Math.random().toString(36).slice(2,9) + Date.now().toString(36).slice(-4); }
+    function money(n) { return new Intl.NumberFormat("en-US", {style:"currency",currency:"USD"}).format(Number(n)||0); }
+    function formatTime(d) { return d.toLocaleTimeString([], {hour:"numeric",minute:"2-digit"}); }
+    function escapeHtml(value="") {
+      return String(value).replace(/[&<>'"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch]));
+    }
+    function openModal(id) { document.getElementById(id).classList.add("show"); }
+    function closeModal(id) { document.getElementById(id).classList.remove("show"); }
+
+    let toastTimer;
+    function showToast(message) {
+      const toast = document.getElementById("toast");
+      toast.textContent = message;
+      toast.classList.add("show");
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(()=>toast.classList.remove("show"), 2200);
+    }
+
+    function updateClock() { document.getElementById("clock").textContent = formatTime(new Date()); }
+
+    // ================================================================
+    // Event Wiring
+    // ================================================================
+    document.querySelectorAll(".nav-btn").forEach(btn => btn.addEventListener("click", () => switchView(btn.dataset.view)));
+    document.querySelectorAll(".order-type-btn").forEach(btn => btn.addEventListener("click", () => setOrderType(btn.dataset.type)));
+    document.querySelectorAll("[data-close]").forEach(btn => btn.addEventListener("click", () => closeModal(btn.dataset.close)));
+    document.querySelectorAll(".modal-backdrop").forEach(backdrop => backdrop.addEventListener("click", e => { if (e.target === backdrop) closeModal(backdrop.id); }));
+
+    document.getElementById("addModifierBtn").addEventListener("click", addOrUpdateLine);
+    document.getElementById("confirmTableBtn").addEventListener("click", confirmTable);
+    document.getElementById("sendBtn").addEventListener("click", sendToKitchen);
+    document.getElementById("payBtn").addEventListener("click", openPayment);
+    document.getElementById("discountBtn").addEventListener("click", openDiscount);
+    document.getElementById("voidBtn").addEventListener("click", openVoid);
+    document.getElementById("holdBtn").addEventListener("click", () => { state.orderStatus="Held"; renderOrder(); showToast("Check placed on hold."); });
+    document.getElementById("moreBtn").addEventListener("click", () => showToast("More actions intentionally left as a discussion placeholder."));
+    document.getElementById("newOrderFromTables").addEventListener("click", () => { switchView("pos"); newOrder("Dine In"); });
+
+    document.querySelectorAll(".discount-choice").forEach(btn => btn.addEventListener("click", () => selectDiscount(btn.dataset.discount)));
+    document.getElementById("applyDiscountBtn").addEventListener("click", applyDiscount);
+    document.getElementById("clearDiscountBtn").addEventListener("click", clearDiscount);
+
+    document.querySelectorAll("[data-reason]").forEach(btn => btn.addEventListener("click", () => {
+      state.selectedVoidReason = btn.dataset.reason;
+      document.querySelectorAll("[data-reason]").forEach(x => x.classList.toggle("selected", x===btn));
+    }));
+    document.getElementById("confirmVoidBtn").addEventListener("click", confirmVoid);
+
+    document.querySelectorAll(".pay-option").forEach(btn => btn.addEventListener("click", () => selectPaymentMethod(btn.dataset.method)));
+    document.querySelectorAll(".tip-btn").forEach(btn => btn.addEventListener("click", () => selectTip(btn.dataset.tip)));
+    document.getElementById("customTipInput").addEventListener("input", renderPaymentSummary);
+    document.getElementById("splitEqualBtn").addEventListener("click", splitEqual);
+    document.getElementById("splitItemBtn").addEventListener("click", splitByItem);
+    document.getElementById("processPaymentBtn").addEventListener("click", processPayment);
+
+    // ================================================================
+    // Initial Render
+    // ================================================================
+    renderCategories();
+    renderMenu();
+    renderOrder();
+    renderTables();
+    renderKitchen();
+    updateClock();
+    setInterval(updateClock, 30000);
+  </script>
+</body>
+</html>

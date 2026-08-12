@@ -1,0 +1,2195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#08090a">
+<title>RestaurantOS POS — Concept Prototype</title>
+<style>
+/* ============================================================
+   DESIGN TOKENS — Linear design language
+   Two themes: Night (Linear's dark-native palette) and Day
+   (Linear's documented light-mode neutrals).
+
+   Resolution order, strongest last:
+     1. :root                        → Day, the base
+     2. prefers-color-scheme: dark   → Night, following the OS
+     3. :root[data-theme="…"]        → explicit choice, wins over both
+   Every component styles through these tokens only, never inside a
+   media query, so a new theme is a token block and nothing else.
+   ============================================================ */
+
+/* ---------- DAY (base) ---------- */
+:root{
+  color-scheme:light;
+
+  --bg:#f7f8f8;             /* app canvas */
+  --panel:#ffffff;          /* sidebar / topbar panels */
+  --surface:#ffffff;        /* cards, dropdowns, elevated areas */
+  --surface-2:#eceef1;      /* hover / slightly elevated */
+
+  --ink:#0d0e10;            /* primary */
+  --ink-2:#3c4149;          /* secondary / body */
+  --ink-3:#555a62;          /* tertiary / metadata  — 6.9:1 on canvas */
+  --ink-4:#6b7079;          /* quaternary / disabled — 4.6:1, the AA floor */
+
+  --brand:#5e6ad2;
+  --accent:#4d59c4;         /* the brighter violet washes out on white */
+  --accent-hover:#3f4aa8;
+
+  /* Status — darkened for contrast against light ground */
+  --green:#15702f;    --green-wash:rgba(21,112,47,.10);   --green-line:rgba(21,112,47,.32);
+  --emerald:#047857;  --emerald-wash:rgba(4,120,87,.09);  --emerald-line:rgba(4,120,87,.30);
+  --amber:#a16207;    --amber-wash:rgba(161,98,7,.10);    --amber-line:rgba(161,98,7,.30);
+  --red:#c0353a;      --red-wash:rgba(192,53,58,.09);     --red-line:rgba(192,53,58,.32);
+  --brand-wash:rgba(94,106,210,.11);
+  --accent-wash:rgba(77,89,196,.08);
+  --accent-line:rgba(77,89,196,.26);
+
+  --line:rgba(9,10,12,0.11);
+  --line-subtle:rgba(9,10,12,0.06);
+  --line-solid:#e6e6e6;
+  --line-solid-2:#d0d6e0;
+
+  --overlay:rgba(13,14,16,0.42);
+  --scrim:rgba(13,14,16,0.34);
+  --shadow-lg:0 16px 48px rgba(13,14,16,.16);
+  --shadow-sm:0 8px 24px rgba(13,14,16,.14);
+
+  /* Type */
+  --font:"Inter var","Inter",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --font-mono:"Berkeley Mono",ui-monospace,"SF Mono","Cascadia Mono",Menlo,Consolas,monospace;
+
+  /* Radius — Linear's scale bottoms out at 6px */
+  --r:8px;
+  --r-sm:6px;
+  --r-lg:12px;
+
+  /* Layout */
+  --tap:44px;
+  --sidebar:212px;
+  --topbar:60px;
+  --safe-b:env(safe-area-inset-bottom,0px);
+}
+
+/* ---------- NIGHT ----------
+   Applied to a selector list so the OS preference and an explicit
+   choice resolve through exactly the same declarations. */
+@media (prefers-color-scheme:dark){ :root:not([data-theme="light"]){
+  color-scheme:dark;
+
+  --bg:#08090a;             /* marketing black */
+  --panel:#0f1011;
+  --surface:#191a1b;
+  --surface-2:#28282c;
+
+  --ink:#f7f8f8;
+  --ink-2:#d0d6e0;
+  --ink-3:#8a8f98;
+  --ink-4:#7c828b;            /* raised from Linear's #62666d, which sat at 3.0:1 on --surface */
+
+  --brand:#5e6ad2;
+  --accent:#7170ff;
+  --accent-hover:#828fff;
+
+  --green:#2eb84e;    --green-wash:rgba(46,184,78,.13);   --green-line:rgba(46,184,78,.38);
+  --emerald:#10b981;  --emerald-wash:rgba(16,185,129,.10); --emerald-line:rgba(16,185,129,.32);
+  --amber:#d9a441;    --amber-wash:rgba(217,164,65,.11);  --amber-line:rgba(217,164,65,.32);
+  --red:#e5484d;      --red-wash:rgba(229,72,77,.11);     --red-line:rgba(229,72,77,.35);
+  --brand-wash:rgba(94,106,210,.16);
+  --accent-wash:rgba(113,112,255,.10);
+  --accent-line:rgba(113,112,255,.28);
+
+  --line:rgba(255,255,255,0.08);
+  --line-subtle:rgba(255,255,255,0.05);
+  --line-solid:#23252a;
+  --line-solid-2:#34343a;
+
+  --overlay:rgba(0,0,0,0.85);
+  --scrim:rgba(0,0,0,0.6);
+  --shadow-lg:0 16px 48px rgba(0,0,0,.6);
+  --shadow-sm:0 8px 24px rgba(0,0,0,.5);
+}}
+
+:root[data-theme="dark"]{
+  color-scheme:dark;
+
+  --bg:#08090a;
+  --panel:#0f1011;
+  --surface:#191a1b;
+  --surface-2:#28282c;
+
+  --ink:#f7f8f8;
+  --ink-2:#d0d6e0;
+  --ink-3:#8a8f98;
+  --ink-4:#7c828b;            /* raised from Linear's #62666d, which sat at 3.0:1 on --surface */
+
+  --brand:#5e6ad2;
+  --accent:#7170ff;
+  --accent-hover:#828fff;
+
+  --green:#2eb84e;    --green-wash:rgba(46,184,78,.13);   --green-line:rgba(46,184,78,.38);
+  --emerald:#10b981;  --emerald-wash:rgba(16,185,129,.10); --emerald-line:rgba(16,185,129,.32);
+  --amber:#d9a441;    --amber-wash:rgba(217,164,65,.11);  --amber-line:rgba(217,164,65,.32);
+  --red:#e5484d;      --red-wash:rgba(229,72,77,.11);     --red-line:rgba(229,72,77,.35);
+  --brand-wash:rgba(94,106,210,.16);
+  --accent-wash:rgba(113,112,255,.10);
+  --accent-line:rgba(113,112,255,.28);
+
+  --line:rgba(255,255,255,0.08);
+  --line-subtle:rgba(255,255,255,0.05);
+  --line-solid:#23252a;
+  --line-solid-2:#34343a;
+
+  --overlay:rgba(0,0,0,0.85);
+  --scrim:rgba(0,0,0,0.6);
+  --shadow-lg:0 16px 48px rgba(0,0,0,.6);
+  --shadow-sm:0 8px 24px rgba(0,0,0,.5);
+}
+
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:var(--bg)}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms !important;transition-duration:.01ms !important}
+}
+body{
+  background:var(--bg);
+  color:var(--ink-2);
+  font-family:var(--font);
+  font-feature-settings:"cv01","ss03";
+  font-size:14px;
+  line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+  overflow:hidden;
+  user-select:none;
+}
+h1,h2,h3,h4{color:var(--ink);font-weight:590;letter-spacing:-0.011em;line-height:1.25}
+button{font:inherit;font-feature-settings:"cv01","ss03";color:inherit;background:none;border:none;cursor:pointer;text-align:left}
+button:disabled{opacity:.38;cursor:not-allowed}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+input,textarea,select{
+  font:inherit;color:var(--ink);background:var(--bg);
+  border:1px solid var(--line);border-radius:var(--r-sm);
+  padding:10px 12px;width:100%;
+}
+input:focus,textarea:focus,select:focus{border-color:var(--accent);outline:none}
+textarea{resize:none;user-select:text;line-height:1.45}
+.num{font-variant-numeric:tabular-nums;letter-spacing:-0.01em}
+.muted{color:var(--ink-3)}
+
+/* ============================================================
+   APP SHELL
+   ============================================================ */
+#app{display:grid;grid-template-rows:var(--topbar) 1fr;height:100%}
+
+.topbar{
+  display:flex;align-items:center;gap:16px;
+  padding:0 18px;
+  background:var(--panel);
+  border-bottom:1px solid var(--line);
+}
+.brand{display:flex;align-items:center;gap:10px;min-width:0}
+.mark{
+  width:26px;height:26px;flex:0 0 auto;border-radius:var(--r-sm);
+  background:var(--brand);color:#fff;
+  display:grid;place-items:center;
+  font-size:13px;font-weight:700;letter-spacing:-0.04em;
+}
+.brand h1{font-size:14px;font-weight:510;letter-spacing:-0.012em;white-space:nowrap}
+.badge-proto{
+  font-size:11px;font-weight:510;
+  color:var(--accent);
+  background:var(--accent-wash);
+  border:1px solid var(--accent-line);
+  padding:3px 10px;border-radius:var(--r-sm);white-space:nowrap;
+}
+.topbar .spacer{flex:1}
+
+/* Day/night toggle. A real terminal lives in two lighting conditions —
+   a bright back office at 10am and a dim dining room at 8pm. */
+.theme-toggle{
+  display:flex;gap:2px;padding:3px;flex:0 0 auto;
+  background:var(--surface);border:1px solid var(--line-subtle);border-radius:var(--r-sm);
+}
+.theme-toggle button{
+  min-width:34px;height:28px;border-radius:4px;
+  display:grid;place-items:center;font-size:13px;color:var(--ink-4);
+}
+.theme-toggle button:hover{color:var(--ink-2)}
+.theme-toggle button[aria-pressed="true"]{background:var(--surface-2);color:var(--ink)}
+
+.meta-pills{display:flex;align-items:center;gap:8px}
+.pill{
+  display:flex;flex-direction:column;gap:1px;
+  padding:5px 11px;border-radius:var(--r-sm);
+  background:var(--surface);border:1px solid var(--line-subtle);
+  min-width:0;
+}
+.pill span{font-size:10px;color:var(--ink-4);text-transform:uppercase;letter-spacing:.055em;font-weight:510}
+.pill strong{font-size:12.5px;color:var(--ink);font-weight:510;white-space:nowrap}
+
+.main{display:grid;grid-template-columns:var(--sidebar) 1fr;min-height:0}
+
+/* ---- sidebar ---- */
+.sidebar{
+  background:var(--panel);border-right:1px solid var(--line);
+  padding:14px 10px;display:flex;flex-direction:column;gap:2px;
+}
+.side-label{
+  font-size:10px;text-transform:uppercase;letter-spacing:.07em;
+  color:var(--ink-4);font-weight:510;padding:6px 10px 8px;
+}
+.nav-btn{
+  display:flex;align-items:center;gap:10px;
+  min-height:var(--tap);padding:0 11px;border-radius:var(--r-sm);
+  color:var(--ink-3);font-size:13.5px;font-weight:510;
+}
+.nav-btn .ico{width:16px;text-align:center;font-size:14px;opacity:.85}
+.nav-btn:hover{background:var(--surface);color:var(--ink-2)}
+.nav-btn.active{background:var(--surface);color:var(--ink)}
+.nav-btn .count{
+  margin-left:auto;min-width:20px;height:19px;line-height:19px;padding:0 6px;
+  background:var(--brand);color:#fff;border-radius:999px;
+  font-size:11px;font-weight:600;text-align:center;
+}
+.side-foot{
+  margin-top:auto;padding:11px;border-top:1px solid var(--line-subtle);
+  font-size:11.5px;color:var(--ink-4);line-height:1.45;
+}
+
+/* ---- screens ---- */
+.screen{display:none;min-height:0;overflow:hidden}
+.screen.active{display:block}
+.screen-pad{padding:20px 22px;height:100%;overflow:auto}
+.screen-head{display:flex;align-items:flex-start;gap:14px;margin-bottom:16px}
+.screen-head h2{font-size:17px;letter-spacing:-0.015em}
+.screen-head p{font-size:12.5px;color:var(--ink-3);margin-top:3px;max-width:62ch}
+.screen-head .spacer{flex:1}
+
+/* ============================================================
+   POS SCREEN
+   ============================================================ */
+#screen-pos.active{display:grid;grid-template-columns:150px 1fr 372px;height:100%}
+
+.rail{
+  border-right:1px solid var(--line);background:var(--bg);
+  padding:12px 8px;overflow:auto;display:flex;flex-direction:column;gap:2px;
+}
+.rail button{
+  display:flex;align-items:center;gap:8px;
+  min-height:42px;padding:0 11px;border-radius:var(--r-sm);
+  font-size:13px;font-weight:510;color:var(--ink-3);
+}
+.rail button:hover{background:var(--surface);color:var(--ink-2)}
+.rail button.active{background:var(--surface);color:var(--ink)}
+.rail button .n{margin-left:auto;font-size:11px;color:var(--ink-4);font-variant-numeric:tabular-nums}
+
+.menu-pane{display:flex;flex-direction:column;min-width:0;min-height:0}
+.pane-head{padding:16px 20px 12px;border-bottom:1px solid var(--line-subtle)}
+.pane-head h2{font-size:15px}
+.pane-head p{font-size:12px;color:var(--ink-4);margin-top:3px}
+.pane-head code{font-family:var(--font-mono);font-size:11px;color:var(--ink-3)}
+.item-grid{
+  flex:1;overflow:auto;padding:16px 20px 24px;
+  display:grid;gap:10px;
+  grid-template-columns:repeat(auto-fill,minmax(178px,1fr));
+  align-content:start;
+}
+.item-btn{
+  display:flex;flex-direction:column;justify-content:space-between;gap:12px;
+  min-height:88px;padding:13px 14px;
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--r);
+  transition:background .12s,border-color .12s;
+}
+.item-btn:hover{background:var(--surface-2);border-color:var(--line-solid-2)}
+.item-btn:active{transform:translateY(1px)}
+.item-btn .nm{font-size:13.5px;font-weight:510;color:var(--ink);letter-spacing:-0.008em}
+.item-btn .foot{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.item-btn .pr{font-size:13px;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.item-btn .hint{font-size:10.5px;color:var(--ink-4);white-space:nowrap}
+
+/* ---- check panel ---- */
+.check{
+  display:flex;flex-direction:column;min-height:0;
+  background:var(--panel);border-left:1px solid var(--line);
+}
+.sheet-head{display:none}
+.check-head{padding:14px 16px 12px;border-bottom:1px solid var(--line-subtle)}
+.check-title{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.check-title h3{font-size:15px}
+.check-title .sub{font-size:11.5px;color:var(--ink-4);margin-top:2px}
+.stamp{
+  font-size:10.5px;font-weight:510;padding:3px 9px;border-radius:var(--r-sm);
+  border:1px solid;white-space:nowrap;
+}
+.stamp.open{color:var(--ink-3);border-color:var(--line-solid-2);background:var(--surface)}
+.stamp.sent{color:var(--emerald);border-color:var(--emerald-line);background:var(--emerald-wash)}
+.stamp.held{color:var(--amber);border-color:var(--amber-line);background:var(--amber-wash)}
+.stamp.paid{color:var(--accent);border-color:var(--accent-line);background:var(--accent-wash)}
+
+.seg{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin-top:12px;
+  background:var(--bg);border:1px solid var(--line-subtle);border-radius:var(--r-sm);padding:3px}
+.seg button{
+  padding:7px 4px;border-radius:4px;text-align:center;
+  font-size:12px;font-weight:510;color:var(--ink-3);
+}
+.seg button:hover{color:var(--ink-2)}
+.seg button.active{background:var(--surface-2);color:var(--ink)}
+.table-btn{
+  margin-top:9px;width:100%;min-height:36px;padding:0 12px;
+  border:1px solid var(--line);border-radius:var(--r-sm);background:var(--surface);
+  font-size:12.5px;font-weight:510;color:var(--ink-2);
+  display:flex;align-items:center;justify-content:space-between;
+}
+.table-btn:hover{background:var(--surface-2)}
+.table-btn .chev{color:var(--ink-4);font-size:11px}
+
+.lines{flex:1;overflow:auto;padding:8px 10px}
+.empty{
+  display:grid;place-content:center;text-align:center;gap:5px;
+  min-height:170px;padding:24px;color:var(--ink-4);font-size:12.5px;
+}
+.empty strong{display:block;color:var(--ink-2);font-size:13.5px;font-weight:510}
+
+.line{padding:10px;border-radius:var(--r-sm);border:1px solid transparent}
+.line + .line{border-top:1px solid var(--line-subtle);border-radius:0}
+.line:hover{background:var(--surface);border-color:transparent}
+.line.voided{opacity:.5}
+.line.voided .nm,.line.voided .amt{text-decoration:line-through}
+.line.comped .amt{color:var(--emerald)}
+.line-top{display:flex;align-items:baseline;gap:8px}
+.line-top .qty{
+  font-size:11.5px;font-weight:600;color:var(--ink-4);
+  font-variant-numeric:tabular-nums;min-width:20px;
+}
+.line-top .nm{font-size:13px;font-weight:510;color:var(--ink);flex:1;letter-spacing:-0.006em}
+.line-top .amt{font-size:13px;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.line .mods{font-size:11.5px;color:var(--ink-3);margin:3px 0 0 28px;line-height:1.45}
+.line .mods .plus{color:var(--ink-4)}
+.line .mods .note{color:var(--amber)}
+.line .mods .flag{color:var(--red);font-weight:510}
+.line-actions{display:flex;align-items:center;gap:4px;margin:8px 0 0 28px}
+.line-actions button{
+  min-height:28px;min-width:28px;padding:0 9px;border-radius:4px;
+  background:var(--surface-2);color:var(--ink-3);
+  font-size:12px;font-weight:510;text-align:center;
+}
+.line-actions button:hover:not(:disabled){background:var(--line-solid-2);color:var(--ink)}
+.line-actions .q{
+  min-width:22px;text-align:center;font-size:12px;color:var(--ink);
+  font-variant-numeric:tabular-nums;
+}
+
+.totals{padding:12px 16px;border-top:1px solid var(--line)}
+.trow{display:flex;justify-content:space-between;gap:12px;font-size:12.5px;padding:3px 0;color:var(--ink-3)}
+.trow .v{color:var(--ink-2);font-variant-numeric:tabular-nums}
+.trow.disc{color:var(--emerald)}
+.trow.disc .v{color:var(--emerald)}
+.trow.grand{
+  margin-top:7px;padding-top:9px;border-top:1px solid var(--line-subtle);
+  font-size:15px;font-weight:590;color:var(--ink);
+}
+.trow.grand .v{color:var(--ink);font-size:16px}
+.tax-note{font-size:10.5px;color:var(--ink-4);margin-top:8px;line-height:1.4}
+
+.actions{
+  display:grid;grid-template-columns:repeat(3,1fr);gap:6px;
+  padding:12px 14px calc(14px + var(--safe-b));border-top:1px solid var(--line);
+}
+.act{
+  min-height:var(--tap);border-radius:var(--r-sm);text-align:center;
+  background:var(--surface);border:1px solid var(--line);
+  font-size:13px;font-weight:510;color:var(--ink-2);
+  display:grid;place-items:center;
+}
+.act:hover:not(:disabled){background:var(--surface-2);border-color:var(--line-solid-2)}
+.act.primary{background:var(--brand);border-color:var(--brand);color:#fff}
+.act.primary:hover:not(:disabled){background:var(--accent)}
+.act.go{background:var(--surface);border-color:var(--green-line);color:var(--green)}
+.act.go:hover:not(:disabled){background:var(--green-wash)}
+.act.danger{color:var(--red)}
+.act.danger:hover:not(:disabled){background:var(--red-wash);border-color:var(--red-line)}
+
+/* ============================================================
+   TABLES SCREEN
+   ============================================================ */
+.floor{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(196px,1fr))}
+.table-card{
+  display:flex;flex-direction:column;justify-content:space-between;gap:16px;
+  min-height:118px;padding:14px;
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--r);
+  border-left:2px solid var(--line-solid-2);
+}
+.table-card:hover{background:var(--surface-2)}
+.table-card.occupied{border-left-color:var(--emerald)}
+.table-card.check{border-left-color:var(--amber)}
+.table-card h3{font-size:14px}
+.table-card .seats{font-size:11.5px;color:var(--ink-4);margin-top:2px}
+.table-card .bottom{display:flex;align-items:flex-end;justify-content:space-between;gap:10px}
+.table-card .status{font-size:11.5px;font-weight:510;color:var(--ink-3)}
+.table-card.occupied .status{color:var(--emerald)}
+.table-card.check .status{color:var(--amber)}
+.table-card .since{font-size:11px;color:var(--ink-4);margin-top:2px}
+.table-card .amt{font-size:14px;color:var(--ink);font-variant-numeric:tabular-nums;font-weight:510}
+
+/* ============================================================
+   KITCHEN SCREEN
+   ============================================================ */
+.board{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(266px,1fr));align-items:start}
+.ticket{
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--r);
+  border-top:2px solid var(--line-solid-2);overflow:hidden;
+}
+.ticket.new{border-top-color:var(--accent)}
+.ticket.cooking{border-top-color:var(--amber)}
+.ticket.ready{border-top-color:var(--green)}
+.ticket-head{
+  display:flex;justify-content:space-between;gap:10px;
+  padding:11px 13px;border-bottom:1px solid var(--line-subtle);
+}
+.ticket-head .dest{font-size:13px;font-weight:590;color:var(--ink);letter-spacing:-0.005em}
+.ticket-head .sub{font-size:11px;color:var(--ink-4);margin-top:2px}
+.ticket-head .age{font-size:11px;color:var(--ink-3);text-align:right;font-variant-numeric:tabular-nums;line-height:1.45}
+.ticket-body{padding:10px 13px;display:flex;flex-direction:column;gap:9px}
+.tline .n{font-size:12.5px;color:var(--ink);font-weight:510}
+.tline .n .q{color:var(--ink-4);margin-right:6px;font-variant-numeric:tabular-nums}
+.tline ul{list-style:none;margin:3px 0 0 18px}
+.tline li{font-size:11.5px;color:var(--ink-3);line-height:1.5}
+.tline li::before{content:"– ";color:var(--ink-4)}
+.tline li.hot{color:var(--red)}
+.tline li.note{color:var(--amber)}
+.ticket-foot{display:flex;gap:6px;padding:10px 13px;border-top:1px solid var(--line-subtle)}
+.ticket-foot button{
+  flex:1;min-height:36px;border-radius:var(--r-sm);text-align:center;
+  background:var(--surface-2);font-size:12.5px;font-weight:510;color:var(--ink-2);
+}
+.ticket-foot button:hover{background:var(--line-solid-2);color:var(--ink)}
+.ticket-foot button.go{background:var(--brand);color:#fff}
+.ticket-foot button.go:hover{background:var(--accent)}
+.ticket-foot button.done{background:var(--green-wash);color:var(--green)}
+.ticket-foot button.done:hover{background:var(--green-wash);filter:brightness(1.12)}
+
+/* ============================================================
+   MODALS
+   ============================================================ */
+.modal-backdrop{
+  position:fixed;inset:0;background:var(--overlay);
+  display:none;align-items:center;justify-content:center;padding:24px;z-index:100;
+}
+.modal-backdrop.show{display:flex}
+.modal{
+  width:100%;max-width:440px;max-height:86vh;display:flex;flex-direction:column;
+  background:var(--surface);border:1px solid var(--line-solid-2);border-radius:var(--r-lg);
+  box-shadow:var(--shadow-lg);
+}
+.modal.wide{max-width:580px}
+.modal-head{
+  display:flex;align-items:flex-start;justify-content:space-between;gap:14px;
+  padding:16px 18px;border-bottom:1px solid var(--line-subtle);
+}
+.modal-head h3{font-size:15px}
+.modal-head p{font-size:11.5px;color:var(--ink-4);margin-top:3px;line-height:1.45;max-width:46ch}
+.modal-head .price{font-size:17px;font-weight:590;color:var(--ink);font-variant-numeric:tabular-nums;white-space:nowrap}
+.close-btn{
+  width:28px;height:28px;flex:0 0 auto;border-radius:var(--r-sm);
+  color:var(--ink-3);font-size:17px;display:grid;place-items:center;
+}
+.close-btn:hover{background:var(--surface-2);color:var(--ink)}
+.modal-body{padding:16px 18px;overflow:auto;flex:1}
+.modal-foot{
+  display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;
+  padding:13px 18px;border-top:1px solid var(--line-subtle);
+}
+.modal-foot button{
+  min-height:36px;padding:0 15px;border-radius:var(--r-sm);
+  background:var(--surface-2);border:1px solid var(--line);
+  font-size:13px;font-weight:510;color:var(--ink-2);
+}
+.modal-foot button:hover{background:var(--line-solid-2);color:var(--ink)}
+.modal-foot button.primary{background:var(--brand);border-color:var(--brand);color:#fff}
+.modal-foot button.primary:hover{background:var(--accent)}
+.modal-foot .spacer{flex:1}
+
+.group + .group{margin-top:16px}
+.group h4{
+  font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;
+  color:var(--ink-4);font-weight:510;margin-bottom:8px;
+}
+.group h4 .req{color:var(--accent);text-transform:none;letter-spacing:0;font-weight:510}
+.choices{display:grid;gap:6px;grid-template-columns:repeat(auto-fill,minmax(126px,1fr))}
+.choices.two{grid-template-columns:repeat(auto-fill,minmax(168px,1fr))}
+.choice{
+  display:flex;align-items:center;justify-content:space-between;gap:8px;
+  min-height:var(--tap);padding:0 12px;border-radius:var(--r-sm);
+  background:var(--bg);border:1px solid var(--line);
+  font-size:12.5px;font-weight:510;color:var(--ink-2);
+}
+.choice:hover{background:var(--surface-2);border-color:var(--line-solid-2)}
+.choice.selected{background:var(--brand-wash);border-color:var(--brand);color:var(--ink)}
+.choice .up{font-size:11.5px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+.choice.selected .up{color:var(--accent-hover)}
+.heat{display:flex;gap:2px}
+.heat i{width:4px;height:4px;border-radius:50%;background:var(--line-solid-2)}
+.heat i.f{background:var(--red)}
+
+.grid-nums{display:grid;gap:6px;grid-template-columns:repeat(auto-fill,minmax(58px,1fr))}
+.grid-nums button{
+  min-height:52px;border-radius:var(--r-sm);text-align:center;
+  background:var(--bg);border:1px solid var(--line);
+  font-size:14px;font-weight:510;color:var(--ink-2);
+  display:grid;place-items:center;
+}
+.grid-nums button:hover{background:var(--surface-2)}
+.grid-nums button.selected{background:var(--brand-wash);border-color:var(--brand);color:var(--ink)}
+.grid-nums button.taken{border-color:var(--emerald-line);color:var(--emerald)}
+.grid-nums button .s{display:block;font-size:10px;color:var(--ink-4);font-weight:400}
+
+.stub-list{display:flex;flex-direction:column;gap:5px}
+.stub-list button{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  min-height:42px;padding:0 13px;border-radius:var(--r-sm);
+  background:var(--bg);border:1px solid var(--line);
+  font-size:13px;color:var(--ink-2);
+}
+.stub-list button:hover{background:var(--surface-2)}
+.stub-list button .tag{font-size:10.5px;color:var(--ink-4)}
+
+.note-box{
+  margin-top:14px;padding:11px 13px;border-radius:var(--r-sm);
+  background:var(--accent-wash);border:1px solid var(--accent-line);
+  font-size:11.5px;color:var(--ink-3);line-height:1.55;
+}
+.note-box strong{color:var(--ink-2);font-weight:510}
+
+.sum-box{
+  padding:12px 14px;border-radius:var(--r-sm);
+  background:var(--bg);border:1px solid var(--line);margin-bottom:16px;
+}
+.split-row{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:9px 0;border-bottom:1px solid var(--line-subtle);font-size:12.5px;
+}
+.split-row:last-child{border-bottom:none}
+.split-row .who{color:var(--ink-2)}
+.split-row .who .meta{color:var(--ink-4);margin-left:6px;font-variant-numeric:tabular-nums}
+.split-row .amt{color:var(--ink);font-variant-numeric:tabular-nums;font-weight:510}
+.split-row .assign{display:flex;gap:4px}
+.split-row .assign button{
+  width:32px;height:30px;border-radius:4px;text-align:center;
+  background:var(--surface-2);color:var(--ink-3);font-size:12px;font-weight:510;
+}
+.split-row .assign button.selected{background:var(--brand);color:#fff}
+
+.result{
+  display:none;text-align:center;padding:22px 16px;
+}
+.result.show{display:block}
+.result .mark{
+  width:44px;height:44px;margin:0 auto 12px;border-radius:50%;
+  background:var(--green-wash);color:var(--green);
+  display:grid;place-items:center;font-size:20px;
+}
+.result h4{font-size:15px}
+.result .big{
+  font-size:26px;font-weight:590;color:var(--ink);
+  font-variant-numeric:tabular-nums;margin:6px 0 4px;letter-spacing:-0.02em;
+}
+.result p{font-size:12px;color:var(--ink-4)}
+.hidden{display:none !important}
+
+/* ============================================================
+   TOASTS + MOBILE CHECK BAR
+   ============================================================ */
+#toasts{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:120;
+  display:flex;flex-direction:column;gap:7px;align-items:center;pointer-events:none}
+.toast{
+  padding:9px 15px;border-radius:var(--r-sm);
+  background:var(--surface-2);border:1px solid var(--line-solid-2);
+  color:var(--ink);font-size:12.5px;font-weight:510;
+  box-shadow:var(--shadow-sm);
+}
+.toast.good{border-color:var(--green-line)}
+.toast.warn{border-color:var(--amber-line)}
+
+.check-bar{display:none}
+.sheet-scrim{display:none}
+
+/* ============================================================
+   TOUCH — a finger leaves its last hover stuck to the button it
+   tapped. On a terminal that reads as a selection that isn't real,
+   and the lightened ground eats contrast under small labels.
+   ============================================================ */
+@media (hover:none){
+  .choice:hover{background:var(--bg)}
+  .grid-nums button:hover{background:var(--bg)}
+  .stub-list button:hover{background:var(--bg)}
+  .item-btn:hover{background:var(--surface);border-color:var(--line)}
+  .table-card:hover{background:var(--surface)}
+  .line:hover{background:transparent}
+  .act:hover:not(:disabled){background:var(--surface);border-color:var(--line)}
+  .act.primary:hover:not(:disabled){background:var(--brand)}
+  .act.go:hover:not(:disabled){background:var(--surface)}
+  .act.danger:hover:not(:disabled){background:var(--surface);border-color:var(--line)}
+  .rail button:hover:not(.active){background:transparent;color:var(--ink-3)}
+  .nav-btn:hover:not(.active){background:transparent;color:var(--ink-3)}
+}
+
+/* ============================================================
+   RESPONSIVE — POS terminals get used on tablets
+   ============================================================ */
+@media (max-width:1180px){
+  #screen-pos.active{grid-template-columns:132px 1fr 330px}
+  :root{--sidebar:184px}
+}
+@media (max-width:1000px){
+  :root{--sidebar:72px}
+  /* Stack rather than hide the label. Three bare glyphs are not a
+     navigation anyone can read on a device they've never used. */
+  .nav-btn{
+    flex-direction:column;gap:4px;justify-content:center;
+    padding:8px 2px;min-height:58px;position:relative;
+  }
+  .nav-btn .ico{font-size:15px}
+  .nav-btn span:not(.ico):not(.count){
+    font-size:9.5px;line-height:1;white-space:nowrap;letter-spacing:.005em;
+  }
+  .nav-btn .count{
+    position:absolute;top:5px;right:9px;margin:0;
+    min-width:16px;height:16px;line-height:16px;padding:0 4px;font-size:10px;
+  }
+  .side-label,.side-foot{display:none}
+  .meta-pills .pill:nth-child(n+3){display:none}
+}
+@media (max-width:820px){
+  :root{--tap:52px}
+  #screen-pos.active{grid-template-columns:118px 1fr}
+  .meta-pills{display:none}
+
+  /* check becomes a bottom sheet */
+  .check{
+    position:fixed;inset:auto 0 0 0;z-index:70;
+    max-height:86vh;border-left:none;border-top:1px solid var(--line-solid-2);
+    border-radius:var(--r-lg) var(--r-lg) 0 0;
+    transform:translateY(102%);transition:transform .22s ease;
+  }
+  .check.open{transform:translateY(0)}
+  .sheet-head{
+    display:flex;align-items:center;justify-content:space-between;gap:10px;
+    padding:12px 16px 8px;
+  }
+  .sheet-head h3{font-size:14px}
+  .sheet-scrim{
+    display:block;position:fixed;inset:0;background:var(--scrim);z-index:60;
+  }
+  .sheet-scrim[hidden]{display:none}
+  .check-bar{
+    display:flex;align-items:center;gap:12px;
+    position:fixed;inset:auto 0 0 0;z-index:50;
+    padding:11px 16px calc(11px + var(--safe-b));
+    background:var(--panel);border-top:1px solid var(--line);
+  }
+  .check-bar .cnt{font-size:12.5px;color:var(--ink-3)}
+  .check-bar .cnt b{color:var(--ink);margin-left:8px;font-variant-numeric:tabular-nums;font-weight:590}
+  .check-bar .spacer{flex:1}
+  .check-bar button{
+    min-height:38px;padding:0 15px;border-radius:var(--r-sm);
+    background:var(--brand);color:#fff;font-size:12.5px;font-weight:510;
+  }
+  .item-grid{padding-bottom:76px}
+  .screen-pad{padding-bottom:76px}
+  .actions{grid-template-columns:repeat(3,1fr)}
+  /* the bottom of a phone belongs to the check bar and the sheet's
+     action row — a toast down there lands on top of Pay */
+  #toasts{top:calc(var(--topbar) + 10px);bottom:auto}
+}
+@media (max-width:560px){
+  #screen-pos.active{grid-template-columns:1fr}
+  .rail{
+    flex-direction:row;border-right:none;border-bottom:1px solid var(--line);
+    overflow-x:auto;padding:8px;
+  }
+  .rail button{white-space:nowrap;min-height:38px}
+  .rail button .n{display:none}
+  #screen-pos.active{grid-template-rows:auto 1fr}
+  .item-grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
+  .badge-proto{display:none}
+}
+</style>
+</head>
+<body>
+
+<div id="app">
+  <!-- ============================ TOP BAR ============================ -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="mark">R</div>
+      <h1>RestaurantOS POS</h1>
+    </div>
+    <span class="badge-proto">Concept Prototype</span>
+    <div class="spacer"></div>
+    <div class="theme-toggle" id="themeToggle" role="group" aria-label="Appearance">
+      <button data-theme-set="light" aria-pressed="false" title="Day mode" aria-label="Day mode">☀</button>
+      <button data-theme-set="dark" aria-pressed="false" title="Night mode" aria-label="Night mode">☾</button>
+    </div>
+    <div class="meta-pills">
+      <div class="pill"><span>Venue</span><strong id="mVenue">—</strong></div>
+      <div class="pill"><span>Employee</span><strong id="mEmployee">—</strong></div>
+      <div class="pill"><span>Check</span><strong id="mCheck">—</strong></div>
+      <div class="pill"><span>Time</span><strong id="mClock" class="num">—</strong></div>
+    </div>
+  </header>
+
+  <div class="main">
+    <!-- ============================ SIDEBAR ============================ -->
+    <nav class="sidebar" id="sidebar">
+      <div class="side-label">Terminal</div>
+      <button class="nav-btn active" data-screen="pos">
+        <span class="ico">▦</span><span>Order Entry</span>
+      </button>
+      <button class="nav-btn" data-screen="tables">
+        <span class="ico">◫</span><span>Tables</span><span class="count hidden" id="tblCount">0</span>
+      </button>
+      <button class="nav-btn" data-screen="kitchen">
+        <span class="ico">▤</span><span>Kitchen</span><span class="count hidden" id="kitCount">0</span>
+      </button>
+      <div class="side-foot">
+        Demo data only. Nothing is charged, printed, or sent anywhere.
+      </div>
+    </nav>
+
+    <!-- ============================ POS ============================ -->
+    <section class="screen active" id="screen-pos">
+      <div class="rail" id="rail"></div>
+
+      <div class="menu-pane">
+        <div class="pane-head">
+          <h2 id="catTitle">Appetizers</h2>
+          <p>Tap an item to build it. Demo menu — edit the <code>MENU</code> array in the source.</p>
+        </div>
+        <div class="item-grid" id="items"></div>
+      </div>
+
+      <aside class="check" id="checkPanel">
+        <div class="sheet-head">
+          <h3>Current check</h3>
+          <button class="close-btn" id="sheetClose" aria-label="Close check">×</button>
+        </div>
+
+        <div class="check-head">
+          <div class="check-title">
+            <div>
+              <h3 id="checkTitle">New check</h3>
+              <div class="sub" id="checkSub">Dine In</div>
+            </div>
+            <span class="stamp open" id="stamp">Open</span>
+          </div>
+          <div class="seg" id="typeSeg">
+            <button data-type="dinein" class="active">Dine In</button>
+            <button data-type="takeout">Takeout</button>
+            <button data-type="delivery">Delivery</button>
+          </div>
+          <button class="table-btn" id="tableBtn"><span id="tableBtnLabel">Pick a table</span><span class="chev">▸</span></button>
+        </div>
+
+        <div class="lines" id="lines"></div>
+        <div class="totals" id="totals"></div>
+
+        <div class="actions">
+          <button class="act" id="btnHold">Hold</button>
+          <button class="act primary" id="btnSend">Send</button>
+          <button class="act go" id="btnPay">Pay</button>
+          <button class="act" id="btnDiscount">Discount</button>
+          <button class="act danger" id="btnVoid">Void</button>
+          <button class="act" id="btnMore">More</button>
+        </div>
+      </aside>
+    </section>
+
+    <!-- ============================ TABLES ============================ -->
+    <section class="screen" id="screen-tables">
+      <div class="screen-pad">
+        <div class="screen-head">
+          <div>
+            <h2>Dining room</h2>
+            <p>Tap an open table to start a check, or an occupied table to pick it back up. Simple floor view for discovery — not a floor-plan editor.</p>
+          </div>
+          <div class="spacer"></div>
+          <button class="act" style="max-width:150px;padding:0 16px" id="btnNewWalkIn">New takeout</button>
+        </div>
+        <div class="floor" id="floor"></div>
+      </div>
+    </section>
+
+    <!-- ============================ KITCHEN ============================ -->
+    <section class="screen" id="screen-kitchen">
+      <div class="screen-pad">
+        <div class="screen-head">
+          <div>
+            <h2>Kitchen line</h2>
+            <p>Tickets arrive when a server sends an order. No station routing, printers, or course-timing logic in this prototype.</p>
+          </div>
+          <div class="spacer"></div>
+          <span class="stamp open" id="kitStatus">0 active</span>
+        </div>
+        <div class="board" id="board"></div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<!-- mobile check bar -->
+<div class="check-bar" id="checkBar">
+  <span class="cnt" id="checkBarLabel">No items<b>$0.00</b></span>
+  <span class="spacer"></span>
+  <button id="checkBarOpen">View check</button>
+</div>
+<div class="sheet-scrim" id="sheetScrim" hidden></div>
+
+<!-- ============================================================
+     MODALS — declarative shells, bodies rendered by JS
+     ============================================================ -->
+
+<!-- Modifier -->
+<div class="modal-backdrop" id="modifierModal">
+  <div class="modal wide">
+    <div class="modal-head">
+      <div>
+        <h3 id="modTitle">Item</h3>
+        <p id="modSub">New item</p>
+      </div>
+      <div class="price" id="modPrice">$0.00</div>
+    </div>
+    <div class="modal-body" id="modBody"></div>
+    <div class="modal-foot">
+      <button data-close="modifierModal">Cancel</button>
+      <button class="primary" id="modConfirm">Add to order</button>
+    </div>
+  </div>
+</div>
+
+<!-- Table select -->
+<div class="modal-backdrop" id="tableModal">
+  <div class="modal">
+    <div class="modal-head">
+      <div>
+        <h3>Choose a table</h3>
+        <p>Tables outlined in green already have an open check. Selecting one picks that check back up.</p>
+      </div>
+      <button class="close-btn" data-close="tableModal">×</button>
+    </div>
+    <div class="modal-body"><div class="grid-nums" id="tableGrid"></div></div>
+    <div class="modal-foot"><button data-close="tableModal">Cancel</button></div>
+  </div>
+</div>
+
+<!-- Discount -->
+<div class="modal-backdrop" id="discountModal">
+  <div class="modal">
+    <div class="modal-head">
+      <div>
+        <h3>Discount</h3>
+        <p>Demo only — no manager PIN, approval workflow, or audit trail behind this.</p>
+      </div>
+      <button class="close-btn" data-close="discountModal">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="group">
+        <h4>Type</h4>
+        <div class="choices two" id="discountChoices">
+          <button class="choice" data-discount="mgr10">Manager 10%</button>
+          <button class="choice" data-discount="emp20">Employee 20%</button>
+          <button class="choice" data-discount="comp">Comp an item</button>
+          <button class="choice" data-discount="custom">Custom %</button>
+        </div>
+      </div>
+      <div class="group hidden" id="customDiscountGroup">
+        <h4>Custom percentage</h4>
+        <input id="customDiscountInput" type="number" min="1" max="100" step="1" placeholder="e.g. 15">
+      </div>
+      <div class="group hidden" id="compGroup">
+        <h4>Which item?</h4>
+        <select id="compSelect"></select>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button id="clearDiscountBtn">Clear discount</button>
+      <span class="spacer"></span>
+      <button data-close="discountModal">Cancel</button>
+      <button class="primary" id="applyDiscountBtn">Apply</button>
+    </div>
+  </div>
+</div>
+
+<!-- Void -->
+<div class="modal-backdrop" id="voidModal">
+  <div class="modal">
+    <div class="modal-head">
+      <div>
+        <h3>Void item</h3>
+        <p>Voided items stay visible on the check with their reason, but come out of the totals.</p>
+      </div>
+      <button class="close-btn" data-close="voidModal">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="group">
+        <h4>Item</h4>
+        <select id="voidSelect"></select>
+      </div>
+      <div class="group">
+        <h4>Reason <span class="req">· required</span></h4>
+        <div class="choices two" id="voidReasons"></div>
+      </div>
+      <div class="note-box">
+        A real POS ties every void to an employee, a timestamp, and often a manager approval. Worth asking how closely the operator watches this today.
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button data-close="voidModal">Cancel</button>
+      <button class="primary" id="confirmVoidBtn">Void item</button>
+    </div>
+  </div>
+</div>
+
+<!-- Payment -->
+<div class="modal-backdrop" id="paymentModal">
+  <div class="modal wide">
+    <div class="modal-head">
+      <div>
+        <h3>Payment</h3>
+        <p id="payScope">Simulation only — no card reader, gateway, or real transaction.</p>
+      </div>
+      <button class="close-btn" data-close="paymentModal">×</button>
+    </div>
+    <div class="modal-body" id="payBody">
+      <div class="sum-box" id="paySummary"></div>
+
+      <div class="group">
+        <h4>Tip</h4>
+        <div class="choices" id="tipChoices"></div>
+        <div class="hidden" id="customTipWrap" style="margin-top:8px">
+          <input type="number" id="customTipInput" min="0" step="0.5" placeholder="Custom tip amount">
+        </div>
+      </div>
+
+      <div class="group">
+        <h4>How are they paying?</h4>
+        <div class="choices two" id="payMethods">
+          <button class="choice" data-method="Credit card">Credit card</button>
+          <button class="choice" data-method="Cash">Cash</button>
+          <button class="choice" data-method="Gift card">Gift card</button>
+          <button class="choice" data-method="Split check">Split check</button>
+        </div>
+      </div>
+
+      <div class="group hidden" id="splitGroup">
+        <h4>Split</h4>
+        <div class="choices" id="splitModes">
+          <button class="choice" data-split="even">Split equally</button>
+          <button class="choice" data-split="item">Split by item</button>
+        </div>
+        <div id="splitDetail" style="margin-top:10px"></div>
+        <div class="note-box">
+          This ignores everything that makes splitting hard in real life — shared appetizers, one partial cash payment, a card declining, someone joining after two rounds. <strong>Worth asking how they actually do it.</strong>
+        </div>
+      </div>
+    </div>
+
+    <div class="result" id="payResult">
+      <div class="mark">✓</div>
+      <h4>Demo payment approved</h4>
+      <div class="big" id="payResultAmt">$0.00</div>
+      <p id="payResultMethod">Nothing was actually processed.</p>
+      <div class="stub-list" style="margin-top:18px;text-align:left">
+        <button data-receipt="print">Print receipt<span class="tag">simulated</span></button>
+        <button data-receipt="email">Email receipt<span class="tag">simulated</span></button>
+      </div>
+    </div>
+
+    <div class="modal-foot" id="payFoot">
+      <button data-close="paymentModal">Back to check</button>
+      <button class="primary" id="processPayBtn">Take payment</button>
+    </div>
+  </div>
+</div>
+
+<!-- More (stubs) -->
+<div class="modal-backdrop" id="moreModal">
+  <div class="modal">
+    <div class="modal-head">
+      <div>
+        <h3>More actions</h3>
+        <p>Stubbed on purpose — each one is a real workflow, and which ones matter is the conversation to have.</p>
+      </div>
+      <button class="close-btn" data-close="moreModal">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="stub-list" id="stubList"></div>
+      <div class="note-box">
+        Which of these does the operator touch <strong>every shift</strong>, and which are once a month? That answer decides what a real V1 has to include.
+      </div>
+    </div>
+    <div class="modal-foot"><button data-close="moreModal">Close</button></div>
+  </div>
+</div>
+
+<div id="toasts"></div>
+
+<script>
+"use strict";
+
+/* ============================================================
+   1. DEMO DATA — everything below is fictional. Edit freely.
+   ============================================================ */
+
+const VENUE = { name:"Nine Thai Kitchen", employee:"Nina P. · Server", taxRate:0.08875 };
+
+const PROTEINS = [
+  { name:"Chicken", price:0 }, { name:"Tofu", price:0 }, { name:"Beef", price:2 },
+  { name:"Shrimp", price:3 },  { name:"Pork Belly", price:3 }, { name:"Duck", price:5 }
+];
+
+const SPICE = ["No Spice","Mild","Medium","Hot","Thai Hot"];
+
+const OPTIONS_ENTREE = [
+  { name:"No Peanuts", price:0 }, { name:"No Egg", price:0 }, { name:"No Bean Sprouts", price:0 },
+  { name:"Extra Vegetables", price:2 }, { name:"Extra Noodles", price:3 }, { name:"Extra Protein", price:5 }
+];
+
+const OPTIONS_LIGHT = [
+  { name:"No Peanuts", price:0 }, { name:"Sauce on Side", price:0 }, { name:"Extra Sauce", price:1 }
+];
+
+const OPTIONS_DRINK = [
+  { name:"No Ice", price:0 }, { name:"Light Ice", price:0 }, { name:"Extra Sweet", price:0 }
+];
+
+// mods: "entree" = protein + spice + options | "light" = spice + few options
+//       "drink" = ice options only | "plain" = notes only | "none" = one tap, no modal
+const MENU = [
+  { id:"app", name:"Appetizers", items:[
+    { id:"spring-rolls", name:"Spring Rolls",  price:9,  mods:"light" },
+    { id:"satay",        name:"Chicken Satay", price:12, mods:"light" },
+    { id:"rangoon",      name:"Crab Rangoon",  price:11, mods:"light" },
+    { id:"wings",        name:"Thai Wings",    price:13, mods:"light" }
+  ]},
+  { id:"noodles", name:"Noodles", items:[
+    { id:"pad-thai",   name:"Pad Thai",        price:18, mods:"entree" },
+    { id:"pad-see-ew", name:"Pad See Ew",      price:18, mods:"entree" },
+    { id:"drunken",    name:"Drunken Noodles", price:19, mods:"entree" }
+  ]},
+  { id:"rice", name:"Fried Rice", items:[
+    { id:"thai-fr",      name:"Thai Fried Rice",      price:18, mods:"entree" },
+    { id:"basil-fr",     name:"Basil Fried Rice",     price:19, mods:"entree" },
+    { id:"pineapple-fr", name:"Pineapple Fried Rice", price:20, mods:"entree" }
+  ]},
+  { id:"curry", name:"Curry", items:[
+    { id:"green-curry",    name:"Green Curry",    price:20, mods:"entree" },
+    { id:"red-curry",      name:"Red Curry",      price:20, mods:"entree" },
+    { id:"panang-curry",   name:"Panang Curry",   price:21, mods:"entree" },
+    { id:"massaman-curry", name:"Massaman Curry", price:22, mods:"entree" }
+  ]},
+  { id:"stirfry", name:"Stir Fry", items:[
+    { id:"kra-pao", name:"Pad Kra Pao",     price:20, mods:"entree" },
+    { id:"cashew",  name:"Cashew Chicken",  price:21, mods:"entree" },
+    { id:"garlic",  name:"Garlic & Pepper", price:20, mods:"entree" }
+  ]},
+  { id:"soup", name:"Soup", items:[
+    { id:"tom-yum", name:"Tom Yum",     price:12, mods:"entree" },
+    { id:"tom-kha", name:"Tom Kha",     price:12, mods:"entree" },
+    { id:"wonton",  name:"Wonton Soup", price:10, mods:"light" }
+  ]},
+  { id:"drinks", name:"Drinks", items:[
+    { id:"thai-tea",    name:"Thai Iced Tea",    price:6, mods:"drink" },
+    { id:"thai-coffee", name:"Thai Iced Coffee", price:6, mods:"drink" },
+    { id:"coke",        name:"Coke",             price:4, mods:"none" },
+    { id:"sparkling",   name:"Sparkling Water",  price:5, mods:"none" }
+  ]},
+  { id:"dessert", name:"Desserts", items:[
+    { id:"mango-rice", name:"Mango Sticky Rice", price:12, mods:"plain" },
+    { id:"fried-ban",  name:"Fried Banana",      price:9,  mods:"plain" },
+    { id:"coco-ice",   name:"Coconut Ice Cream", price:8,  mods:"none" }
+  ]}
+];
+
+const TABLES = [
+  { id:1, seats:2 }, { id:2, seats:4 }, { id:3, seats:6 },  { id:4,  seats:4 },
+  { id:5, seats:2 }, { id:6, seats:4 }, { id:7, seats:8 },  { id:8,  seats:2 },
+  { id:9, seats:4 }, { id:10, seats:6 }, { id:11, seats:4 }, { id:12, seats:2 }
+];
+
+const VOID_REASONS = ["Customer changed mind","Kitchen mistake","Wrong item entered","Manager comp","Other"];
+
+const TIP_PCTS = [18, 20, 22];
+
+const MORE_STUBS = [
+  "Reprint check","Transfer to another table","Merge checks","Guest count",
+  "Course / fire timing","Manager functions","Cash drawer","Clock out"
+];
+
+/* ============================================================
+   2. APP STATE
+   ============================================================ */
+
+let seq = 1000;
+const nextId = () => "x" + (++seq);
+let checkNo = 1041;
+
+const state = {
+  screen:"pos",
+  category:"app",
+  orders:{},        // id -> order
+  currentId:null,
+  tickets:[],
+  voidLog:[],       // kept so we can talk about what a real audit trail needs
+
+  // transient modal state
+  draft:null,       // in-progress modifier selection
+  editingUid:null,
+  editingItem:null,
+  discountKey:null,
+  voidReason:null,
+  payMethod:null,
+  tipChoice:null,   // number pct | "custom" | 0
+  split:{ mode:null, ways:2, assign:{} }
+};
+
+function newOrder(opts){
+  opts = opts || {};
+  const o = {
+    id: nextId(),
+    number: ++checkNo,
+    type: opts.type || "dinein",
+    table: opts.table || null,
+    items: [],
+    status: "open",        // open | sent | held | paid
+    checkRequested: false,
+    openedAt: Date.now(),
+    discount: null,        // {label, pct} | {label, amount}
+    tip: 0
+  };
+  state.orders[o.id] = o;
+  return o;
+}
+
+const cur = () => state.orders[state.currentId];
+
+/* ============================================================
+   3. UTILITIES
+   ============================================================ */
+
+const $  = s => document.querySelector(s);
+const $$ = s => Array.from(document.querySelectorAll(s));
+
+const money = n => new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).format(Number(n)||0);
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c =>
+  ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
+const findItem = id => MENU.flatMap(c => c.items).find(i => i.id === id);
+const clockOf = ts => new Date(ts).toLocaleTimeString([], { hour:"numeric", minute:"2-digit" });
+
+function elapsed(ts){
+  const m = Math.floor((Date.now() - ts) / 60000);
+  return m < 60 ? m + "m" : Math.floor(m/60) + "h " + (m % 60) + "m";
+}
+
+function toast(msg, kind){
+  const el = document.createElement("div");
+  el.className = "toast" + (kind ? " " + kind : "");
+  el.textContent = msg;
+  $("#toasts").appendChild(el);
+  setTimeout(() => el.remove(), 2600);
+}
+
+function optionSetFor(mods){
+  if (mods === "entree") return OPTIONS_ENTREE;
+  if (mods === "light")  return OPTIONS_LIGHT;
+  if (mods === "drink")  return OPTIONS_DRINK;
+  return [];
+}
+
+/* ---- pricing ---- */
+function unitPrice(line){
+  if (line.comped || line.voided) return 0;
+  let p = line.basePrice;
+  if (line.protein) p += line.protein.price;
+  (line.options || []).forEach(o => p += o.price);
+  return p;
+}
+const linePrice = line => unitPrice(line) * line.qty;
+
+function totals(order){
+  const subtotal = order.items.reduce((s,l) => s + linePrice(l), 0);
+  let discount = 0;
+  if (order.discount){
+    discount = order.discount.pct
+      ? subtotal * order.discount.pct / 100
+      : Math.min(order.discount.amount, subtotal);
+  }
+  const taxable = Math.max(0, subtotal - discount);
+  const tax = taxable * VENUE.taxRate;
+  return { subtotal, discount, tax, total: taxable + tax };
+}
+
+const activeLines = o => o.items.filter(l => !l.voided);
+
+/* ============================================================
+   4. MODAL PLUMBING
+   ============================================================ */
+
+function openModal(id){ $("#" + id).classList.add("show"); }
+function closeModal(id){ $("#" + id).classList.remove("show"); }
+function closeAllModals(){ $$(".modal-backdrop").forEach(m => m.classList.remove("show")); }
+
+$$("[data-close]").forEach(b => b.addEventListener("click", () => closeModal(b.dataset.close)));
+$$(".modal-backdrop").forEach(bd =>
+  bd.addEventListener("click", e => { if (e.target === bd) closeModal(bd.id); }));
+document.addEventListener("keydown", e => {
+  if (e.key !== "Escape") return;
+  // topmost layer first: a modal, then the check sheet behind it
+  const openModals = $$(".modal-backdrop.show");
+  if (openModals.length) return closeAllModals();
+  closeSheet();
+});
+
+// If a check was paid, dismissing the payment modal any way must still clear the terminal
+$("#paymentModal").addEventListener("transitionend", () => {});
+new MutationObserver(() => {
+  const shown = $("#paymentModal").classList.contains("show");
+  if (!shown && cur() && cur().status === "paid"){ startFresh(); renderFloor(); }
+}).observe($("#paymentModal"), { attributes:true, attributeFilter:["class"] });
+
+/* ============================================================
+   5. MOBILE SHELL — bottom sheet for the check
+   ============================================================ */
+
+const isNarrow = () => window.matchMedia("(max-width: 820px)").matches;
+
+function openSheet(){
+  if (!isNarrow()) return;
+  $("#checkPanel").classList.add("open");
+  $("#sheetScrim").hidden = false;
+}
+function closeSheet(){
+  $("#checkPanel").classList.remove("open");
+  $("#sheetScrim").hidden = true;
+}
+$("#checkBarOpen").addEventListener("click", openSheet);
+$("#sheetClose").addEventListener("click", closeSheet);
+$("#sheetScrim").addEventListener("click", closeSheet);
+window.addEventListener("popstate", () => { closeAllModals(); closeSheet(); });
+
+function renderCheckBar(){
+  const o = cur();
+  const n = activeLines(o).reduce((s,l) => s + l.qty, 0);
+  const t = totals(o);
+  const where = o.type === "dinein" ? (o.table ? "Table " + o.table : "No table yet")
+              : o.type === "takeout" ? "Takeout" : "Delivery";
+  $("#checkBarLabel").innerHTML =
+    esc(where) + " · " + (n || "no") + " item" + (n === 1 ? "" : "s") + "<b>" + money(t.total) + "</b>";
+}
+
+/* ============================================================
+   5b. APPEARANCE — day / night
+   Untouched, the terminal follows the device. Choosing explicitly
+   pins it and survives a reload.
+   ============================================================ */
+
+const THEME_KEY = "restaurantos.theme";
+
+function systemTheme(){
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+function applyTheme(choice){
+  const root = document.documentElement;
+  if (choice) root.setAttribute("data-theme", choice);
+  else root.removeAttribute("data-theme");
+
+  const effective = choice || systemTheme();
+  $$("#themeToggle button").forEach(b =>
+    b.setAttribute("aria-pressed", String(b.dataset.themeSet === effective)));
+}
+
+function storedTheme(){
+  try { return localStorage.getItem(THEME_KEY); } catch { return null; }
+}
+
+$("#themeToggle").addEventListener("click", e => {
+  const b = e.target.closest("button[data-theme-set]");
+  if (!b) return;
+  const pick = b.dataset.themeSet;
+  // tapping the active side hands control back to the device
+  const next = (storedTheme() === pick) ? null : pick;
+  try { next ? localStorage.setItem(THEME_KEY, next) : localStorage.removeItem(THEME_KEY); } catch {}
+  applyTheme(next);
+  toast(next ? (next === "dark" ? "Night mode" : "Day mode") : "Following device appearance");
+});
+
+// keep in step with the OS while no explicit choice is pinned
+window.matchMedia("(prefers-color-scheme: dark)")
+  .addEventListener("change", () => { if (!storedTheme()) applyTheme(null); });
+
+applyTheme(storedTheme());
+
+/* ============================================================
+   6. NAVIGATION
+   ============================================================ */
+
+function go(screen){
+  closeSheet();
+  state.screen = screen;
+  $$(".screen").forEach(s => s.classList.toggle("active", s.id === "screen-" + screen));
+  $$(".nav-btn").forEach(b => b.classList.toggle("active", b.dataset.screen === screen));
+  if (screen === "tables")  renderFloor();
+  if (screen === "kitchen") renderKitchen();
+}
+$("#sidebar").addEventListener("click", e => {
+  const b = e.target.closest("button[data-screen]");
+  if (b) go(b.dataset.screen);
+});
+
+/* ============================================================
+   7. MENU RENDERING
+   ============================================================ */
+
+function renderRail(){
+  $("#rail").innerHTML = MENU.map(c => `
+    <button data-cat="${c.id}" class="${c.id === state.category ? "active" : ""}">
+      ${esc(c.name)}<span class="n">${c.items.length}</span>
+    </button>`).join("");
+}
+$("#rail").addEventListener("click", e => {
+  const b = e.target.closest("button[data-cat]");
+  if (!b) return;
+  state.category = b.dataset.cat;
+  renderRail(); renderItems();
+});
+
+function renderItems(){
+  const cat = MENU.find(c => c.id === state.category);
+  $("#catTitle").textContent = cat.name;
+  $("#items").innerHTML = cat.items.map(i => `
+    <button class="item-btn" data-item="${i.id}">
+      <span class="nm">${esc(i.name)}</span>
+      <span class="foot">
+        <span class="pr">${money(i.price)}</span>
+        <span class="hint">${i.mods === "entree" ? "Protein · spice · options"
+                          : i.mods === "none" ? "One tap" : "Options"}</span>
+      </span>
+    </button>`).join("");
+}
+$("#items").addEventListener("click", e => {
+  const b = e.target.closest("button[data-item]");
+  if (b) tapMenuItem(b.dataset.item);
+});
+
+/* ============================================================
+   8. MODIFIERS
+   ============================================================ */
+
+function tapMenuItem(itemId){
+  const item = findItem(itemId);
+  if (item.mods === "none"){
+    addLine({ menuId:item.id, name:item.name, basePrice:item.price, qty:1,
+              protein:null, spice:null, options:[], notes:"" });
+    toast(item.name + " added");
+    return;
+  }
+  openModifiers(item, null);
+}
+
+function openModifiers(item, editingLine){
+  state.editingItem = item;
+  state.editingUid  = editingLine ? editingLine.uid : null;
+  // a separate draft means Cancel is a genuine cancel
+  state.draft = editingLine
+    ? { protein:editingLine.protein, spice:editingLine.spice,
+        options:editingLine.options.slice(), notes:editingLine.notes }
+    : { protein:null, spice:null, options:[], notes:"" };
+
+  $("#modTitle").textContent = item.name;
+  $("#modSub").textContent = editingLine
+    ? "Editing an item already on the check"
+    : "Base price " + money(item.price);
+  $("#modConfirm").textContent = editingLine ? "Save changes" : "Add to order";
+  renderModifierBody();
+  openModal("modifierModal");
+}
+
+function draftPrice(){
+  const d = state.draft, item = state.editingItem;
+  let p = item.price;
+  if (d.protein) p += d.protein.price;
+  d.options.forEach(o => p += o.price);
+  return p;
+}
+
+function renderModifierBody(){
+  const item = state.editingItem, d = state.draft;
+  const needsProtein = item.mods === "entree";
+  const needsSpice   = item.mods === "entree" || item.mods === "light";
+  const opts = optionSetFor(item.mods);
+  let h = "";
+
+  if (needsProtein){
+    h += `<div class="group"><h4>Choose protein <span class="req">· required</span></h4><div class="choices">` +
+      PROTEINS.map((p,i) => `
+        <button class="choice ${d.protein && d.protein.name === p.name ? "selected" : ""}" data-g="protein" data-i="${i}">
+          <span>${esc(p.name)}</span>${p.price ? `<span class="up">+${money(p.price)}</span>` : ""}
+        </button>`).join("") + `</div></div>`;
+  }
+  if (needsSpice){
+    h += `<div class="group"><h4>Spice level</h4><div class="choices">` +
+      SPICE.map((s,i) => `
+        <button class="choice ${d.spice === s ? "selected" : ""}" data-g="spice" data-i="${i}">
+          <span>${esc(s)}</span>
+          <span class="heat">${[0,1,2,3,4].map(n => `<i class="${n < i ? "f" : ""}"></i>`).join("")}</span>
+        </button>`).join("") + `</div></div>`;
+  }
+  if (opts.length){
+    h += `<div class="group"><h4>Options</h4><div class="choices">` +
+      opts.map((o,i) => `
+        <button class="choice ${d.options.some(x => x.name === o.name) ? "selected" : ""}" data-g="option" data-i="${i}">
+          <span>${esc(o.name)}</span>${o.price ? `<span class="up">+${money(o.price)}</span>` : ""}
+        </button>`).join("") + `</div></div>`;
+  }
+  h += `<div class="group"><h4>Special instructions</h4>
+          <textarea id="modNotes" rows="2" placeholder="Allergy, plating, timing…">${esc(d.notes)}</textarea></div>`;
+
+  $("#modBody").innerHTML = h;
+  $("#modPrice").textContent = money(draftPrice());
+}
+
+$("#modBody").addEventListener("click", e => {
+  const b = e.target.closest(".choice");
+  if (!b) return;
+  const d = state.draft, i = +b.dataset.i;
+  const opts = optionSetFor(state.editingItem.mods);
+
+  if (b.dataset.g === "protein") d.protein = PROTEINS[i];
+  if (b.dataset.g === "spice")   d.spice = (d.spice === SPICE[i] ? null : SPICE[i]);
+  if (b.dataset.g === "option"){
+    const o = opts[i];
+    const at = d.options.findIndex(x => x.name === o.name);
+    if (at > -1) d.options.splice(at,1); else d.options.push(o);
+  }
+  d.notes = $("#modNotes").value;   // preserve typing across re-render
+  renderModifierBody();
+});
+
+$("#modConfirm").addEventListener("click", () => {
+  const item = state.editingItem, d = state.draft;
+  d.notes = $("#modNotes").value.trim();
+  if (item.mods === "entree" && !d.protein) return toast("Pick a protein first", "warn");
+
+  if (state.editingUid){
+    const line = cur().items.find(l => l.uid === state.editingUid);
+    if (line) Object.assign(line, d);
+    toast("Item updated");
+  } else {
+    addLine({ menuId:item.id, name:item.name, basePrice:item.price, qty:1,
+              protein:d.protein, spice:d.spice, options:d.options.slice(), notes:d.notes });
+    toast(item.name + " added");
+  }
+  closeModal("modifierModal");
+  renderCheck();
+});
+
+/* ============================================================
+   9. ORDER MANAGEMENT
+   ============================================================ */
+
+function addLine(line){
+  const o = cur();
+  o.items.push({ uid:nextId(), fired:false, comped:false, voided:false, voidReason:"", ...line });
+  if (o.status !== "open") o.status = "open";   // new items reopen the check until re-sent
+  renderCheck();
+}
+
+function modsText(line){
+  const bits = [];
+  if (line.protein) bits.push({ t:line.protein.name, up:line.protein.price });
+  if (line.spice)   bits.push({ t:line.spice, up:0 });
+  (line.options || []).forEach(o => bits.push({ t:o.name, up:o.price }));
+
+  let h = bits.map(b => esc(b.t) + (b.up ? ` <span class="plus">+${money(b.up)}</span>` : "")).join(" · ");
+  if (line.comped) h += (h ? " · " : "") + '<span class="flag">COMPED</span>';
+  if (line.notes)  h += (h ? "<br>" : "") + `<span class="note">“${esc(line.notes)}”</span>`;
+  if (line.voided) h += (h ? "<br>" : "") + `<span class="flag">VOID — ${esc(line.voidReason)}</span>`;
+  return h;
+}
+
+function renderCheck(){
+  const o = cur();
+
+  // header
+  $("#checkTitle").textContent = o.type === "dinein"
+    ? (o.table ? "Table " + o.table : "New check")
+    : (o.type === "takeout" ? "Takeout" : "Delivery");
+  $("#checkSub").textContent =
+    (o.type === "dinein" ? "Dine In" : o.type === "takeout" ? "Takeout" : "Delivery") + " · Check #" + o.number;
+  $("#mCheck").textContent = "#" + o.number;
+
+  $$("#typeSeg button").forEach(b => b.classList.toggle("active", b.dataset.type === o.type));
+  $("#tableBtnLabel").textContent = o.type === "dinein"
+    ? (o.table ? "Table " + o.table + " · change" : "Pick a table")
+    : (o.type === "takeout" ? "Walk-in takeout" : "Delivery order");
+  $("#tableBtn").disabled = o.type !== "dinein";
+
+  const stamp = $("#stamp");
+  stamp.className = "stamp " + o.status;
+  stamp.textContent = { open:"Open", sent:"Sent", held:"Held", paid:"Paid" }[o.status];
+
+  // lines
+  if (!o.items.length){
+    $("#lines").innerHTML = `<div class="empty">
+      <strong>No items yet</strong>Pick a category, then tap a dish to start the check.</div>`;
+  } else {
+    $("#lines").innerHTML = o.items.map(l => {
+      const m = modsText(l);
+      return `<div class="line ${l.voided ? "voided" : ""} ${l.comped ? "comped" : ""}" data-line="${l.uid}">
+        <div class="line-top">
+          <span class="qty">${l.qty}×</span>
+          <span class="nm">${esc(l.name)}</span>
+          <span class="amt">${l.voided ? "—" : money(linePrice(l))}</span>
+        </div>
+        ${m ? `<div class="mods">${m}</div>` : ""}
+        <div class="line-actions">
+          <button data-a="dec" ${l.voided ? "disabled" : ""}>−</button>
+          <span class="q">${l.qty}</span>
+          <button data-a="inc" ${l.voided ? "disabled" : ""}>+</button>
+          <button data-a="edit" ${l.voided ? "disabled" : ""}>Edit</button>
+          <button data-a="remove" ${l.voided ? "disabled" : ""}>${l.fired ? "Void" : "Remove"}</button>
+        </div>
+      </div>`;
+    }).join("");
+  }
+
+  // totals
+  const t = totals(o);
+  $("#totals").innerHTML =
+    `<div class="trow"><span>Subtotal</span><span class="v">${money(t.subtotal)}</span></div>` +
+    (o.discount ? `<div class="trow disc"><span>${esc(o.discount.label)}</span><span class="v">−${money(t.discount)}</span></div>` : "") +
+    `<div class="trow"><span>Tax</span><span class="v">${money(t.tax)}</span></div>` +
+    `<div class="trow grand"><span>Total</span><span class="v">${money(t.total)}</span></div>` +
+    `<div class="tax-note">Demo tax: 8.875% NYC-style rate. All prices and totals are prototype data.</div>`;
+
+  const empty = activeLines(o).length === 0;
+  ["#btnSend","#btnPay","#btnDiscount","#btnVoid","#btnHold"].forEach(s => $(s).disabled = empty);
+
+  updateCounts();
+  renderCheckBar();
+}
+
+function updateCounts(){
+  const active = state.tickets.filter(t => t.status !== "ready").length;
+  const kc = $("#kitCount");
+  kc.textContent = active;
+  kc.classList.toggle("hidden", !active);
+
+  const seated = TABLES.filter(t => tableOrder(t.id)).length;
+  const tc = $("#tblCount");
+  tc.textContent = seated;
+  tc.classList.toggle("hidden", !seated);
+
+  $("#kitStatus").textContent = active + " active";
+}
+
+$("#lines").addEventListener("click", e => {
+  const btn = e.target.closest("button[data-a]");
+  if (!btn) return;
+  const o = cur();
+  const uid = e.target.closest(".line").dataset.line;
+  const idx = o.items.findIndex(l => l.uid === uid);
+  const line = o.items[idx];
+  const a = btn.dataset.a;
+
+  if (a === "inc") line.qty++;
+  if (a === "dec"){ line.qty--; if (line.qty <= 0) o.items.splice(idx,1); }
+  if (a === "remove"){
+    if (line.fired) return openVoid(uid);   // already in the kitchen → needs a reason
+    o.items.splice(idx,1);
+    toast("Removed " + line.name);
+  }
+  if (a === "edit"){
+    const item = findItem(line.menuId);
+    if (item.mods === "none") return toast("Nothing to change on this one");
+    return openModifiers(item, line);
+  }
+  renderCheck();
+});
+
+/* ---- order type + table ---- */
+$("#typeSeg").addEventListener("click", e => {
+  const b = e.target.closest("button[data-type]");
+  if (!b) return;
+  const o = cur();
+  o.type = b.dataset.type;
+  if (o.type !== "dinein") o.table = null;
+  renderCheck();
+  if (o.type === "dinein" && !o.table) openTablePicker();
+});
+$("#tableBtn").addEventListener("click", () => { if (cur().type === "dinein") openTablePicker(); });
+
+function tableOrder(id){
+  return Object.values(state.orders).find(o =>
+    o.type === "dinein" && o.table === id && o.status !== "paid" && o.items.length);
+}
+
+function openTablePicker(){
+  $("#tableGrid").innerHTML = TABLES.map(t => {
+    const taken = tableOrder(t.id);
+    const mine  = cur().table === t.id;
+    return `<button data-t="${t.id}" class="${mine ? "selected" : (taken ? "taken" : "")}">
+      ${t.id}<span class="s">${t.seats} seats</span></button>`;
+  }).join("");
+  openModal("tableModal");
+}
+
+$("#tableGrid").addEventListener("click", e => {
+  const b = e.target.closest("button[data-t]");
+  if (!b) return;
+  const id = +b.dataset.t;
+  const existing = tableOrder(id);
+
+  if (existing && existing.id !== state.currentId){
+    if (cur() && !cur().items.length) delete state.orders[state.currentId];
+    state.currentId = existing.id;
+    toast("Opened the check on table " + id);
+  } else {
+    cur().table = id;
+    cur().type  = "dinein";
+  }
+  closeModal("tableModal");
+  renderCheck();
+});
+
+/* ---- hold / send / more ---- */
+function startFresh(type){
+  closeSheet();
+  const o = newOrder({ type: type || "dinein" });
+  state.currentId = o.id;
+  renderCheck();
+}
+
+$("#btnHold").addEventListener("click", () => {
+  const o = cur();
+  if (!activeLines(o).length) return toast("Nothing to hold");
+  o.status = "held";
+  toast("Check held. Pick it back up from Tables.");
+  startFresh();
+});
+
+$("#btnSend").addEventListener("click", () => {
+  const o = cur();
+  if (o.type === "dinein" && !o.table) return openTablePicker();
+  const fresh = activeLines(o).filter(l => !l.fired);
+  if (!fresh.length) return toast("Everything on this check is already in the kitchen", "warn");
+
+  state.tickets.push({
+    id: nextId(),
+    dest: o.type === "dinein" ? "Table " + o.table
+        : (o.type === "takeout" ? "Takeout #" + o.number : "Delivery #" + o.number),
+    orderId: o.id,
+    at: Date.now(),
+    status: "new",
+    items: fresh.map(l => ({ name:l.name, qty:l.qty, protein:l.protein,
+                             spice:l.spice, options:l.options, notes:l.notes }))
+  });
+  fresh.forEach(l => l.fired = true);
+  o.status = "sent";
+  renderCheck(); renderKitchen();
+  toast("Order sent to kitchen.", "good");
+});
+
+$("#btnMore").addEventListener("click", () => {
+  $("#stubList").innerHTML = MORE_STUBS
+    .map(x => `<button data-stub="${esc(x)}">${esc(x)}<span class="tag">Not built</span></button>`).join("");
+  openModal("moreModal");
+});
+$("#stubList").addEventListener("click", e => {
+  const b = e.target.closest("button[data-stub]");
+  if (!b) return;
+  closeModal("moreModal");
+  toast(b.dataset.stub + " isn't in this prototype yet");
+});
+
+$("#btnNewWalkIn").addEventListener("click", () => { startFresh("takeout"); go("pos"); openSheet(); });
+
+/* ============================================================
+   10. DISCOUNTS
+   ============================================================ */
+
+$("#btnDiscount").addEventListener("click", () => {
+  state.discountKey = null;
+  $$("#discountChoices .choice").forEach(c => c.classList.remove("selected"));
+  $("#customDiscountGroup").classList.add("hidden");
+  $("#compGroup").classList.add("hidden");
+  $("#customDiscountInput").value = "";
+  $("#compSelect").innerHTML = activeLines(cur())
+    .map(l => `<option value="${l.uid}">${esc(l.name)} × ${l.qty} — ${money(linePrice(l))}</option>`).join("");
+  openModal("discountModal");
+});
+
+$("#discountChoices").addEventListener("click", e => {
+  const b = e.target.closest(".choice");
+  if (!b) return;
+  state.discountKey = b.dataset.discount;
+  $$("#discountChoices .choice").forEach(c => c.classList.toggle("selected", c === b));
+  $("#customDiscountGroup").classList.toggle("hidden", state.discountKey !== "custom");
+  $("#compGroup").classList.toggle("hidden", state.discountKey !== "comp");
+});
+
+$("#applyDiscountBtn").addEventListener("click", () => {
+  const o = cur(), key = state.discountKey;
+  if (!key) return toast("Choose a discount type first", "warn");
+
+  if (key === "mgr10") o.discount = { label:"Manager 10%",  pct:10 };
+  if (key === "emp20") o.discount = { label:"Employee 20%", pct:20 };
+  if (key === "custom"){
+    const v = Number($("#customDiscountInput").value);
+    if (!(v > 0 && v <= 100)) return toast("Enter a percentage between 1 and 100", "warn");
+    o.discount = { label:"Custom " + v + "%", pct:v };
+  }
+  if (key === "comp"){
+    // comp is a line-level flag, not a check-level discount — closer to how a POS models it
+    const line = o.items.find(l => l.uid === $("#compSelect").value);
+    if (!line) return toast("Pick an item to comp", "warn");
+    line.comped = true;
+    toast(line.name + " comped");
+    closeModal("discountModal");
+    return renderCheck();
+  }
+  closeModal("discountModal");
+  renderCheck();
+  toast("Discount applied");
+});
+
+$("#clearDiscountBtn").addEventListener("click", () => {
+  const o = cur();
+  o.discount = null;
+  o.items.forEach(l => l.comped = false);
+  closeModal("discountModal");
+  renderCheck();
+  toast("Discounts and comps cleared");
+});
+
+/* ============================================================
+   11. VOID
+   ============================================================ */
+
+function openVoid(preselectUid){
+  const o = cur();
+  const candidates = activeLines(o);
+  if (!candidates.length) return toast("Nothing to void");
+
+  $("#voidSelect").innerHTML = candidates
+    .map(l => `<option value="${l.uid}" ${l.uid === preselectUid ? "selected" : ""}>
+                 ${esc(l.name)} × ${l.qty}${l.fired ? " (in the kitchen)" : ""}</option>`).join("");
+  $("#voidReasons").innerHTML = VOID_REASONS
+    .map(r => `<button class="choice" data-reason="${esc(r)}">${esc(r)}</button>`).join("");
+  state.voidReason = null;
+  openModal("voidModal");
+}
+$("#btnVoid").addEventListener("click", () => openVoid(null));
+
+$("#voidReasons").addEventListener("click", e => {
+  const b = e.target.closest(".choice");
+  if (!b) return;
+  state.voidReason = b.dataset.reason;
+  $$("#voidReasons .choice").forEach(c => c.classList.toggle("selected", c === b));
+});
+
+$("#confirmVoidBtn").addEventListener("click", () => {
+  if (!state.voidReason) return toast("Pick a reason first", "warn");
+  const o = cur();
+  const line = o.items.find(l => l.uid === $("#voidSelect").value);
+  if (!line) return;
+
+  line.voided = true;
+  line.voidReason = state.voidReason;
+  state.voidLog.push({
+    at: Date.now(), employee: VENUE.employee,
+    order: o.number, item: line.name, reason: state.voidReason
+  });
+
+  closeModal("voidModal");
+  renderCheck();
+  toast(line.name + " voided");
+});
+
+/* ============================================================
+   12. PAYMENT
+   ============================================================ */
+
+$("#btnPay").addEventListener("click", () => {
+  const o = cur();
+  if (!activeLines(o).length) return toast("Nothing to pay for");
+
+  state.payMethod = null;
+  state.tipChoice = null;
+  state.split = { mode:null, ways:2, assign:{} };
+  o.tip = 0;
+
+  $("#payScope").textContent =
+    (o.type === "dinein" ? "Table " + o.table : o.type === "takeout" ? "Takeout" : "Delivery") +
+    " · Check #" + o.number + " — simulation only, no card reader or gateway.";
+
+  $("#tipChoices").innerHTML =
+    TIP_PCTS.map(p => `<button class="choice" data-tip="${p}"><span>${p}%</span>
+       <span class="up">${money(totals(o).total * p / 100)}</span></button>`).join("") +
+    `<button class="choice" data-tip="custom"><span>Custom</span></button>
+     <button class="choice" data-tip="0"><span>No tip</span></button>`;
+
+  $$("#payMethods .choice").forEach(c => c.classList.remove("selected"));
+  $("#splitGroup").classList.add("hidden");
+  $("#customTipWrap").classList.add("hidden");
+  $("#customTipInput").value = "";
+  $("#splitDetail").innerHTML = "";
+  $$("#splitModes .choice").forEach(c => c.classList.remove("selected"));
+
+  $("#payBody").classList.remove("hidden");
+  $("#payResult").classList.remove("show");
+  $("#payFoot").classList.remove("hidden");
+  $("#processPayBtn").textContent = "Take payment";
+
+  renderPaySummary();
+  openModal("paymentModal");
+});
+
+function tipAmount(){
+  const o = cur(), t = totals(o);
+  if (state.tipChoice === null || state.tipChoice === 0) return 0;
+  if (state.tipChoice === "custom") return Math.max(0, Number($("#customTipInput").value) || 0);
+  return t.total * Number(state.tipChoice) / 100;
+}
+
+function renderPaySummary(){
+  const o = cur(), t = totals(o), tip = tipAmount();
+  $("#paySummary").innerHTML =
+    `<div class="trow"><span>Subtotal</span><span class="v">${money(t.subtotal)}</span></div>` +
+    (o.discount ? `<div class="trow disc"><span>${esc(o.discount.label)}</span><span class="v">−${money(t.discount)}</span></div>` : "") +
+    `<div class="trow"><span>Tax</span><span class="v">${money(t.tax)}</span></div>` +
+    (tip ? `<div class="trow"><span>Tip</span><span class="v">${money(tip)}</span></div>` : "") +
+    `<div class="trow grand"><span>Amount due</span><span class="v">${money(t.total + tip)}</span></div>`;
+}
+
+$("#tipChoices").addEventListener("click", e => {
+  const b = e.target.closest(".choice");
+  if (!b) return;
+  const v = b.dataset.tip;
+  state.tipChoice = (v === "custom") ? "custom" : Number(v);
+  $$("#tipChoices .choice").forEach(c => c.classList.toggle("selected", c === b));
+  $("#customTipWrap").classList.toggle("hidden", state.tipChoice !== "custom");
+  renderPaySummary();
+});
+$("#customTipInput").addEventListener("input", renderPaySummary);
+
+$("#payMethods").addEventListener("click", e => {
+  const b = e.target.closest(".choice");
+  if (!b) return;
+  state.payMethod = b.dataset.method;
+  $$("#payMethods .choice").forEach(c => c.classList.toggle("selected", c === b));
+  const splitting = state.payMethod === "Split check";
+  $("#splitGroup").classList.toggle("hidden", !splitting);
+  if (splitting && !state.split.mode){
+    state.split.mode = "even";
+    $$("#splitModes .choice").forEach(c => c.classList.toggle("selected", c.dataset.split === "even"));
+    renderSplit();
+  }
+});
+
+/* ---- split check (deliberately naive — see the note in the modal) ---- */
+$("#splitModes").addEventListener("click", e => {
+  const b = e.target.closest(".choice");
+  if (!b) return;
+  state.split.mode = b.dataset.split;
+  $$("#splitModes .choice").forEach(c => c.classList.toggle("selected", c === b));
+  if (state.split.mode === "item"){
+    activeLines(cur()).forEach(l => { if (!state.split.assign[l.uid]) state.split.assign[l.uid] = "A"; });
+  }
+  renderSplit();
+});
+
+function guestTotal(who){
+  const o = cur();
+  const sub = activeLines(o)
+    .filter(l => state.split.assign[l.uid] === who)
+    .reduce((s,l) => s + linePrice(l), 0);
+  return sub * (1 + VENUE.taxRate);
+}
+
+function renderSplit(){
+  const o = cur(), t = totals(o), tip = tipAmount();
+  const grand = t.total + tip;
+  let h = "";
+
+  if (state.split.mode === "even"){
+    h += `<div class="choices" id="wayRow" style="margin-bottom:10px">` +
+      [2,3,4,5,6].map(n =>
+        `<button class="choice ${state.split.ways === n ? "selected" : ""}" data-ways="${n}">
+           <span>${n} ways</span></button>`).join("") + `</div>`;
+    h += Array.from({ length: state.split.ways }, (_,i) =>
+      `<div class="split-row"><span class="who">Guest ${i+1}</span>
+       <span class="amt">${money(grand / state.split.ways)}</span></div>`).join("");
+  } else if (state.split.mode === "item"){
+    h += activeLines(o).map(l => `
+      <div class="split-row">
+        <span class="who">${esc(l.name)}<span class="meta">${money(linePrice(l))}</span></span>
+        <span class="assign">
+          <button class="${state.split.assign[l.uid] === "A" ? "selected" : ""}" data-as="${l.uid}" data-who="A">A</button>
+          <button class="${state.split.assign[l.uid] === "B" ? "selected" : ""}" data-as="${l.uid}" data-who="B">B</button>
+        </span>
+      </div>`).join("");
+    h += `<div class="split-row" style="margin-top:8px">
+            <span class="who">Guest A · with tax</span><span class="amt">${money(guestTotal("A"))}</span></div>
+          <div class="split-row">
+            <span class="who">Guest B · with tax</span><span class="amt">${money(guestTotal("B"))}</span></div>`;
+  }
+  $("#splitDetail").innerHTML = h;
+}
+
+$("#splitDetail").addEventListener("click", e => {
+  const w = e.target.closest("[data-ways]");
+  if (w){ state.split.ways = +w.dataset.ways; return renderSplit(); }
+  const a = e.target.closest("[data-as]");
+  if (a){ state.split.assign[a.dataset.as] = a.dataset.who; return renderSplit(); }
+});
+
+$("#processPayBtn").addEventListener("click", () => {
+  if (!state.payMethod) return toast("Choose a payment method", "warn");
+  const o = cur(), t = totals(o), tip = tipAmount();
+  const amount = t.total + tip;
+
+  o.tip = tip;
+  o.status = "paid";
+  o.checkRequested = false;
+
+  $("#payResultAmt").textContent = money(amount);
+  $("#payResultMethod").textContent = state.payMethod + " · nothing was actually processed.";
+  $("#payBody").classList.add("hidden");
+  $("#payFoot").classList.add("hidden");
+  $("#payResult").classList.add("show");
+});
+
+$("#payResult").addEventListener("click", e => {
+  const b = e.target.closest("[data-receipt]");
+  if (!b) return;
+  toast(b.dataset.receipt === "print"
+    ? "Receipt sent to the printer (simulated)"
+    : "Receipt emailed (simulated)");
+  closeModal("paymentModal");
+  startFresh();
+  renderFloor();
+  go("pos");
+});
+
+/* ============================================================
+   13. TABLES
+   ============================================================ */
+
+function renderFloor(){
+  $("#floor").innerHTML = TABLES.map(t => {
+    const o = tableOrder(t.id);
+    let cls = "", status = "Open", amt = "", since = "";
+    if (o){
+      cls    = o.checkRequested ? "check" : "occupied";
+      status = o.checkRequested ? "Check requested" : (o.status === "held" ? "On hold" : "Occupied");
+      amt    = money(totals(o).total);
+      const n = activeLines(o).length;
+      since  = elapsed(o.openedAt) + " · " + n + " item" + (n === 1 ? "" : "s");
+    }
+    return `<button class="table-card ${cls}" data-tbl="${t.id}">
+      <div>
+        <h3>Table ${t.id}</h3>
+        <div class="seats">${t.seats} seats</div>
+      </div>
+      <div class="bottom">
+        <div>
+          <div class="status">${status}</div>
+          <div class="since">${since || "&nbsp;"}</div>
+        </div>
+        <div class="amt">${amt}</div>
+      </div>
+    </button>`;
+  }).join("");
+  updateCounts();
+}
+
+$("#floor").addEventListener("click", e => {
+  const b = e.target.closest("[data-tbl]");
+  if (!b) return;
+  const id = +b.dataset.tbl;
+  const existing = tableOrder(id);
+
+  if (existing){
+    state.currentId = existing.id;
+    toast("Table " + id + " · check open");
+  } else {
+    if (cur() && !cur().items.length) delete state.orders[state.currentId];
+    const o = newOrder({ type:"dinein", table:id });
+    state.currentId = o.id;
+    toast("New check on table " + id);
+  }
+  renderCheck();
+  go("pos");
+  if (existing) openSheet();
+});
+
+/* ============================================================
+   14. KITCHEN
+   ============================================================ */
+
+function renderKitchen(){
+  const open = state.tickets.slice().sort((a,b) => a.at - b.at);
+  if (!open.length){
+    $("#board").innerHTML = `<div class="empty">
+      <strong>The line is clear</strong>Send an order from the terminal and the ticket lands here.</div>`;
+  } else {
+    $("#board").innerHTML = open.map(t => `
+      <div class="ticket ${t.status}" data-tk="${t.id}">
+        <div class="ticket-head">
+          <div>
+            <div class="dest">${esc(t.dest)}</div>
+            <div class="sub">${t.items.reduce((s,i) => s + i.qty, 0)} items</div>
+          </div>
+          <div class="age">${clockOf(t.at)}<br>${elapsed(t.at)} ago</div>
+        </div>
+        <div class="ticket-body">${t.items.map(i => `
+          <div class="tline">
+            <div class="n"><span class="q">${i.qty}×</span>${esc(i.name)}</div>
+            <ul>
+              ${i.protein ? `<li>${esc(i.protein.name)}</li>` : ""}
+              ${i.spice ? `<li class="${/Hot/.test(i.spice) ? "hot" : ""}">${esc(i.spice)}</li>` : ""}
+              ${(i.options || []).map(o => `<li>${esc(o.name)}</li>`).join("")}
+              ${i.notes ? `<li class="note">${esc(i.notes)}</li>` : ""}
+            </ul>
+          </div>`).join("")}
+        </div>
+        <div class="ticket-foot">
+          ${t.status === "new"     ? `<button class="go" data-k="start">Start</button>` : ""}
+          ${t.status === "cooking" ? `<button class="done" data-k="ready">Ready</button>` : ""}
+          ${t.status === "ready"   ? `<button data-k="clear">Clear ticket</button>` : ""}
+        </div>
+      </div>`).join("");
+  }
+  updateCounts();
+}
+
+$("#board").addEventListener("click", e => {
+  const b = e.target.closest("[data-k]");
+  if (!b) return;
+  const id = e.target.closest("[data-tk]").dataset.tk;
+  const t = state.tickets.find(x => x.id === id);
+  if (b.dataset.k === "start"){ t.status = "cooking"; toast(t.dest + " started"); }
+  if (b.dataset.k === "ready"){ t.status = "ready";   toast(t.dest + " is ready", "good"); }
+  if (b.dataset.k === "clear"){ state.tickets = state.tickets.filter(x => x.id !== id); }
+  renderKitchen();
+});
+
+/* ============================================================
+   15. SEED + BOOT
+   The room opens mid-service on purpose — an empty POS demos badly.
+   ============================================================ */
+
+function seedLine(menuId, opts){
+  opts = opts || {};
+  const item = findItem(menuId);
+  return {
+    uid: nextId(), menuId:item.id, name:item.name, basePrice:item.price,
+    qty: opts.qty || 1,
+    protein: opts.protein ? PROTEINS.find(p => p.name === opts.protein) : null,
+    spice: opts.spice || null,
+    options: (opts.options || [])
+      .map(n => [...OPTIONS_ENTREE, ...OPTIONS_LIGHT, ...OPTIONS_DRINK].find(o => o.name === n))
+      .filter(Boolean),
+    notes: opts.notes || "", fired:true, comped:false, voided:false, voidReason:""
+  };
+}
+
+function seed(){
+  const MIN = 60000;
+
+  // Table 2 — mid meal
+  const t2 = newOrder({ type:"dinein", table:2 });
+  t2.openedAt = Date.now() - 38*MIN; t2.status = "sent";
+  t2.items = [
+    seedLine("pad-thai",     { protein:"Shrimp", spice:"Medium", options:["No Peanuts"] }),
+    seedLine("green-curry",  { protein:"Beef",   spice:"Hot" }),
+    seedLine("spring-rolls", { spice:"Mild" }),
+    seedLine("rangoon",      {}),
+    seedLine("thai-tea",     { qty:2 })
+  ];
+
+  // Table 3 — big top, one allergy note
+  const t3 = newOrder({ type:"dinein", table:3 });
+  t3.openedAt = Date.now() - 52*MIN; t3.status = "sent";
+  t3.items = [
+    seedLine("pad-see-ew",     { protein:"Chicken", spice:"Mild" }),
+    seedLine("drunken",        { protein:"Shrimp",  spice:"Thai Hot" }),
+    seedLine("panang-curry",   { protein:"Beef",    spice:"Medium" }),
+    seedLine("massaman-curry", { protein:"Chicken", spice:"No Spice",
+                                 notes:"Allergy: no shellfish anywhere near this" }),
+    seedLine("pineapple-fr",   { protein:"Shrimp",  spice:"Mild" }),
+    seedLine("thai-tea",       { qty:3 }),
+    seedLine("coke",           { qty:2 })
+  ];
+
+  // Table 4 — done eating, wants the check
+  const t4 = newOrder({ type:"dinein", table:4 });
+  t4.openedAt = Date.now() - 71*MIN; t4.status = "sent"; t4.checkRequested = true;
+  t4.items = [
+    seedLine("pad-thai",     { protein:"Shrimp",  spice:"Medium", options:["No Peanuts"] }),
+    seedLine("green-curry",  { protein:"Chicken", spice:"Hot" }),
+    seedLine("spring-rolls", {})
+  ];
+
+  // Table 7 — check already had one item voided, so the audit story is visible on open
+  const t7 = newOrder({ type:"dinein", table:7 });
+  t7.openedAt = Date.now() - 22*MIN; t7.status = "sent";
+  t7.items = [
+    seedLine("kra-pao", { protein:"Chicken", spice:"Thai Hot" }),
+    seedLine("tom-yum", { protein:"Shrimp",  spice:"Medium" }),
+    Object.assign(seedLine("cashew", { protein:"Duck", spice:"Mild" }),
+                  { voided:true, voidReason:"Kitchen mistake" })
+  ];
+
+  // Two tickets already on the line
+  state.tickets.push({
+    id: nextId(), dest:"Table 4", orderId:t4.id, at: Date.now() - 9*MIN, status:"cooking",
+    items: t4.items.map(l => ({ name:l.name, qty:l.qty, protein:l.protein,
+                                spice:l.spice, options:l.options, notes:l.notes }))
+  });
+  state.tickets.push({
+    id: nextId(), dest:"Takeout #1039", orderId:null, at: Date.now() - 3*MIN, status:"new",
+    items: [
+      { name:"Pad Kra Pao", qty:1, protein:PROTEINS[3], spice:"Thai Hot", options:[], notes:"Pickup 8:40" },
+      { name:"Thai Fried Rice", qty:1, protein:PROTEINS[0], spice:"Mild",
+        options:[{ name:"Extra Vegetables", price:2 }], notes:"" }
+    ]
+  });
+
+  startFresh();
+}
+
+function tickClock(){
+  $("#mClock").textContent = new Date().toLocaleTimeString([], { hour:"numeric", minute:"2-digit" });
+}
+
+$("#mVenue").textContent    = VENUE.name;
+$("#mEmployee").textContent = VENUE.employee.split(" · ")[0];
+
+renderRail();
+renderItems();
+seed();
+renderCheck();
+renderFloor();
+renderKitchen();
+tickClock();
+setInterval(tickClock, 15000);
+setInterval(() => {                       // keep the "38m ago" ages honest
+  if (state.screen === "kitchen") renderKitchen();
+  if (state.screen === "tables")  renderFloor();
+}, 60000);
+</script>
+</body>
+</html>

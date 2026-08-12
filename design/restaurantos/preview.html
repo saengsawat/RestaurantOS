@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Design System Preview: RestaurantOS (Day)</title>
+<style>
+  :root {
+    /* Brand */
+    --brand: #9fe870;
+    --brand-ink: #163300;
+    --brand-hover: #8ddd5e;
+    --brand-wash: rgba(159,232,112,.18);
+    /* Surfaces */
+    --bg: #f2f1ec;
+    --panel: #ffffff;
+    --surface: #ffffff;
+    --surface-2: #e9ebe4;
+    /* Ink */
+    --ink: #0e0f0c;
+    --ink-2: #3f423d;
+    --ink-3: #5f635c;
+    --ink-4: #787c74;
+    /* Status */
+    --info: #0a7ea4;  --info-wash: rgba(10,126,164,.10);  --info-line: rgba(10,126,164,.30);
+    --amber: #a16207; --amber-wash: rgba(161,98,7,.10);   --amber-line: rgba(161,98,7,.30);
+    --green: #116e3b; --green-wash: rgba(17,110,59,.10);  --green-line: rgba(17,110,59,.32);
+    --red: #c22f35;   --red-wash: rgba(194,47,53,.09);    --red-line: rgba(194,47,53,.32);
+    /* Lines & depth */
+    --line: rgba(14,15,12,.12);
+    --line-subtle: rgba(14,15,12,.06);
+    --ring: 0 0 0 1px rgba(14,15,12,.12);
+    --shadow-sm: 0 2px 8px rgba(14,15,12,.08);
+    --shadow-lg: 0 16px 40px rgba(14,15,12,.16);
+    --overlay: rgba(14,15,12,.45);
+    /* Type */
+    --font: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+    /* Radius */
+    --r-sm: 8px; --r-tile: 12px; --r-card: 16px; --r-pill: 9999px;
+    --tap: 44px;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font);
+    font-size: 16px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* NAV */
+  .nav {
+    position: sticky; top: 0; z-index: 100;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 40px;
+    background: rgba(242,241,236,.92);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--line);
+  }
+  .nav-brand { display: flex; align-items: center; gap: 10px; font-size: 18px; font-weight: 700; }
+  .logo-mark {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 30px; height: 30px; background: var(--brand); color: var(--brand-ink);
+    border-radius: var(--r-pill); font-size: 15px; font-weight: 800;
+  }
+  .nav-links { display: flex; gap: 28px; align-items: center; }
+  .nav-links a { color: var(--ink-3); text-decoration: none; font-size: 14px; font-weight: 550; }
+  .nav-links a:hover { color: var(--ink); }
+  .nav-cta {
+    background: var(--brand); color: var(--brand-ink);
+    min-height: var(--tap); padding: 0 22px; border: none; border-radius: var(--r-pill);
+    font: 600 15px var(--font); cursor: pointer;
+  }
+  .nav-cta:active { transform: scale(.97); }
+
+  /* HERO */
+  .hero { position: relative; text-align: center; padding: 96px 40px 72px; overflow: hidden; }
+  .hero::before {
+    content: ''; position: absolute; top: 40%; left: 50%; width: 720px; height: 720px;
+    transform: translate(-50%, -50%);
+    background: radial-gradient(circle, rgba(159,232,112,.14) 0%, rgba(159,232,112,.05) 40%, transparent 70%);
+    pointer-events: none;
+  }
+  .hero h1 { position: relative; font-size: 52px; font-weight: 800; line-height: 1.05; letter-spacing: -0.02em; margin-bottom: 20px; }
+  .hero h1 span { background: var(--brand); color: var(--brand-ink); border-radius: 12px; padding: 0 12px; }
+  .hero p { position: relative; color: var(--ink-2); font-size: 18px; max-width: 560px; margin: 0 auto 28px; }
+  .hero-actions { position: relative; display: flex; gap: 12px; justify-content: center; }
+
+  /* SECTIONS */
+  .section { max-width: 1080px; margin: 0 auto; padding: 56px 40px; border-top: 1px solid var(--line-subtle); }
+  .section-label { color: var(--brand-ink); background: var(--brand-wash); display: inline-block; padding: 4px 12px; border-radius: var(--r-pill); font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; margin-bottom: 14px; }
+  .section-heading { font-size: 28px; font-weight: 800; letter-spacing: -0.01em; margin-bottom: 8px; }
+  .section-sub { color: var(--ink-3); font-size: 15px; margin-bottom: 28px; max-width: 640px; }
+
+  /* COLOR SWATCHES */
+  .swatch-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+  .swatch { background: var(--surface); border-radius: var(--r-tile); box-shadow: var(--ring); overflow: hidden; }
+  .swatch-chip { height: 64px; }
+  .swatch-meta { padding: 10px 12px; }
+  .swatch-name { font-size: 13px; font-weight: 650; }
+  .swatch-hex { font-family: var(--font-mono); font-size: 12px; color: var(--ink-3); }
+
+  /* STATUS CHIPS */
+  .chip-row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 18px; }
+  .chip { border-radius: var(--r-pill); padding: 5px 12px; font: 700 11px/1.4 var(--font); letter-spacing: .06em; text-transform: uppercase; border: 1px solid; }
+  .chip.info  { color: var(--info);  background: var(--info-wash);  border-color: var(--info-line); }
+  .chip.amber { color: var(--amber); background: var(--amber-wash); border-color: var(--amber-line); }
+  .chip.green { color: var(--green); background: var(--green-wash); border-color: var(--green-line); }
+  .chip.red   { color: var(--red);   background: var(--red-wash);   border-color: var(--red-line); }
+
+  /* TYPOGRAPHY */
+  .type-row { display: flex; align-items: baseline; gap: 24px; padding: 14px 0; border-bottom: 1px solid var(--line-subtle); }
+  .type-spec { width: 190px; flex-shrink: 0; font-family: var(--font-mono); font-size: 12px; color: var(--ink-3); }
+  .t-display { font-size: 36px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.05; }
+  .t-heading { font-size: 22px; font-weight: 700; }
+  .t-label { font-size: 15px; font-weight: 600; }
+  .t-body { font-size: 15px; font-weight: 450; color: var(--ink-2); }
+  .t-meta { font-size: 12px; font-weight: 550; color: var(--ink-3); }
+  .t-money { font-size: 24px; font-weight: 800; font-variant-numeric: tabular-nums; }
+
+  /* BUTTONS */
+  .btn-row { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+  .btn { min-height: 48px; padding: 0 24px; border-radius: var(--r-pill); font: 600 16px var(--font); cursor: pointer; border: none; transition: transform .1s; }
+  .btn:active { transform: scale(.97); }
+  .btn-primary { background: var(--brand); color: var(--brand-ink); }
+  .btn-primary:hover { background: var(--brand-hover); }
+  .btn-secondary { background: var(--surface-2); color: var(--ink); }
+  .btn-destructive { background: transparent; color: var(--red); border: 1.5px solid var(--red); }
+  .btn-quiet { background: transparent; color: var(--ink); }
+  .btn-quiet:hover { text-decoration: underline; }
+
+  /* POS COMPONENTS */
+  .pos-demo { display: grid; grid-template-columns: 1.4fr 1fr; gap: 20px; align-items: start; }
+  .tile-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 10px; }
+  .tile {
+    background: var(--surface); border-radius: var(--r-tile); box-shadow: var(--ring);
+    min-height: 72px; padding: 12px 14px; cursor: pointer;
+    display: flex; flex-direction: column; justify-content: space-between;
+  }
+  .tile:active { transform: scale(.97); }
+  .tile-name { font-size: 15px; font-weight: 600; }
+  .tile-price { font-size: 14px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+  .tile.selected { background: var(--brand-wash); box-shadow: 0 0 0 1.5px var(--brand-ink); }
+  .tile.eightysixed { background: var(--surface-2); }
+  .tile.eightysixed .tile-name { color: var(--ink-4); }
+  .badge-86 { align-self: flex-start; font: 700 10px/1.4 var(--font); color: var(--red); background: var(--red-wash); border: 1px solid var(--red-line); border-radius: var(--r-pill); padding: 2px 8px; }
+
+  .check-card { background: var(--surface); border-radius: var(--r-card); box-shadow: var(--ring); padding: 18px; }
+  .check-head { display: flex; justify-content: space-between; align-items: baseline; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+  .check-no { font-family: var(--font-mono); font-size: 13px; color: var(--ink-3); }
+  .check-line { display: flex; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line-subtle); font-size: 15px; }
+  .check-qty { font-family: var(--font-mono); color: var(--ink-3); }
+  .check-item { flex: 1; font-weight: 550; }
+  .check-mod { display: block; font-size: 13px; font-weight: 450; color: var(--ink-3); margin-top: 2px; }
+  .check-price { font-variant-numeric: tabular-nums; }
+  .check-line.voided .check-item, .check-line.voided .check-price { text-decoration: line-through; color: var(--ink-4); }
+  .check-total { display: flex; justify-content: space-between; padding-top: 14px; font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; }
+
+  /* KDS */
+  .kds-lane { display: flex; gap: 14px; overflow-x: auto; padding-bottom: 8px; }
+  .kds-ticket { background: var(--surface); border-radius: var(--r-card); box-shadow: var(--ring); min-width: 220px; overflow: hidden; border-top: 4px solid var(--info); }
+  .kds-ticket.working { border-top-color: var(--amber); }
+  .kds-ticket.working .kds-head { background: var(--amber-wash); }
+  .kds-ticket.late { border-top-color: var(--red); }
+  .kds-ticket.late .kds-head { background: var(--red-wash); }
+  .kds-ticket.late .kds-time { color: var(--red); }
+  .kds-head { display: flex; justify-content: space-between; padding: 10px 14px; background: var(--info-wash); font-family: var(--font-mono); font-size: 13px; font-weight: 700; }
+  .kds-time { color: var(--ink-3); }
+  .kds-items { padding: 12px 14px; }
+  .kds-item { font-size: 16px; font-weight: 600; padding: 4px 0; }
+  .kds-bump { display: block; width: calc(100% - 24px); margin: 4px 12px 12px; }
+
+  /* CARDS / SPACING / RADIUS / ELEVATION */
+  .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
+  .metric-card { background: var(--surface); border-radius: var(--r-card); box-shadow: var(--ring); padding: 18px; }
+  .metric-label { font-size: 12px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 6px; }
+  .metric-value { font-size: 30px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .metric-delta { font-size: 13px; font-weight: 600; margin-top: 4px; }
+  .metric-delta.up { color: var(--green); }
+  .metric-delta.down { color: var(--red); }
+
+  .space-row { display: flex; align-items: flex-end; gap: 18px; }
+  .space-block { background: var(--brand-wash); border: 1px solid var(--brand); border-radius: 4px; }
+  .space-label { font-family: var(--font-mono); font-size: 12px; color: var(--ink-3); text-align: center; margin-top: 6px; }
+
+  .radius-row { display: flex; gap: 18px; flex-wrap: wrap; }
+  .radius-box { width: 110px; height: 78px; background: var(--surface); box-shadow: var(--ring); display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 12px; color: var(--ink-3); }
+
+  .elev-row { display: flex; gap: 18px; flex-wrap: wrap; }
+  .elev-box { width: 170px; height: 100px; background: var(--surface); border-radius: var(--r-card); display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+
+  .footer { text-align: center; padding: 44px; color: var(--ink-4); font-size: 13px; border-top: 1px solid var(--line-subtle); margin-top: 40px; }
+
+  @media (max-width: 860px) {
+    .pos-demo { grid-template-columns: 1fr; }
+    .hero h1 { font-size: 38px; }
+    .nav-links a:not(:last-child) { display: none; }
+  }
+  @media (hover: none) { .nav-links a:hover, .btn-quiet:hover { text-decoration: none; } }
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-brand"><span class="logo-mark">R</span> RestaurantOS</div>
+  <div class="nav-links">
+    <a href="#colors">Colors</a>
+    <a href="#typography">Typography</a>
+    <a href="#buttons">Buttons</a>
+    <a href="#pos">POS Components</a>
+    <a href="#elevation">Elevation</a>
+    <button class="nav-cta">Open Terminal</button>
+  </div>
+</nav>
+
+<section class="hero">
+  <h1>Warm hospitality,<br><span>operational</span> precision.</h1>
+  <p>The RestaurantOS design language — Day mode. A warm linen canvas, one lime jolt of energy for forward actions, and a four-state status system readable from across the pass.</p>
+  <div class="hero-actions">
+    <button class="btn btn-primary">Send to Kitchen</button>
+    <button class="btn btn-secondary">View Tables</button>
+  </div>
+</section>
+
+<section class="section" id="colors">
+  <span class="section-label">Section 2</span>
+  <h2 class="section-heading">Color Palette &amp; Roles</h2>
+  <p class="section-sub">Lime means go. Status hues mean state. Nothing else in the chrome is colored.</p>
+  <div class="swatch-grid">
+    <div class="swatch"><div class="swatch-chip" style="background:#9fe870"></div><div class="swatch-meta"><div class="swatch-name">Brand Lime</div><div class="swatch-hex">#9fe870</div></div></div>
+    <div class="swatch"><div class="swatch-chip" style="background:#163300"></div><div class="swatch-meta"><div class="swatch-name">Brand Ink</div><div class="swatch-hex">#163300</div></div></div>
+    <div class="swatch"><div class="swatch-chip" style="background:#f2f1ec; box-shadow: inset 0 0 0 1px rgba(14,15,12,.12)"></div><div class="swatch-meta"><div class="swatch-name">Canvas</div><div class="swatch-hex">#f2f1ec</div></div></div>
+    <div class="swatch"><div class="swatch-chip" style="background:#e9ebe4"></div><div class="swatch-meta"><div class="swatch-name">Surface 2</div><div class="swatch-hex">#e9ebe4</div></div></div>
+    <div class="swatch"><div class="swatch-chip" style="background:#0e0f0c"></div><div class="swatch-meta"><div class="swatch-name">Ink</div><div class="swatch-hex">#0e0f0c</div></div></div>
+    <div class="swatch"><div class="swatch-chip" style="background:#5f635c"></div><div class="swatch-meta"><div class="swatch-name">Ink 3</div><div class="swatch-hex">#5f635c</div></div></div>
+    <div class="swatch"><div class="swatch-chip" style="background:#0a7ea4"></div><div class="swatch-meta"><div class="swatch-name">Info · New</div><div class="swatch-hex">#0a7ea4</div></div></div>
+    <div class="swatch"><div class="swatch-chip" style="background:#a16207"></div><div class="swatch-meta"><div class="swatch-name">Amber · Working</div><div class="swatch-hex">#a16207</div></div></div>
+    <div class="swatch"><div class="swatch-chip" style="background:#116e3b"></div><div class="swatch-meta"><div class="swatch-name">Green · Ready</div><div class="swatch-hex">#116e3b</div></div></div>
+    <div class="swatch"><div class="swatch-chip" style="background:#c22f35"></div><div class="swatch-meta"><div class="swatch-name">Red · Late</div><div class="swatch-hex">#c22f35</div></div></div>
+  </div>
+  <div class="chip-row">
+    <span class="chip info">New</span>
+    <span class="chip amber">Cooking</span>
+    <span class="chip amber">Pending upload</span>
+    <span class="chip green">Ready</span>
+    <span class="chip green">Paid</span>
+    <span class="chip red">Late</span>
+    <span class="chip red">Voided</span>
+  </div>
+</section>
+
+<section class="section" id="typography">
+  <span class="section-label">Section 3</span>
+  <h2 class="section-heading">Typography Rules</h2>
+  <p class="section-sub">Inter everywhere. Weight carries hierarchy; money is always tabular.</p>
+  <div class="type-row"><div class="type-spec">Display · 36/800</div><div class="t-display">Table 12 — $148.60</div></div>
+  <div class="type-row"><div class="type-spec">Heading · 22/700</div><div class="t-heading">Split check by seat</div></div>
+  <div class="type-row"><div class="type-spec">UI label · 15/600</div><div class="t-label">Pad Thai · Chicken · Medium spice</div></div>
+  <div class="type-row"><div class="type-spec">Body · 15/450</div><div class="t-body">Rice noodles wok-tossed with tamarind, egg, tofu, bean sprouts, and crushed peanut.</div></div>
+  <div class="type-row"><div class="type-spec">Meta · 12/550</div><div class="t-meta">SEAT 2 · SENT 7:42 PM · KI-1041</div></div>
+  <div class="type-row"><div class="type-spec">Money · tabular-nums</div><div class="t-money">$1,204.75&nbsp;&nbsp;$&nbsp;&nbsp;941.20&nbsp;&nbsp;$&nbsp;&nbsp;&nbsp;18.00</div></div>
+</section>
+
+<section class="section" id="buttons">
+  <span class="section-label">Section 4</span>
+  <h2 class="section-heading">Buttons</h2>
+  <p class="section-sub">Pills, 48px primary height, physical press feedback. Destructive is outlined, never filled.</p>
+  <div class="btn-row">
+    <button class="btn btn-primary">Charge $42.80</button>
+    <button class="btn btn-secondary">Add Tip</button>
+    <button class="btn btn-destructive">Void Item</button>
+    <button class="btn btn-quiet">Cancel</button>
+  </div>
+</section>
+
+<section class="section" id="pos">
+  <span class="section-label">Section 4 · POS</span>
+  <h2 class="section-heading">POS Components</h2>
+  <p class="section-sub">Menu tiles, the check card, and KDS tickets — the three workhorses of service.</p>
+  <div class="pos-demo">
+    <div>
+      <div class="tile-grid">
+        <div class="tile selected"><div class="tile-name">Pad Thai</div><div class="tile-price">$16.50</div></div>
+        <div class="tile"><div class="tile-name">Green Curry</div><div class="tile-price">$17.00</div></div>
+        <div class="tile"><div class="tile-name">Drunken Noodles</div><div class="tile-price">$16.75</div></div>
+        <div class="tile"><div class="tile-name">Basil Stir Fry</div><div class="tile-price">$15.95</div></div>
+        <div class="tile eightysixed"><span class="badge-86">86</span><div class="tile-name">Crispy Duck</div><div class="tile-price">$24.00</div></div>
+        <div class="tile"><div class="tile-name">Tom Yum Soup</div><div class="tile-price">$9.50</div></div>
+      </div>
+      <div style="height:20px"></div>
+      <div class="kds-lane">
+        <div class="kds-ticket">
+          <div class="kds-head"><span>TABLE 6</span><span class="kds-time">2m</span></div>
+          <div class="kds-items"><div class="kds-item">2× Pad Thai</div><div class="kds-item">1× Tom Yum</div></div>
+          <button class="btn btn-primary kds-bump">Bump</button>
+        </div>
+        <div class="kds-ticket working">
+          <div class="kds-head"><span>TABLE 3</span><span class="kds-time">9m</span></div>
+          <div class="kds-items"><div class="kds-item">1× Green Curry</div><div class="kds-item">1× Fried Rice</div></div>
+          <button class="btn btn-primary kds-bump">Bump</button>
+        </div>
+        <div class="kds-ticket late">
+          <div class="kds-head"><span>TAKEOUT 41</span><span class="kds-time">18m</span></div>
+          <div class="kds-items"><div class="kds-item">3× Drunken Noodles</div></div>
+          <button class="btn btn-primary kds-bump">Bump</button>
+        </div>
+      </div>
+    </div>
+    <div class="check-card">
+      <div class="check-head"><strong>Table 12 · Seat 2</strong><span class="check-no">#1042</span></div>
+      <div class="check-line"><span class="check-qty">1</span><span class="check-item">Pad Thai<span class="check-mod">Chicken · Medium · No peanut</span></span><span class="check-price">$16.50</span></div>
+      <div class="check-line"><span class="check-qty">2</span><span class="check-item">Thai Iced Tea</span><span class="check-price">$9.00</span></div>
+      <div class="check-line voided"><span class="check-qty">1</span><span class="check-item">Spring Rolls <span class="chip red">Voided</span></span><span class="check-price">$8.50</span></div>
+      <div class="check-line"><span class="check-qty">1</span><span class="check-item">Green Curry<span class="check-mod">Tofu · Mild</span></span><span class="check-price">$17.00</span></div>
+      <div class="check-total"><span>Total</span><span>$46.27</span></div>
+      <div style="height:14px"></div>
+      <button class="btn btn-primary" style="width:100%">Charge $46.27</button>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="cards">
+  <span class="section-label">Section 4 · Console</span>
+  <h2 class="section-heading">Metric Cards</h2>
+  <p class="section-sub">The operator console shares the language: same ring borders, same status colors as delta text only.</p>
+  <div class="card-grid">
+    <div class="metric-card"><div class="metric-label">Yesterday Sales</div><div class="metric-value">$8,420</div><div class="metric-delta up">+3.2% vs forecast</div></div>
+    <div class="metric-card"><div class="metric-label">Food Cost</div><div class="metric-value">34.8%</div><div class="metric-delta down">+3.3 pts over target</div></div>
+    <div class="metric-card"><div class="metric-label">Labor Cost</div><div class="metric-value">29.0%</div><div class="metric-delta down">+3.0 pts over target</div></div>
+  </div>
+</section>
+
+<section class="section" id="spacing">
+  <span class="section-label">Section 5</span>
+  <h2 class="section-heading">Spacing System</h2>
+  <p class="section-sub">Base-8, deliberately dense: 4 · 8 · 12 · 16 · 24 · 32.</p>
+  <div class="space-row">
+    <div><div class="space-block" style="width:4px;height:4px"></div><div class="space-label">4</div></div>
+    <div><div class="space-block" style="width:8px;height:8px"></div><div class="space-label">8</div></div>
+    <div><div class="space-block" style="width:12px;height:12px"></div><div class="space-label">12</div></div>
+    <div><div class="space-block" style="width:16px;height:16px"></div><div class="space-label">16</div></div>
+    <div><div class="space-block" style="width:24px;height:24px"></div><div class="space-label">24</div></div>
+    <div><div class="space-block" style="width:32px;height:32px"></div><div class="space-label">32</div></div>
+  </div>
+</section>
+
+<section class="section">
+  <span class="section-label">Section 5</span>
+  <h2 class="section-heading">Border Radius</h2>
+  <p class="section-sub">Nothing below 8px — sharp corners read cold.</p>
+  <div class="radius-row">
+    <div class="radius-box" style="border-radius:8px">8 · inputs</div>
+    <div class="radius-box" style="border-radius:12px">12 · tiles</div>
+    <div class="radius-box" style="border-radius:16px">16 · cards</div>
+    <div class="radius-box" style="border-radius:9999px">pill · actions</div>
+  </div>
+</section>
+
+<section class="section" id="elevation">
+  <span class="section-label">Section 6</span>
+  <h2 class="section-heading">Depth &amp; Elevation</h2>
+  <p class="section-sub">Ring first, shadow second. Only modals get the big shadow.</p>
+  <div class="elev-row">
+    <div class="elev-box" style="box-shadow: var(--ring)">ring</div>
+    <div class="elev-box" style="box-shadow: var(--ring), var(--shadow-sm)">ring + sm</div>
+    <div class="elev-box" style="box-shadow: var(--shadow-lg)">lg · modals</div>
+  </div>
+</section>
+
+<footer class="footer">
+  RestaurantOS Design System — Day mode preview · Derived from the Wise design language, adapted for POS · Concept prototype, fictional demo data
+</footer>
+
+</body>
+</html>
