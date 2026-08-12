@@ -362,6 +362,9 @@ body.offline .net-banner{display:flex}
   background:var(--surface-2);color:var(--ink-2);border:1.5px solid transparent}
 .opt:active{transform:scale(.95)}
 .opt.on{background:var(--brand-wash);color:var(--ink);border-color:var(--brand)}
+.opt:disabled{opacity:.32;cursor:default}
+.opt:disabled:active{transform:none}
+.opt-big{min-height:46px;min-width:46px;font-size:15px}
 .opt .p{color:var(--ink-4);font-weight:550;font-size:12px}
 .qty-row{display:flex;align-items:center;gap:14px;margin:4px 0 12px}
 .qty-btn{width:46px;height:46px;border-radius:var(--r-pill);background:var(--surface-2);font-size:21px;font-weight:600}
@@ -614,6 +617,13 @@ body.offline .net-banner{display:flex}
   <div class="modal" style="width:min(460px,100%)">
     <div class="modal-head"><div><h3 id="moreTitle">More actions</h3><div class="sub" id="moreSub">Two are real, the rest are stubbed on purpose. Each is a real workflow, and which ones matter is the conversation to have.</div></div><button class="modal-x" data-close="ovMore">✕</button></div>
     <div class="modal-body" id="moreBody"></div>
+  </div>
+</div>
+
+<div class="overlay" id="ovCovers">
+  <div class="modal" style="width:min(420px,100%)">
+    <div class="modal-head"><div><h3 id="covTitle">Party size</h3><div class="sub" id="covSub"></div></div><button class="modal-x" data-close="ovCovers">✕</button></div>
+    <div class="modal-body" id="covBody"></div>
   </div>
 </div>
 
@@ -938,7 +948,7 @@ function renderConfig(){
   const d=state.draft, it=d.item;
   let html=`<div class="qty-row"><button class="qty-btn" id="qMinus">−</button><span class="qty-val num" id="qVal">${d.qty}</span><button class="qty-btn" id="qPlus">+</button>
     <span style="flex:1"></span><span style="font-size:13px;color:var(--ink-3)">Seat</span>
-    <div class="opt-row">${Array.from({length:cur().table.seats},(_,i)=>i+1).map(s=>
+    <div class="opt-row">${Array.from({length:cur().covers},(_,i)=>i+1).map(s=>
       `<button class="opt ${d.seat===s?"on":""}" data-seat="${s}" style="min-width:44px">${s}</button>`).join("")}</div></div>`;
   html+=it.opts.map(gid=>{
     const g=OG[gid]; const picked=d.picks[gid];
@@ -1005,18 +1015,50 @@ $("#btnSwitch").addEventListener("click",()=>{
 });
 $("#switchTables").addEventListener("click",()=>{ closeOv("ovSwitch"); go("tables"); });
 
-const MORE_STUBS=["Reprint check","Merge checks","Guest count","Course / fire timing","Manager functions","Cash drawer","Clock out"];
+const MORE_STUBS=["Reprint check","Merge checks","Course / fire timing","Manager functions","Cash drawer","Clock out"];
+
+/* Party size (covers) stays editable after seating: two join the table,
+   one leaves. Guest count drives per-cover reporting and, in the real
+   product, auto-gratuity thresholds, so the change is audited like any
+   other check edit. Covers cannot drop below a seat that has items:
+   move or void those first. */
+function openCovers(orderId){
+  const o=state.orders[orderId]; if(!o) return;
+  ["ovMore","ovTable","ovSwitch"].forEach(closeOv);
+  const topSeat=o.lines.filter(l=>l.state!=="voided").reduce((m,l)=>Math.max(m,l.seat),0);
+  $("#covTitle").textContent="Party size · "+o.table.name;
+  $("#covSub").textContent="Check #"+o.checkNo+" · currently "+o.covers+" cover"+(o.covers===1?"":"s");
+  $("#covBody").innerHTML=
+    `<div class="opt-row" style="margin-bottom:12px">`+
+      Array.from({length:12},(_,i)=>i+1).map(n=>
+        `<button class="opt opt-big ${o.covers===n?"on":""}" data-cov="${n}"${n<topSeat?" disabled":""}>${n}</button>`).join("")+
+    `</div>`+
+    (topSeat>1?`<div class="m-callout">Seats 1 to ${topSeat} have items ordered, so the party cannot shrink below ${topSeat}. Move or void those items first.</div>`:"")+
+    `<div class="m-callout" style="background:var(--surface-2);border-color:var(--line)">Table seats ${o.table.seats}. A larger party is allowed here (tables get pushed together), and parties of 6 or more commonly trigger auto-gratuity. That rule is not modeled in this prototype: it is a question for the operator.</div>`;
+  document.querySelectorAll("[data-cov]").forEach(b=>b.addEventListener("click",()=>{
+    const n=+b.dataset.cov, was=o.covers;
+    if(n===was){ closeOv("ovCovers"); return; }
+    o.covers=n;
+    log(o,"Party size changed",was+" → "+n+" covers");
+    closeOv("ovCovers");
+    renderCheck(); if(state.screen==="tables") renderFloor();
+    toast(o.table.name+": party of "+n,"good");
+  }));
+  openOv("ovCovers");
+}
 function renderMore(){
   const o=cur();
   const emptyOk = o && !o.lines.length && !o.payments.length;
   $("#moreTitle").textContent="More actions";
   $("#moreSub").textContent="Two are real, the rest are stubbed on purpose. Each is a real workflow, and which ones matter is the conversation to have.";
   $("#moreBody").innerHTML=
+    `<button class="mrow live" id="moreCovers" ${o?"":"disabled"}><span>Guest count</span><span class="mnote">${o?o.covers+" covers ›":"Works"}</span></button>`+
     `<button class="mrow live" id="moreTransfer" ${o?"":"disabled"}><span>Transfer to another table</span><span class="mnote">Works</span></button>`+
     `<button class="mrow live" id="moreCancel" ${emptyOk?"":"disabled"}><span>Cancel this check</span><span class="mnote">${emptyOk?"Works":"empty checks only"}</span></button>`+
     MORE_STUBS.map(s=>`<button class="mrow" data-stub="${esc(s)}"><span>${esc(s)}</span><span class="mnote">Not built</span></button>`).join("")+
     `<div class="m-callout">Which of these does the operator touch <b>every shift</b>, and which are once a month? That answer decides what a real V1 has to include.</div>`;
   document.querySelectorAll("[data-stub]").forEach(b=>b.addEventListener("click",()=>toast(b.dataset.stub+" isn't in this prototype yet")));
+  const cv=$("#moreCovers"); if(cv&&o) cv.addEventListener("click",()=>openCovers(o.id));
   const tr=$("#moreTransfer"); if(tr&&o) tr.addEventListener("click",renderTransfer);
   const cx=$("#moreCancel"); if(cx&&emptyOk) cx.addEventListener("click",()=>{
     delete state.orders[o.id]; state.currentId=null;
@@ -1187,7 +1229,8 @@ function renderFloor(){
   const tbls=TABLES.filter(t=>t.sec===state.section).map(t=>{
     const st=tableStatus(t); const o=state.orders[t.id];
     const short=t.name.replace("Table ","T").replace("Terrazza ","T").replace("Bar ","B");
-    const dots=`<span class="seat-dots">${Array.from({length:t.seats},(_,i)=>
+    const dotN=Math.max(t.seats, o?o.covers:0);
+    const dots=`<span class="seat-dots">${Array.from({length:dotN},(_,i)=>
       `<span class="seat-dot ${o&&i<o.covers?"occupied":""}"></span>`).join("")}</span>`;
     return `<button class="tblf ${st.cls} ${t.shape} ${state.currentId===t.id?"cur":""}" data-tbl="${t.id}"
       style="left:${t.x}%;top:${t.y}%;width:${t.w}%;height:${t.h}%" title="${esc(t.name)} · ${esc(st.label)}">
@@ -1219,11 +1262,16 @@ function openTable(id){
       toast(t.name+" seated, check #"+state.orders[id].checkNo);
     }));
   } else {
+    const settled=orderPaid(o)>=orderTotal(o)-0.005;
     $("#tblModalSub").textContent="Check #"+o.checkNo+" · "+o.covers+" covers · due "+money(Math.max(0,orderTotal(o)-orderPaid(o)));
-    $("#tblModalBody").innerHTML=`<div style="display:flex;flex-direction:column;gap:10px;padding:6px 0 4px">
-      <button class="btn btn-primary" id="tblOpenCheck">Open check</button>
-      <button class="btn btn-secondary" id="tblCloseOut" ${orderPaid(o)>=orderTotal(o)-0.005?"":"disabled"} style="${orderPaid(o)>=orderTotal(o)-0.005?"":"opacity:.5"}">Clear table (paid)</button></div>`;
+    $("#tblModalBody").innerHTML=`<div style="padding:6px 0 4px">
+      <button class="btn btn-primary" id="tblOpenCheck" style="width:100%;margin-bottom:10px">Open check ▸</button>
+      <button class="mrow" id="tblCovers"><span>Party size</span><span class="mnote">${o.covers} covers ›</span></button>
+      <button class="mrow" id="tblTransfer"><span>Transfer table</span><span class="mnote">›</span></button>
+      <button class="btn btn-secondary" id="tblCloseOut" style="width:100%;margin-top:4px${settled?"":";opacity:.5"}" ${settled?"":"disabled"}>Clear table (paid)</button></div>`;
     $("#tblOpenCheck").addEventListener("click",()=>{ state.currentId=id; closeOv("ovTable"); go("service"); renderCheck(); });
+    $("#tblCovers").addEventListener("click",()=>openCovers(id));
+    $("#tblTransfer").addEventListener("click",()=>{ state.currentId=id; closeOv("ovTable"); renderCheck(); renderTransfer(); openOv("ovMore"); });
     $("#tblCloseOut").addEventListener("click",()=>{ delete state.orders[id]; if(state.currentId===id) state.currentId=null;
       closeOv("ovTable"); renderFloor(); renderBadges(); toast(t.name+" cleared"); });
   }
