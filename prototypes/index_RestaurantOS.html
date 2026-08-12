@@ -65,18 +65,22 @@
 *{margin:0;padding:0;box-sizing:border-box}
 html,body{height:100%}
 body{background:var(--bg);color:var(--ink);font-family:var(--font);font-size:15px;line-height:1.45;
-  -webkit-font-smoothing:antialiased;overflow:hidden;user-select:none;-webkit-user-select:none}
+  -webkit-font-smoothing:antialiased;overflow:hidden;user-select:none;-webkit-user-select:none;
+  transition:background-color .25s ease,color .25s ease}
 button{font-family:var(--font);cursor:pointer;color:inherit;background:none;border:none}
+button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 .num{font-variant-numeric:tabular-nums}
 
 .app{display:grid;grid-template-columns:var(--rail) 1fr;grid-template-rows:var(--topbar) 1fr;height:100%}
 
 /* Rail */
-.rail{grid-row:1/3;background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;padding:12px 0 14px;gap:6px}
+.rail{grid-row:1/3;background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;padding:12px 0 14px;gap:6px;
+  transition:background-color .25s ease,border-color .25s ease}
 .rail-logo{width:40px;height:40px;border-radius:var(--r-pill);background:var(--brand);color:var(--brand-ink);
   display:flex;align-items:center;justify-content:center;font-weight:800;font-size:18px;margin-bottom:14px}
 .nav-btn{width:66px;min-height:58px;border-radius:var(--r-tile);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
-  color:var(--ink-3);font-size:11px;font-weight:600;position:relative;transition:background .12s}
+  color:var(--ink-3);font-size:11px;font-weight:600;position:relative;transition:background .15s ease,color .15s ease}
 .nav-btn .glyph{font-size:19px;line-height:1}
 .nav-btn:active{transform:scale(.96)}
 .nav-btn.active{background:var(--brand-wash);color:var(--ink)}
@@ -87,14 +91,15 @@ button{font-family:var(--font);cursor:pointer;color:inherit;background:none;bord
 .rail-foot{font-size:10px;color:var(--ink-4);text-align:center;padding:0 8px;line-height:1.35}
 
 /* Topbar */
-.topbar{display:flex;align-items:center;gap:14px;background:var(--panel);border-bottom:1px solid var(--line);padding:0 18px}
+.topbar{display:flex;align-items:center;gap:14px;background:var(--panel);border-bottom:1px solid var(--line);padding:0 18px;
+  transition:background-color .25s ease,border-color .25s ease}
 .venue{font-weight:700;font-size:16px;white-space:nowrap}
 .venue small{display:block;font-size:10.5px;font-weight:600;color:var(--ink-4);letter-spacing:.05em;text-transform:uppercase}
 .badge-proto{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--amber);
   background:var(--amber-wash);border:1px solid var(--amber-line);border-radius:var(--r-pill);padding:3px 10px;white-space:nowrap}
 .top-meta{display:flex;gap:8px;align-items:center;margin-left:auto}
 .pill{display:flex;align-items:center;gap:6px;background:var(--surface-2);border-radius:var(--r-pill);
-  padding:6px 12px;font-size:12.5px;font-weight:600;color:var(--ink-2);white-space:nowrap}
+  padding:6px 12px;font-size:12.5px;font-weight:600;color:var(--ink-2);white-space:nowrap;transition:background-color .25s ease}
 .pill b{color:var(--ink)}
 .icon-btn{min-width:var(--tap);min-height:38px;border-radius:var(--r-pill);background:var(--surface-2);
   display:flex;align-items:center;justify-content:center;gap:6px;font-size:15px;padding:0 12px;font-weight:600;transition:background .12s}
@@ -129,7 +134,7 @@ body.offline .net-banner{display:flex}
 .menu-area{flex:1;overflow-y:auto;padding:14px}
 .tile-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
 .tile{background:var(--surface);border-radius:var(--r-tile);box-shadow:var(--ring);min-height:82px;padding:11px 13px;
-  display:flex;flex-direction:column;justify-content:space-between;text-align:left;transition:transform .1s,box-shadow .12s;position:relative}
+  display:flex;flex-direction:column;justify-content:space-between;text-align:left;transition:transform .1s,box-shadow .12s,background-color .2s ease;position:relative}
 .tile:active{transform:scale(.96)}
 .tile-name{display:block;font-size:14.5px;font-weight:600;line-height:1.25}
 .tile-sub{display:block;font-size:11px;color:var(--ink-4);font-weight:550;margin-top:2px}
@@ -141,7 +146,8 @@ body.offline .net-banner{display:flex}
 .tile.t86 .low{color:var(--red);background:var(--red-wash);border-color:var(--red-line)}
 
 /* Check panel */
-.check{width:var(--check-w);flex-shrink:0;background:var(--panel);border-left:1px solid var(--line);display:flex;flex-direction:column;overflow:hidden}
+.check{width:var(--check-w);flex-shrink:0;background:var(--panel);border-left:1px solid var(--line);display:flex;flex-direction:column;overflow:hidden;
+  transition:background-color .25s ease,border-color .25s ease}
 .check-handle{display:none}
 .check-top{padding:14px 16px 10px;border-bottom:1px solid var(--line)}
 .check-title{display:flex;justify-content:space-between;align-items:center}
@@ -217,17 +223,17 @@ body.offline .net-banner{display:flex}
    ============================================================ */
 #screen-tables{flex-direction:column;overflow-y:auto;padding:16px 18px}
 .sec-tabs{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
-.sec-tab{min-height:38px;border-radius:var(--r-pill);padding:0 16px;font-size:13.5px;font-weight:600;background:var(--surface-2);color:var(--ink-2)}
+.sec-tab{min-height:38px;border-radius:var(--r-pill);padding:0 16px;font-size:13.5px;font-weight:600;background:var(--surface-2);color:var(--ink-2);transition:background-color .2s,color .2s}
 .sec-tab.active{background:var(--ink);color:var(--bg)}
 
 /* Spatial floor plan: tables sit where they sit in the room.
    Percent-positioned, so the same plan scales phone to terminal. */
 .room{position:relative;width:100%;aspect-ratio:16/8;max-height:560px;background:var(--surface);
-  border-radius:var(--r-card);box-shadow:var(--ring);overflow:hidden}
+  border-radius:var(--r-card);box-shadow:var(--ring);overflow:hidden;transition:background-color .25s ease}
 .deco{position:absolute;background:var(--surface-2);border-radius:10px;display:flex;align-items:center;justify-content:center;
   font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-4);pointer-events:none}
 .tblf{position:absolute;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;
-  border:2.5px solid;border-radius:14px;padding:2px;transition:transform .1s;min-width:0}
+  border:2.5px solid;border-radius:14px;padding:3px;transition:transform .1s,background-color .2s,border-color .2s;min-width:0}
 .tblf:active{transform:scale(.94)}
 .tblf.round{border-radius:50%}
 .tblf .tn{font-size:clamp(11px,1.5vw,15px);font-weight:700;line-height:1.1}
@@ -238,8 +244,18 @@ body.offline .net-banner{display:flex}
 .tblf.seated{border-color:var(--info);background:var(--info-wash)}
 .tblf.entrees{border-color:var(--amber);background:var(--amber-wash)}
 .tblf.checkreq{border-color:var(--green);background:var(--green-wash)}
-.tblf.late{border-color:var(--red);background:var(--red-wash)}
+.tblf.late{border-color:var(--red);background:var(--red-wash);animation:latePulse 2s infinite}
 .tblf.cur{box-shadow:0 0 0 3px var(--brand)}
+
+/* Seat occupancy dots: capacity vs current party at a glance */
+.seat-dots{display:flex;gap:3px;margin-top:2px;align-items:center;justify-content:center;flex-wrap:wrap}
+.seat-dot{width:5px;height:5px;border-radius:50%;background:var(--ink-4);opacity:.35}
+.seat-dot.occupied{background:currentColor;opacity:1}
+
+@keyframes latePulse{
+  0%,100%{box-shadow:var(--ring),0 0 0 0 var(--red-line)}
+  50%{box-shadow:var(--ring),0 0 0 6px transparent}
+}
 .legend{display:flex;gap:16px;flex-wrap:wrap;align-items:center;margin:12px 2px 4px;font-size:12px;color:var(--ink-3)}
 .lg{display:flex;align-items:center;gap:6px;font-weight:600}
 .lg .sw{width:13px;height:13px;border-radius:4px;border:2px solid}
@@ -265,10 +281,10 @@ body.offline .net-banner{display:flex}
 /* One card per table; dispatches stack inside it in fire order */
 .kds-flow{flex:1;display:flex;gap:12px;overflow-x:auto;align-items:flex-start;padding-bottom:10px}
 .ticket{background:var(--surface);border-radius:var(--r-card);box-shadow:var(--ring);min-width:252px;max-width:284px;overflow:hidden;
-  border-top:4px solid var(--info);flex-shrink:0}
+  border-top:4px solid var(--info);flex-shrink:0;transition:background-color .25s ease}
 .ticket.working{border-top-color:var(--amber)}
 .ticket.ready{border-top-color:var(--green)}
-.ticket.late{border-top-color:var(--red)}
+.ticket.late{border-top-color:var(--red);animation:latePulse 2s infinite}
 .tk-head{display:flex;justify-content:space-between;align-items:center;padding:9px 13px;background:var(--info-wash);
   font-family:var(--mono);font-size:12.5px;font-weight:700}
 .ticket.working .tk-head{background:var(--amber-wash)}
@@ -305,7 +321,7 @@ body.offline .net-banner{display:flex}
 .ins-head h2{font-size:23px;font-weight:800;letter-spacing:-.01em}
 .ins-head p{color:var(--ink-3);font-size:13.5px}
 .metric-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:18px}
-.metric{background:var(--surface);border-radius:var(--r-card);box-shadow:var(--ring);padding:14px 16px}
+.metric{background:var(--surface);border-radius:var(--r-card);box-shadow:var(--ring);padding:14px 16px;transition:background-color .25s ease}
 .m-label{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3)}
 .m-value{font-size:26px;font-weight:800;margin-top:3px}
 .m-delta{font-size:12.5px;font-weight:600;margin-top:2px}
@@ -313,7 +329,7 @@ body.offline .net-banner{display:flex}
 .m-delta.down{color:var(--red)}
 .ins-section{font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);margin:6px 0 10px}
 .attn{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
-.attn-card{background:var(--surface);border-radius:var(--r-card);box-shadow:var(--ring);padding:15px 17px;text-align:left;transition:transform .1s}
+.attn-card{background:var(--surface);border-radius:var(--r-card);box-shadow:var(--ring);padding:15px 17px;text-align:left;transition:transform .1s,background-color .25s ease}
 .attn-card:active{transform:scale(.98)}
 .attn-card h4{font-size:15px;font-weight:700;display:flex;gap:8px;align-items:center;margin-bottom:5px}
 .attn-card p{font-size:13px;color:var(--ink-2);line-height:1.5}
@@ -326,7 +342,7 @@ body.offline .net-banner{display:flex}
 .overlay{position:fixed;inset:0;background:var(--overlay);display:none;align-items:center;justify-content:center;z-index:200;padding:18px}
 .overlay.open{display:flex}
 .modal{background:var(--surface);border-radius:var(--r-card);box-shadow:var(--shadow-lg);width:min(560px,100%);
-  max-height:min(88vh,760px);display:flex;flex-direction:column;animation:pop .16s ease-out}
+  max-height:min(88vh,760px);display:flex;flex-direction:column;animation:pop .16s ease-out;transition:background-color .25s ease}
 @keyframes pop{from{transform:scale(.97);opacity:.6}to{transform:scale(1);opacity:1}}
 .modal-head{display:flex;justify-content:space-between;align-items:center;padding:16px 20px 12px}
 .modal-head h3{font-size:19px;font-weight:700}
@@ -372,7 +388,7 @@ body.offline .net-banner{display:flex}
 .pin-dot.on{background:var(--ink)}
 
 .drawer{position:fixed;top:0;right:0;bottom:0;width:min(400px,92vw);background:var(--panel);box-shadow:var(--shadow-lg);
-  z-index:210;transform:translateX(105%);transition:transform .2s ease-out;display:flex;flex-direction:column}
+  z-index:210;transform:translateX(105%);transition:transform .2s ease-out,background-color .25s ease;display:flex;flex-direction:column}
 .drawer.open{transform:none}
 .tl-list{flex:1;overflow-y:auto;padding:6px 20px 20px}
 .tl-item{display:flex;gap:12px;padding:10px 0;border-bottom:1px solid var(--line-subtle);font-size:13px}
@@ -1171,10 +1187,13 @@ function renderFloor(){
   const tbls=TABLES.filter(t=>t.sec===state.section).map(t=>{
     const st=tableStatus(t); const o=state.orders[t.id];
     const short=t.name.replace("Table ","T").replace("Terrazza ","T").replace("Bar ","B");
+    const dots=`<span class="seat-dots">${Array.from({length:t.seats},(_,i)=>
+      `<span class="seat-dot ${o&&i<o.covers?"occupied":""}"></span>`).join("")}</span>`;
     return `<button class="tblf ${st.cls} ${t.shape} ${state.currentId===t.id?"cur":""}" data-tbl="${t.id}"
       style="left:${t.x}%;top:${t.y}%;width:${t.w}%;height:${t.h}%" title="${esc(t.name)} · ${esc(st.label)}">
       <span class="tn">${esc(short)}</span>
       <span class="tm">${o?o.covers+" cov":t.seats+" seats"}</span>
+      ${dots}
       ${o?`<span class="tt">${ago(o.opened)} · ${money(orderTotal(o))}</span>`:""}</button>`;
   }).join("");
   $("#floor").innerHTML = `<div class="room">${deco}${tbls}</div>`+
