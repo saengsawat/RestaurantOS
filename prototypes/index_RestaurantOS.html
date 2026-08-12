@@ -131,8 +131,8 @@ body.offline .net-banner{display:flex}
 .tile{background:var(--surface);border-radius:var(--r-tile);box-shadow:var(--ring);min-height:82px;padding:11px 13px;
   display:flex;flex-direction:column;justify-content:space-between;text-align:left;transition:transform .1s,box-shadow .12s;position:relative}
 .tile:active{transform:scale(.96)}
-.tile-name{font-size:14.5px;font-weight:600;line-height:1.25}
-.tile-sub{font-size:11px;color:var(--ink-4);font-weight:550;margin-top:2px}
+.tile-name{display:block;font-size:14.5px;font-weight:600;line-height:1.25}
+.tile-sub{display:block;font-size:11px;color:var(--ink-4);font-weight:550;margin-top:2px}
 .tile-price{font-size:13.5px;color:var(--ink-3);font-weight:600}
 .tile .low{position:absolute;top:8px;right:8px;font-size:10px;font-weight:700;color:var(--amber);
   background:var(--amber-wash);border:1px solid var(--amber-line);border-radius:var(--r-pill);padding:1px 7px}
@@ -143,8 +143,11 @@ body.offline .net-banner{display:flex}
 /* Check panel */
 .check{width:var(--check-w);flex-shrink:0;background:var(--panel);border-left:1px solid var(--line);display:flex;flex-direction:column}
 .check-top{padding:14px 16px 10px;border-bottom:1px solid var(--line)}
-.check-title{display:flex;justify-content:space-between;align-items:baseline}
-.check-title b{font-size:16.5px}
+.check-title{display:flex;justify-content:space-between;align-items:center}
+.where-btn{display:flex;align-items:center;gap:7px;font-size:16.5px;font-weight:700;min-height:38px;
+  border-radius:var(--r-pill);padding:4px 12px 4px 10px;margin-left:-10px;transition:background .12s}
+.where-btn .car{font-size:11px;color:var(--ink-3)}
+.where-btn:active{transform:scale(.97);background:var(--surface-2)}
 .check-no{font-family:var(--mono);font-size:12px;color:var(--ink-3)}
 .check-tags{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
 .tag-btn{font-size:12px;font-weight:600;border-radius:var(--r-pill);padding:5px 11px;background:var(--surface-2);color:var(--ink-2);min-height:30px}
@@ -186,7 +189,19 @@ body.offline .net-banner{display:flex}
 .act-btn{min-height:var(--tap);border-radius:var(--r-tile);background:var(--surface-2);font-size:12.5px;font-weight:600;color:var(--ink-2)}
 .act-btn:active{transform:scale(.95)}
 .act-btn.danger{color:var(--red)}
-.check-pay{padding:8px 16px calc(14px + var(--safe-b))}
+.check-pay{padding:8px 16px calc(14px + var(--safe-b));display:flex;gap:8px}
+.check-pay .btn-secondary{flex:1}
+.check-pay .btn-primary{flex:1.5;width:auto}
+
+/* More-actions + switch lists */
+.mrow{display:flex;justify-content:space-between;align-items:center;width:100%;min-height:46px;
+  background:var(--surface-2);border-radius:var(--r-tile);padding:10px 14px;font-size:14px;font-weight:600;margin-bottom:8px;text-align:left}
+.mrow:active{transform:scale(.98)}
+.mrow .mnote{font-size:12px;font-weight:550;color:var(--ink-4)}
+.mrow.live .mnote{color:var(--green)}
+.mrow:disabled{opacity:.45;cursor:default}
+.m-callout{background:var(--brand-wash);border:1px solid var(--brand);border-radius:var(--r-tile);
+  padding:11px 14px;font-size:13px;color:var(--ink-2);line-height:1.5;margin-top:6px}
 .btn{min-height:48px;border-radius:var(--r-pill);font-size:16px;font-weight:600;padding:0 24px;transition:transform .1s,background .12s;
   display:inline-flex;align-items:center;justify-content:center;gap:8px}
 .btn:active{transform:scale(.97)}
@@ -248,6 +263,9 @@ body.offline .net-banner{display:flex}
   border-radius:var(--r-pill);padding:1px 6px;vertical-align:2px;margin-left:5px}
 .tk-actions{display:flex;gap:8px;padding:4px 12px 12px}
 .tk-actions .btn{min-height:40px;font-size:14px;flex:1;padding:0 10px}
+.tk-actions .tk-back{flex:0 0 46px;background:var(--surface-2);color:var(--ink-2);font-size:16px}
+.ticket.served{opacity:.55;border-top-color:var(--line)}
+.ticket.served .tk-head{background:var(--surface-2)}
 
 /* ============================================================
    6. INSIGHTS SCREEN — the differentiator, teased
@@ -399,7 +417,7 @@ body.offline .net-banner{display:flex}
         <div class="menu-area"><div class="tile-grid" id="tileGrid"></div></div>
         <aside class="check">
           <div class="check-top">
-            <div class="check-title"><b id="checkWhere">Table 14</b><span class="check-no" id="checkNo">#2041</span></div>
+            <div class="check-title"><button class="where-btn" id="btnSwitch" title="Switch check"><span id="checkWhere">Table 14</span><span class="car">▼</span></button><span class="check-no" id="checkNo">#2041</span></div>
             <div class="check-tags" id="checkTags"></div>
           </div>
           <div class="check-body" id="checkBody"></div>
@@ -408,9 +426,9 @@ body.offline .net-banner{display:flex}
             <button class="act-btn" id="btnDiscount">Discount</button>
             <button class="act-btn danger" id="btnVoid">Void</button>
             <button class="act-btn" id="btnTimeline">History</button>
-            <button class="act-btn" id="btnSend">Send ▸</button>
+            <button class="act-btn" id="btnMore">More ⋯</button>
           </div>
-          <div class="check-pay"><button class="btn btn-primary" id="btnPay">Pay</button></div>
+          <div class="check-pay"><button class="btn btn-secondary" id="btnSend">Send ▸</button><button class="btn btn-primary" id="btnPay">Pay</button></div>
         </aside>
       </section>
 
@@ -485,6 +503,21 @@ body.offline .net-banner{display:flex}
     <div class="modal-head"><div><h3>Payment</h3><div class="sub" id="paySub">Check #2041</div></div><button class="modal-x" data-close="ovPay">✕</button></div>
     <div class="modal-body" id="payBody"></div>
     <div class="modal-foot" id="payFoot"></div>
+  </div>
+</div>
+
+<div class="overlay" id="ovSwitch">
+  <div class="modal" style="width:min(420px,100%)">
+    <div class="modal-head"><div><h3>Switch check</h3><div class="sub">Jump to any open check</div></div><button class="modal-x" data-close="ovSwitch">✕</button></div>
+    <div class="modal-body" id="switchBody"></div>
+    <div class="modal-foot"><button class="btn btn-secondary" id="switchTables">Seat a new table ▸</button></div>
+  </div>
+</div>
+
+<div class="overlay" id="ovMore">
+  <div class="modal" style="width:min(460px,100%)">
+    <div class="modal-head"><div><h3 id="moreTitle">More actions</h3><div class="sub" id="moreSub">Two are real — the rest are stubbed on purpose. Each is a real workflow, and which ones matter is the conversation to have.</div></div><button class="modal-x" data-close="ovMore">✕</button></div>
+    <div class="modal-body" id="moreBody"></div>
   </div>
 </div>
 
@@ -843,6 +876,63 @@ $("#cfgAdd").addEventListener("click",()=>{
   if(d.item.course==="BEVERAGE") sendCourse(o,"BEVERAGE",false);
 });
 /* ============================================================
+   7b. SWITCH CHECK + MORE ACTIONS (incl. real table transfer)
+   A server on the wrong table has two outs: switch to the right
+   check (btnSwitch), or transfer this check to the right table.
+   ============================================================ */
+$("#btnSwitch").addEventListener("click",()=>{
+  const opens=Object.values(state.orders);
+  $("#switchBody").innerHTML = opens.length? opens.map(o=>{
+    const isCur=o.id===state.currentId;
+    return `<button class="mrow ${isCur?"live":""}" data-sw="${o.id}">
+      <span>${esc(o.table.name)} <span style="color:var(--ink-4);font-weight:550">#${o.checkNo} · ${o.covers} covers</span></span>
+      <span class="mnote num">${isCur?"current":money(Math.max(0,orderTotal(o)-orderPaid(o)))+" due"}</span></button>`;
+  }).join("") : `<div class="empty-check">No open checks. Seat a table to start.</div>`;
+  document.querySelectorAll("[data-sw]").forEach(b=>b.addEventListener("click",()=>{
+    state.currentId=b.dataset.sw; closeOv("ovSwitch"); renderCheck();
+  }));
+  openOv("ovSwitch");
+});
+$("#switchTables").addEventListener("click",()=>{ closeOv("ovSwitch"); go("tables"); });
+
+const MORE_STUBS=["Reprint check","Merge checks","Guest count","Course / fire timing","Manager functions","Cash drawer","Clock out"];
+function renderMore(){
+  const o=cur();
+  const emptyOk = o && !o.lines.length && !o.payments.length;
+  $("#moreTitle").textContent="More actions";
+  $("#moreSub").textContent="Two are real — the rest are stubbed on purpose. Each is a real workflow, and which ones matter is the conversation to have.";
+  $("#moreBody").innerHTML=
+    `<button class="mrow live" id="moreTransfer" ${o?"":"disabled"}><span>Transfer to another table</span><span class="mnote">Works</span></button>`+
+    `<button class="mrow live" id="moreCancel" ${emptyOk?"":"disabled"}><span>Cancel this check</span><span class="mnote">${emptyOk?"Works":"empty checks only"}</span></button>`+
+    MORE_STUBS.map(s=>`<button class="mrow" data-stub="${esc(s)}"><span>${esc(s)}</span><span class="mnote">Not built</span></button>`).join("")+
+    `<div class="m-callout">Which of these does the operator touch <b>every shift</b>, and which are once a month? That answer decides what a real V1 has to include.</div>`;
+  document.querySelectorAll("[data-stub]").forEach(b=>b.addEventListener("click",()=>toast(b.dataset.stub+" isn't in this prototype yet")));
+  const tr=$("#moreTransfer"); if(tr&&o) tr.addEventListener("click",renderTransfer);
+  const cx=$("#moreCancel"); if(cx&&emptyOk) cx.addEventListener("click",()=>{
+    delete state.orders[o.id]; state.currentId=null;
+    closeOv("ovMore"); renderCheck(); renderBadges(); toast("Check #"+o.checkNo+" cancelled — "+o.table.name+" reopened");
+  });
+}
+function renderTransfer(){
+  const o=cur(); if(!o) return;
+  const free=TABLES.filter(t=>!state.orders[t.id]);
+  $("#moreTitle").textContent="Transfer "+o.table.name;
+  $("#moreSub").textContent="Move check #"+o.checkNo+" to a free table. Audited.";
+  $("#moreBody").innerHTML = free.length? free.map(t=>
+    `<button class="mrow" data-tf="${t.id}"><span>${esc(t.name)}</span><span class="mnote">${esc(t.sec)} · ${t.seats} seats</span></button>`).join("")
+    :`<div class="empty-check">No free tables right now.</div>`;
+  document.querySelectorAll("[data-tf]").forEach(b=>b.addEventListener("click",()=>{
+    const t=TABLES.find(x=>x.id===b.dataset.tf); const from=o.table.name; const oldId=o.id;
+    delete state.orders[oldId];
+    o.id=t.id; o.table=t; state.orders[t.id]=o; state.currentId=t.id;
+    state.tickets.forEach(k=>{ if(k.orderId===oldId){ k.orderId=t.id; k.where=t.name; } });
+    log(o,"Check transferred",from+" → "+t.name);
+    closeOv("ovMore"); renderCheck(); toast("Check #"+o.checkNo+" moved: "+from+" → "+t.name,"good");
+  }));
+}
+$("#btnMore").addEventListener("click",()=>{ renderMore(); openOv("ovMore"); });
+
+/* ============================================================
    8. FIRING — courses become kitchen tickets
    Dispatches are immutable: once sent, a line can only be
    voided (with reason + approval), never silently edited.
@@ -876,30 +966,39 @@ $("#btnSend").addEventListener("click",()=>{
    9. KITCHEN (KDS)
    ============================================================ */
 function ticketMin(t){ return Math.round((Date.now()-t.placed)/60000); }
+/* Every step is reversible: Start/Ready have a ↩ back-step, and a
+   served ticket stays recallable for 10 minutes before it purges.
+   Fat fingers happen on the line — no state is one tap from gone. */
 function renderKitchen(){
+  state.tickets=state.tickets.filter(t=>t.state!=="served" || Date.now()-t.servedAt<10*60000);
   $("#stationTabs").innerHTML = STATIONS.map(s=>
     `<button class="sec-tab ${state.station===s?"active":""}" data-st="${s}">${s==="ALL"?"All stations":s}</button>`).join("");
   document.querySelectorAll("[data-st]").forEach(b=>b.addEventListener("click",()=>{state.station=b.dataset.st; renderKitchen();}));
-  const list=state.tickets.filter(t=>state.station==="ALL"||t.items.some(i=>i.station===state.station));
+  const list=state.tickets.filter(t=>state.station==="ALL"||t.items.some(i=>i.station===state.station))
+    .slice().sort((a,b)=>(a.state==="served")-(b.state==="served"));
   $("#kdsFlow").innerHTML = list.length? list.map(t=>{
     const m=ticketMin(t);
-    const late = t.state!=="ready" && m>=LATE_MIN;
-    const cls = late?"late":(t.state==="working"?"working":(t.state==="ready"?"ready":""));
+    const late = t.state!=="ready" && t.state!=="served" && m>=LATE_MIN;
+    const cls = t.state==="served"?"served":late?"late":(t.state==="working"?"working":(t.state==="ready"?"ready":""));
+    const back = t.state==="working"?`<button class="btn tk-back" data-tk="${t.id}" data-adv="new" title="Back to new">↩</button>`:
+                 t.state==="ready"?`<button class="btn tk-back" data-tk="${t.id}" data-adv="working" title="Back to cooking">↩</button>`:"";
     const action = t.state==="new"?`<button class="btn btn-secondary" data-tk="${t.id}" data-adv="working">Start</button>`:
                    t.state==="working"?`<button class="btn btn-primary" data-tk="${t.id}" data-adv="ready">Ready</button>`:
-                   `<button class="btn btn-primary" data-tk="${t.id}" data-adv="served">Serve ✓</button>`;
+                   t.state==="ready"?`<button class="btn btn-primary" data-tk="${t.id}" data-adv="served">Serve ✓</button>`:
+                   `<button class="btn btn-secondary" data-tk="${t.id}" data-adv="ready">Recall ↩</button>`;
     return `<div class="ticket ${cls}">
-      <div class="tk-head"><span>${esc(t.where.toUpperCase())} · ${t.id}</span><span class="tk-time num">${m}m</span></div>
-      <div class="tk-course">${esc(COURSE_LABEL[t.course]||t.course)}${late?' · <span style="color:var(--red)">LATE</span>':""}</div>
+      <div class="tk-head"><span>${esc(t.where.toUpperCase())} · ${t.id}</span><span class="tk-time num">${t.state==="served"?"served":m+"m"}</span></div>
+      <div class="tk-course">${esc(COURSE_LABEL[t.course]||t.course)}${late?' · <span style="color:var(--red)">LATE</span>':""}${t.state==="served"?' · recallable 10 min':""}</div>
       <div class="tk-items">${t.items.map(i=>`<div class="tk-item">${i.qty}× ${esc(i.name)}<span class="tk-station">${esc(i.station)}</span>
         ${i.mods?`<small>${esc(i.mods)}</small>`:""}${i.note?`<small>✎ ${esc(i.note)}</small>`:""}
         ${i.allergy?`<small class="allergy">⚠ ALLERGY — see modifiers</small>`:""}</div>`).join("")}</div>
-      <div class="tk-actions">${action}</div></div>`;
+      <div class="tk-actions">${back}${action}</div></div>`;
   }).join("") : `<div class="empty-check" style="width:100%"><div class="big">▤</div>No open tickets${state.station!=="ALL"?" for "+state.station:""}.</div>`;
   document.querySelectorAll("[data-adv]").forEach(b=>b.addEventListener("click",()=>{
     const t=state.tickets.find(x=>x.id===b.dataset.tk); if(!t) return;
-    if(b.dataset.adv==="served"){ state.tickets=state.tickets.filter(x=>x!==t); toast(t.id+" served"); }
-    else t.state=b.dataset.adv;
+    const to=b.dataset.adv;
+    if(to==="served"){ t.state="served"; t.servedAt=Date.now(); toast(t.id+" served — recallable for 10 min"); }
+    else { if(t.state==="served") toast(t.id+" recalled to Ready","warn"); t.state=to; delete t.servedAt; }
     renderKitchen(); renderBadges();
   }));
 }
@@ -910,7 +1009,7 @@ function renderKitchen(){
 function tableStatus(t){
   const o=state.orders[t.id];
   if(!o) return {cls:"open", label:"Open", meta:t.seats+" seats"};
-  if(state.tickets.some(k=>k.orderId===o.id && k.state!=="ready" && ticketMin(k)>=LATE_MIN))
+  if(state.tickets.some(k=>k.orderId===o.id && k.state!=="ready" && k.state!=="served" && ticketMin(k)>=LATE_MIN))
     return {cls:"late", label:"Kitchen late", meta:o.covers+" covers · "+ago(o.opened)};
   if(orderPaid(o)>0) return {cls:"checkreq", label:"Paying", meta:o.covers+" covers"};
   if(o.lines.some(l=>l.course==="SECONDI"&&l.state==="sent")) return {cls:"entrees", label:"Secondi fired", meta:o.covers+" covers"};
@@ -1140,7 +1239,7 @@ function renderInsights(){
 function renderBadges(){
   const n=Object.keys(state.orders).length;
   $("#badgeTables").textContent=n||"";
-  $("#badgeKitchen").textContent=state.tickets.length||"";
+  $("#badgeKitchen").textContent=state.tickets.filter(t=>t.state!=="served").length||"";
 }
 
 /* ============================================================
