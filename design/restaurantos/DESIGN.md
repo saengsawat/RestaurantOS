@@ -6,14 +6,14 @@ Derived from the **Wise** design language (`design-md/wise`), adapted for a rest
 
 ## 1. Visual Theme & Atmosphere
 
-RestaurantOS feels like **a well-run dining room five minutes before doors open**: warm, calm, and completely ready. The canvas is a warm off-white — closer to natural linen than to office paper — and the ink is a near-black with a faint green undertone, so even the darkest text feels organic rather than corporate. Against this warmth sits one deliberate jolt of energy: a fresh lime green, used only for the actions that move service forward.
+RestaurantOS feels like **a well-run dining room five minutes before doors open**: warm, calm, and completely ready. The canvas is a warm off-white, closer to natural linen than to office paper, and the ink is a near-black with a faint green undertone, so even the darkest text feels organic rather than corporate. Against this warmth sits one deliberate jolt of energy: a fresh lime green, used only for the actions that move service forward.
 
-The personality is **hospitality first, precision underneath**. Unlike enterprise dashboards that broadcast complexity, RestaurantOS hides its rigor: money is always tabular and exact, statuses are always unambiguous, but the surfaces stay soft — pill buttons, generously rounded cards, hairline ring borders instead of hard rules. A server should feel the interface is on their side; an owner should feel the numbers are trustworthy.
+The personality is **hospitality first, precision underneath**. Unlike enterprise dashboards that broadcast complexity, RestaurantOS hides its rigor: money is always tabular and exact, statuses are always unambiguous, but the surfaces stay soft, pill buttons, generously rounded cards, hairline ring borders instead of hard rules. A server should feel the interface is on their side; an owner should feel the numbers are trustworthy.
 
 There are two atmospheres, not one theme with an inverted afterthought:
 
-- **Day** — bright dining rooms, patios, counters. Warm off-white ground, ink text, saturated-dark status colors that survive sunlight.
-- **Night** — bars, kitchens, dim service. A warm near-black ground (never blue-black), brightened status colors, the same lime energy. Night is a first-class citizen because half of restaurant service happens in the dark.
+- **Day**, bright dining rooms, patios, counters. Warm off-white ground, ink text, saturated-dark status colors that survive sunlight.
+- **Night**, bars, kitchens, dim service. A warm near-black ground (never blue-black), brightened status colors, the same lime energy. Night is a first-class citizen because half of restaurant service happens in the dark.
 
 Color has a strict constitution: **lime means "go," status hues mean state, and nothing else in the chrome is colored.** That restraint is what makes a red "LATE" badge impossible to miss from four feet away.
 
@@ -23,7 +23,7 @@ Color has a strict constitution: **lime means "go," status hues mean state, and 
 
 | Token | Day | Night | Role |
 |---|---|---|---|
-| `--brand` | `#9fe870` | `#9fe870` | Primary action fill — pay, send, confirm. **Always a fill, never text.** |
+| `--brand` | `#9fe870` | `#9fe870` | Primary action fill, pay, send, confirm. **Always a fill, never text.** |
 | `--brand-ink` | `#163300` | `#163300` | The only text color allowed on a brand fill |
 | `--brand-hover` | `#8ddd5e` | `#b1f286` | Hover/active shift |
 | `--brand-wash` | `rgba(159,232,112,.18)` | `rgba(159,232,112,.14)` | Selected tile, active nav |
@@ -39,20 +39,20 @@ Color has a strict constitution: **lime means "go," status hues mean state, and 
 | `--ink` | `#0e0f0c` | `#f2f1ec` | Primary text |
 | `--ink-2` | `#3f423d` | `#c9cdc4` | Secondary / body |
 | `--ink-3` | `#5f635c` | `#9a9e94` | Tertiary / metadata |
-| `--ink-4` | `#787c74` | `#83877d` | Disabled — the AA floor, go no lighter |
+| `--ink-4` | `#787c74` | `#83877d` | Disabled, the AA floor, go no lighter |
 | `--line` | `rgba(14,15,12,.12)` | `rgba(242,241,236,.10)` | Hairline borders |
 | `--line-subtle` | `rgba(14,15,12,.06)` | `rgba(242,241,236,.05)` | Dividers inside cards |
 
-### Service status — the order-state system
+### Service status: the order-state system
 
 Four hues, one meaning each, everywhere in the product. Each ships as a triple: solid (text/icon), `-wash` (chip/row background), `-line` (chip/row border).
 
 | State | Meaning | Day solid | Night solid | Wash (Day) |
 |---|---|---|---|---|
-| `--info` | **New** — just placed, not yet fired | `#0a7ea4` | `#4cc3e8` | `rgba(10,126,164,.10)` |
-| `--amber` | **Working** — cooking, held, pending upload | `#a16207` | `#e3b341` | `rgba(161,98,7,.10)` |
-| `--green` | **Ready** — ready, served, paid, settled | `#116e3b` | `#34d399` | `rgba(17,110,59,.10)` |
-| `--red` | **Late** — overdue, voided, declined, 86'd | `#c22f35` | `#f0555a` | `rgba(194,47,53,.09)` |
+| `--info` | **New**, just placed, not yet fired | `#0a7ea4` | `#4cc3e8` | `rgba(10,126,164,.10)` |
+| `--amber` | **Working**, cooking, held, pending upload | `#a16207` | `#e3b341` | `rgba(161,98,7,.10)` |
+| `--green` | **Ready**, ready, served, paid, settled | `#116e3b` | `#34d399` | `rgba(17,110,59,.10)` |
+| `--red` | **Late**, overdue, voided, declined, 86'd | `#c22f35` | `#f0555a` | `rgba(194,47,53,.09)` |
 
 **The lime/green rule (resolves Wise's built-in collision):** brand lime `#9fe870` is exclusively a *fill with dark ink text* (a button you press); status green is exclusively *ink and line color* (a state you read). The lightness inversion keeps them unmistakable even side by side: a lime "Charge $42.80" button next to an emerald "PAID" chip never reads as the same signal. Never use lime for a status chip; never use status green as a button fill.
 
@@ -71,7 +71,7 @@ No other chromatic color enters the chrome. No purple, no orange, no teal decora
 --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
 ```
 
-Inter everywhere (free, variable). Wise's proprietary display face is dropped; its *weight strategy* is kept — RestaurantOS compensates with heavier weights, not a second typeface. Mono is reserved for check numbers, ticket IDs, and timestamps.
+Inter everywhere (free, variable). Wise's proprietary display face is dropped; its *weight strategy* is kept, RestaurantOS compensates with heavier weights, not a second typeface. Mono is reserved for check numbers, ticket IDs, and timestamps.
 
 ### Hierarchy
 
@@ -79,9 +79,9 @@ Inter everywhere (free, variable). Wise's proprietary display face is dropped; i
 |---|---|---|
 | Display | 32–40px / 800, line-height 1.05, tracking −0.02em | Screen titles, big totals on payment screen |
 | Heading | 20–24px / 700 | Card and modal titles |
-| UI label | 15–16px / **600** | Buttons, tiles, nav — the workhorse. Heavy on purpose: weight 600 at 15px survives glare and distance |
+| UI label | 15–16px / **600** | Buttons, tiles, nav, the workhorse. Heavy on purpose: weight 600 at 15px survives glare and distance |
 | Body | 15–16px / 450–500, line-height 1.5 | Descriptions, settings |
-| Meta | 12–13px / 550 | Timestamps, seat numbers, badges — never below 12px |
+| Meta | 12–13px / 550 | Timestamps, seat numbers, badges, never below 12px |
 
 ### Money
 
@@ -103,27 +103,27 @@ Check lines, totals, tips, splits, drawer counts, and every analytics metric ali
 
 ### Buttons
 
-- **Primary (service actions):** lime pill. `background: var(--brand); color: var(--brand-ink); border-radius: 9999px; min-height: 48px; padding: 0 24px; font: 600 16px var(--font);` Hover `--brand-hover`; press `transform: scale(0.97)` — physical feedback matters on glass.
+- **Primary (service actions):** lime pill. `background: var(--brand); color: var(--brand-ink); border-radius: 9999px; min-height: 48px; padding: 0 24px; font: 600 16px var(--font);` Hover `--brand-hover`; press `transform: scale(0.97)`, physical feedback matters on glass.
 - **Secondary:** `background: var(--surface-2); color: var(--ink);` same pill geometry.
-- **Destructive (void, comp, cancel):** outline style — `border: 1.5px solid var(--red); color: var(--red); background: transparent`. Destructive actions are never filled red; the confirmation modal is where red gets loud.
+- **Destructive (void, comp, cancel):** outline style, `border: 1.5px solid var(--red); color: var(--red); background: transparent`. Destructive actions are never filled red; the confirmation modal is where red gets loud.
 - **Quiet/tertiary:** ink text, no fill, underline on hover.
 - All buttons: minimum touch height **44px**, primary actions 48px.
 
 ### Menu tiles (POS grid)
 
-`background: var(--surface); border-radius: 12px; box-shadow: var(--ring); min-height: 72px; padding: 12px 14px;` Item name at UI-label weight, price in tabular numerals at `--ink-3`. Selected state: `--brand-wash` fill + 1.5px `--brand-ink`-toned border (Day) / lime border (Night). 86'd items: `--surface-2` fill, `--ink-4` text, small red `86` badge — never hidden, staff must see what's off.
+`background: var(--surface); border-radius: 12px; box-shadow: var(--ring); min-height: 72px; padding: 12px 14px;` Item name at UI-label weight, price in tabular numerals at `--ink-3`. Selected state: `--brand-wash` fill + 1.5px `--brand-ink`-toned border (Day) / lime border (Night). 86'd items: `--surface-2` fill, `--ink-4` text, small red `86` badge, never hidden, staff must see what's off.
 
 ### Status chips
 
-`border-radius: 9999px; padding: 3px 10px; font: 700 11px/1 var(--font); letter-spacing: .06em; text-transform: uppercase;` — wash background, line border, solid text of the state's triple. Chips are the single loudest element in any row; nothing else competes.
+`border-radius: 9999px; padding: 3px 10px; font: 700 11px/1 var(--font); letter-spacing: .06em; text-transform: uppercase;`, wash background, line border, solid text of the state's triple. Chips are the single loudest element in any row; nothing else competes.
 
 ### Check / order card
 
-White (Day) or `--surface` (Night) card, `border-radius: 16px`, ring shadow. Line items on `--line-subtle` dividers: quantity (mono), name, modifiers indented at `--ink-3` 13px, price right-aligned tabular. Voided lines: strikethrough + red chip, never deleted from view — the audit trail is visible by design. Totals block separated by a full `--line` rule; grand total at Display weight.
+White (Day) or `--surface` (Night) card, `border-radius: 16px`, ring shadow. Line items on `--line-subtle` dividers: quantity (mono), name, modifiers indented at `--ink-3` 13px, price right-aligned tabular. Voided lines: strikethrough + red chip, never deleted from view, the audit trail is visible by design. Totals block separated by a full `--line` rule; grand total at Display weight.
 
 ### KDS ticket
 
-A card whose **top border is the status**: 4px solid in the state color, wash-tinted header showing table/check (mono) and elapsed time. Elapsed time flips to `--red` solid at the late threshold. Items at 16px/600 — kitchen reading distance is farther than server reading distance. Bump action is a full-width lime pill at the card's bottom.
+A card whose **top border is the status**: 4px solid in the state color, wash-tinted header showing table/check (mono) and elapsed time. Elapsed time flips to `--red` solid at the late threshold. Items at 16px/600, kitchen reading distance is farther than server reading distance. Bump action is a full-width lime pill at the card's bottom.
 
 ### Modals
 
@@ -137,7 +137,7 @@ Header row 12px/650 uppercase `--ink-3`; data rows 15px with tabular numerals; r
 
 ### Spacing
 
-Base-8 scale, dense by design: `4, 8, 12, 16, 24, 32` px. Cards pad 16–20px; screen gutters 16px (terminal) / 24–32px (console). POS density is intentional — a server should reach any menu item in ≤2 taps, which means more tiles per screen, not more whitespace.
+Base-8 scale, dense by design: `4, 8, 12, 16, 24, 32` px. Cards pad 16–20px; screen gutters 16px (terminal) / 24–32px (console). POS density is intentional, a server should reach any menu item in ≤2 taps, which means more tiles per screen, not more whitespace.
 
 ### App shell
 
@@ -156,7 +156,7 @@ Menu tiles: responsive grid, `minmax(148px, 1fr)`, 8–12px gaps. KDS: horizonta
 | `--r-card` | 16px | Cards, modals, KDS tickets |
 | `--r-pill` | 9999px | All buttons, status chips, nav pills |
 
-Nothing below 8px — sharp corners read cold and enterprise.
+Nothing below 8px, sharp corners read cold and enterprise.
 
 ## 6. Depth & Elevation
 
@@ -168,7 +168,7 @@ Elevation is quiet: **ring first, shadow second.**
 --shadow-lg: 0 16px 40px rgba(14,15,12,.16);   /* modals only */
 ```
 
-Cards sit on the canvas with the ring alone. Hover adds `--shadow-sm`. Only modals and the bottom sheet use `--shadow-lg`. In Night mode elevation also steps surface luminance (`--panel` → `--surface` → `--surface-2`), since shadows die on dark grounds. No glassmorphism, no gradients in chrome — the single permitted gradient is a faint brand-wash radial behind empty states.
+Cards sit on the canvas with the ring alone. Hover adds `--shadow-sm`. Only modals and the bottom sheet use `--shadow-lg`. In Night mode elevation also steps surface luminance (`--panel` → `--surface` → `--surface-2`), since shadows die on dark grounds. No glassmorphism, no gradients in chrome, the single permitted gradient is a faint brand-wash radial behind empty states.
 
 ## 7. Do's and Don'ts
 
@@ -176,19 +176,19 @@ Cards sit on the canvas with the ring alone. Hover adds `--shadow-sm`. Only moda
 
 - Keep lime exclusively for forward actions; a screen should have at most one or two lime elements visible.
 - Use the status triples (solid/wash/line) exactly as shipped; the same state must look identical on POS, KDS, tables, and console.
-- Keep voided/86'd things visible with their status — the system is honest about history.
+- Keep voided/86'd things visible with their status, the system is honest about history.
 - Use tabular numerals for every number that could appear above or below another number.
 - Design Night mode surfaces with warm blacks (`#0e0f0c` family), never blue-blacks.
-- Show sync/connectivity state explicitly (amber "pending upload" chip) — never fake certainty.
+- Show sync/connectivity state explicitly (amber "pending upload" chip), never fake certainty.
 
 ### Don't
 
 - Don't use lime as a text color or status color, and don't use status green as a button fill.
-- Don't introduce new chrome colors — no purples, oranges, teals, no decorative accents.
+- Don't introduce new chrome colors, no purples, oranges, teals, no decorative accents.
 - Don't fill destructive buttons red; red fills are for nothing.
 - Don't drop below 12px text, 44px touch targets, or the `--ink-4` contrast floor.
 - Don't use pure white on Night surfaces (`--ink` is `#f2f1ec`, warm).
-- Don't add hover-dependent affordances — fingers don't hover. Anything hover reveals must also be reachable by tap.
+- Don't add hover-dependent affordances, fingers don't hover. Anything hover reveals must also be reachable by tap.
 - Don't animate anything on the service-critical path beyond 150ms; a POS that "feels designed" during a rush is a POS that feels slow.
 
 ## 8. Responsive Behavior & Touch

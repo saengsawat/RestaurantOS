@@ -3,11 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>RestaurantOS — Osteria Nove · Concept Prototype</title>
+<title>RestaurantOS · Osteria Nove · Concept Prototype</title>
 <style>
 /* ============================================================
-   1. DESIGN TOKENS — RestaurantOS design system
-   (design-md/restaurantos/DESIGN.md — Wise-derived, POS-adapted)
+   1. DESIGN TOKENS, RestaurantOS design system
+   (design-md/restaurantos/DESIGN.md, Wise-derived, POS-adapted)
    Day is the base; Night applies via OS preference or explicit
    choice, resolved through identical declarations.
    ============================================================ */
@@ -141,7 +141,8 @@ body.offline .net-banner{display:flex}
 .tile.t86 .low{color:var(--red);background:var(--red-wash);border-color:var(--red-line)}
 
 /* Check panel */
-.check{width:var(--check-w);flex-shrink:0;background:var(--panel);border-left:1px solid var(--line);display:flex;flex-direction:column}
+.check{width:var(--check-w);flex-shrink:0;background:var(--panel);border-left:1px solid var(--line);display:flex;flex-direction:column;overflow:hidden}
+.check-handle{display:none}
 .check-top{padding:14px 16px 10px;border-bottom:1px solid var(--line)}
 .check-title{display:flex;justify-content:space-between;align-items:center}
 .where-btn{display:flex;align-items:center;gap:7px;font-size:16.5px;font-weight:700;min-height:38px;
@@ -218,22 +219,31 @@ body.offline .net-banner{display:flex}
 .sec-tabs{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
 .sec-tab{min-height:38px;border-radius:var(--r-pill);padding:0 16px;font-size:13.5px;font-weight:600;background:var(--surface-2);color:var(--ink-2)}
 .sec-tab.active{background:var(--ink);color:var(--bg)}
-.floor{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:12px}
-.tbl{background:var(--surface);border-radius:var(--r-card);box-shadow:var(--ring);padding:13px 15px;min-height:104px;text-align:left;
-  display:flex;flex-direction:column;justify-content:space-between;transition:transform .1s;border-top:4px solid transparent}
-.tbl:active{transform:scale(.97)}
-.tbl-head{display:flex;justify-content:space-between;align-items:baseline}
-.tbl-name{font-size:16px;font-weight:700}
-.tbl-time{font-size:11.5px;color:var(--ink-4);font-family:var(--mono)}
-.tbl-meta{font-size:12.5px;color:var(--ink-3);margin-top:3px}
-.tbl-foot{display:flex;justify-content:space-between;align-items:center;margin-top:9px}
-.tbl-total{font-size:14px;font-weight:700}
-.tbl.open{border-top-color:var(--line)}
-.tbl.seated{border-top-color:var(--info)}
-.tbl.entrees{border-top-color:var(--amber)}
-.tbl.checkreq{border-top-color:var(--green)}
-.tbl.late{border-top-color:var(--red)}
-.tbl.open .tbl-name{color:var(--ink-3)}
+
+/* Spatial floor plan: tables sit where they sit in the room.
+   Percent-positioned, so the same plan scales phone to terminal. */
+.room{position:relative;width:100%;aspect-ratio:16/8;max-height:560px;background:var(--surface);
+  border-radius:var(--r-card);box-shadow:var(--ring);overflow:hidden}
+.deco{position:absolute;background:var(--surface-2);border-radius:10px;display:flex;align-items:center;justify-content:center;
+  font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-4);pointer-events:none}
+.tblf{position:absolute;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;
+  border:2.5px solid;border-radius:14px;padding:2px;transition:transform .1s;min-width:0}
+.tblf:active{transform:scale(.94)}
+.tblf.round{border-radius:50%}
+.tblf .tn{font-size:clamp(11px,1.5vw,15px);font-weight:700;line-height:1.1}
+.tblf .tm{font-size:clamp(9px,1.1vw,11.5px);font-weight:600;color:var(--ink-3);line-height:1.2}
+.tblf .tt{font-family:var(--mono);font-size:clamp(9px,1vw,11px);color:var(--ink-4)}
+.tblf.open{border-style:dashed;border-color:var(--line);background:transparent}
+.tblf.open .tn{color:var(--ink-4)}
+.tblf.seated{border-color:var(--info);background:var(--info-wash)}
+.tblf.entrees{border-color:var(--amber);background:var(--amber-wash)}
+.tblf.checkreq{border-color:var(--green);background:var(--green-wash)}
+.tblf.late{border-color:var(--red);background:var(--red-wash)}
+.tblf.cur{box-shadow:0 0 0 3px var(--brand)}
+.legend{display:flex;gap:16px;flex-wrap:wrap;align-items:center;margin:12px 2px 4px;font-size:12px;color:var(--ink-3)}
+.lg{display:flex;align-items:center;gap:6px;font-weight:600}
+.lg .sw{width:13px;height:13px;border-radius:4px;border:2px solid}
+.floor-note{font-size:11.5px;color:var(--ink-4);margin-top:8px}
 
 /* ============================================================
    5. KITCHEN SCREEN (KDS)
@@ -268,7 +278,7 @@ body.offline .net-banner{display:flex}
 .ticket.served .tk-head{background:var(--surface-2)}
 
 /* ============================================================
-   6. INSIGHTS SCREEN — the differentiator, teased
+   6. INSIGHTS SCREEN, the differentiator, teased
    ============================================================ */
 #screen-insights{flex-direction:column;overflow-y:auto;padding:18px 20px}
 .ins-head{margin-bottom:14px}
@@ -369,13 +379,51 @@ body.offline .net-banner{display:flex}
 ::-webkit-scrollbar{width:9px;height:9px}
 ::-webkit-scrollbar-thumb{background:var(--line);border-radius:6px}
 @media (max-width:1120px){ :root{--check-w:330px} .cat-rail{width:110px} }
-@media (max-width:900px){
+@media (max-width:980px) and (min-width:821px){
   :root{--rail:64px}
   .nav-btn{width:52px;font-size:0;gap:0}
   .nav-btn .glyph{font-size:21px}
   .rail-foot{display:none}
   .top-meta .pill.hide-sm{display:none}
   .badge-proto{display:none}
+}
+
+/* ---------- MOBILE (phones + small tablets) ----------
+   Rail becomes bottom tabs; the check becomes a bottom sheet
+   with a persistent total bar, per the design system. */
+@media (max-width:820px){
+  .app{grid-template-columns:1fr}
+  .main{padding-bottom:calc(58px + var(--safe-b))}
+  .rail{position:fixed;left:0;right:0;bottom:0;top:auto;grid-row:auto;z-index:150;
+    flex-direction:row;justify-content:space-around;align-items:center;
+    height:calc(58px + var(--safe-b));padding:4px 6px calc(4px + var(--safe-b));
+    border-right:none;border-top:1px solid var(--line)}
+  .rail-logo,.rail-spacer,.rail-foot{display:none}
+  .nav-btn{width:auto;flex:1;min-height:48px;font-size:10px;gap:1px}
+  .nav-btn .glyph{font-size:19px}
+  .top-meta .pill.hide-sm,.badge-proto{display:none}
+  .topbar{padding:0 12px;gap:8px}
+
+  #screen-service{flex-direction:column}
+  .cat-rail{width:100%;flex-direction:row;overflow-x:auto;overflow-y:hidden;
+    border-right:none;border-bottom:1px solid var(--line-subtle);padding:8px 10px;gap:6px}
+  .cat-btn{white-space:nowrap;flex-shrink:0}
+  .cat-btn small{display:none}
+  .cat-btn.active{box-shadow:inset 0 -2.5px 0 var(--brand)}
+  .menu-area{padding-bottom:80px}
+
+  .check{position:fixed;left:0;right:0;top:auto;bottom:calc(58px + var(--safe-b));width:100%;z-index:140;
+    max-height:calc(100dvh - var(--topbar) - 58px - var(--safe-b));
+    border-left:none;border-top:1px solid var(--line);border-radius:16px 16px 0 0;box-shadow:var(--shadow-lg);
+    transform:translateY(calc(100% - 54px));transition:transform .22s ease-out}
+  body.check-open .check{transform:none}
+  .check-handle{display:flex;justify-content:space-between;align-items:center;min-height:54px;width:100%;
+    padding:0 18px;font-size:15px;font-weight:700;border-bottom:1px solid var(--line-subtle)}
+  .check-handle .car{color:var(--ink-3);font-size:12px;margin-left:8px}
+
+  .room{aspect-ratio:4/3;max-height:none}
+  .modal{max-height:92dvh}
+  .drawer{width:100vw}
 }
 </style>
 </head>
@@ -399,7 +447,7 @@ body.offline .net-banner{display:flex}
     <span class="badge-proto">Concept Prototype</span>
     <div class="top-meta">
       <span class="pill hide-sm">Server <b>Gia R.</b></span>
-      <span class="pill" id="pillCheck">—</span>
+      <span class="pill" id="pillCheck">-</span>
       <span class="pill num" id="pillClock">–:––</span>
       <button class="icon-btn net-btn" id="netBtn" title="Simulate connectivity">● Online</button>
       <button class="icon-btn" id="themeBtn" aria-pressed="false" title="Day / Night">☾</button>
@@ -407,7 +455,7 @@ body.offline .net-banner{display:flex}
   </header>
 
   <div class="main">
-    <div class="net-banner"><span class="dot"></span> Offline — orders are saved locally and will sync when the connection returns. Card payments queue as “pending upload.”</div>
+    <div class="net-banner"><span class="dot"></span> Offline: orders are saved locally and will sync when the connection returns. Card payments queue as “pending upload.”</div>
 
     <div class="screens">
 
@@ -416,6 +464,7 @@ body.offline .net-banner{display:flex}
         <div class="cat-rail" id="catRail"></div>
         <div class="menu-area"><div class="tile-grid" id="tileGrid"></div></div>
         <aside class="check">
+          <button class="check-handle" id="checkHandle"><span id="chLeft">Check</span><span><span id="chRight" class="num"></span><span class="car">▴</span></span></button>
           <div class="check-top">
             <div class="check-title"><button class="where-btn" id="btnSwitch" title="Switch check"><span id="checkWhere">Table 14</span><span class="car">▼</span></button><span class="check-no" id="checkNo">#2041</span></div>
             <div class="check-tags" id="checkTags"></div>
@@ -451,12 +500,12 @@ body.offline .net-banner{display:flex}
       <section class="screen" id="screen-insights">
         <div class="ins-head">
           <h2>Tonight at a glance</h2>
-          <p>Where RestaurantOS goes beyond the terminal — the same data that runs service, turned into decisions. Demo figures.</p>
+          <p>Where RestaurantOS goes beyond the terminal: the same data that runs service, turned into decisions. Demo figures.</p>
         </div>
         <div class="metric-row" id="metricRow"></div>
         <div class="ins-section">What needs your attention</div>
         <div class="attn" id="attnCards"></div>
-        <p class="ins-foot">Concept only: numbers are deterministic demo data. In the real product these come from the transaction stream — the database is the source of truth, deterministic logic does the math, and AI only explains. It never invents numbers.</p>
+        <p class="ins-foot">Concept only: numbers are deterministic demo data. In the real product these come from the transaction stream, the database is the source of truth, deterministic logic does the math, and AI only explains. It never invents numbers.</p>
       </section>
 
     </div>
@@ -516,7 +565,7 @@ body.offline .net-banner{display:flex}
 
 <div class="overlay" id="ovMore">
   <div class="modal" style="width:min(460px,100%)">
-    <div class="modal-head"><div><h3 id="moreTitle">More actions</h3><div class="sub" id="moreSub">Two are real — the rest are stubbed on purpose. Each is a real workflow, and which ones matter is the conversation to have.</div></div><button class="modal-x" data-close="ovMore">✕</button></div>
+    <div class="modal-head"><div><h3 id="moreTitle">More actions</h3><div class="sub" id="moreSub">Two are real, the rest are stubbed on purpose. Each is a real workflow, and which ones matter is the conversation to have.</div></div><button class="modal-x" data-close="ovMore">✕</button></div>
     <div class="modal-body" id="moreBody"></div>
   </div>
 </div>
@@ -530,7 +579,7 @@ body.offline .net-banner{display:flex}
 
 <!-- Timeline drawer -->
 <aside class="drawer" id="drawerTl">
-  <div class="modal-head"><div><h3>Check history</h3><div class="sub">Every action is recorded — voids, fires, payments</div></div><button class="modal-x" id="tlClose">✕</button></div>
+  <div class="modal-head"><div><h3>Check history</h3><div class="sub">Every action is recorded, voids, fires, payments</div></div><button class="modal-x" id="tlClose">✕</button></div>
   <div class="tl-list" id="tlList"></div>
 </aside>
 
@@ -538,7 +587,7 @@ body.offline .net-banner{display:flex}
 
 <script>
 /* ============================================================
-   1. DEMO DATA — everything below is fictional. Edit freely.
+   1. DEMO DATA, everything below is fictional. Edit freely.
    Osteria Nove: full-service Italian, coursing-driven.
    ============================================================ */
 const OG = {
@@ -574,7 +623,7 @@ const MENU = [
     {id:"m1", name:"Cacio e Pepe", sub:"pecorino, tellicherry pepper", price:21, course:"PRIMI", station:"SAUTÉ", opts:["pasta","pastaAdd","allergy"]},
     {id:"m2", name:"Ragù alla Bolognese", sub:"8-hour beef + pork ragù", price:24, course:"PRIMI", station:"SAUTÉ", opts:["pasta","pastaAdd","allergy"]},
     {id:"m3", name:"Linguine alle Vongole", sub:"manila clams, white wine", price:26, course:"PRIMI", station:"SAUTÉ", opts:["pastaAdd","allergy"]},
-    {id:"m4", name:"Risotto ai Funghi", sub:"carnaroli, porcini — 25 min", price:25, course:"PRIMI", station:"SAUTÉ", opts:["pastaAdd","allergy"]},
+    {id:"m4", name:"Risotto ai Funghi", sub:"carnaroli, porcini, 25 min", price:25, course:"PRIMI", station:"SAUTÉ", opts:["pastaAdd","allergy"]},
     {id:"m5", name:"Gnocchi al Pesto", sub:"hand-rolled, genovese", price:22, course:"PRIMI", station:"SAUTÉ", stock:5, opts:["pastaAdd","allergy"]}
   ]},
   {id:"secondi", name:"Secondi", note:"course 3", items:[
@@ -608,21 +657,28 @@ const MENU = [
 const COURSES = ["BEVERAGE","ANTIPASTI","PRIMI","SECONDI","DOLCI"];
 const COURSE_LABEL = {BEVERAGE:"Beverage · fires now", ANTIPASTI:"Antipasti", PRIMI:"Primi", SECONDI:"Secondi", DOLCI:"Dolci"};
 const SECTIONS = ["Sala","Terrazza","Bar"];
+/* Spatial layout: x/y/w/h are % of the room, shape drives the outline.
+   Edit these to replicate a real restaurant's floor plan. */
 const TABLES = [
-  {id:"T2",  name:"Table 2",  sec:"Sala",     seats:2},
-  {id:"T3",  name:"Table 3",  sec:"Sala",     seats:4},
-  {id:"T5",  name:"Table 5",  sec:"Sala",     seats:4},
-  {id:"T7",  name:"Table 7",  sec:"Sala",     seats:6},
-  {id:"T9",  name:"Table 9",  sec:"Sala",     seats:2},
-  {id:"T12", name:"Table 12", sec:"Sala",     seats:4},
-  {id:"T14", name:"Table 14", sec:"Sala",     seats:4},
-  {id:"T21", name:"Terrazza 21", sec:"Terrazza", seats:4},
-  {id:"T22", name:"Terrazza 22", sec:"Terrazza", seats:2},
-  {id:"T23", name:"Terrazza 23", sec:"Terrazza", seats:6},
-  {id:"B1",  name:"Bar 1", sec:"Bar", seats:1},
-  {id:"B2",  name:"Bar 2", sec:"Bar", seats:1},
-  {id:"B3",  name:"Bar 3", sec:"Bar", seats:1}
+  {id:"T2",  name:"Table 2",  sec:"Sala", seats:2, shape:"round", x:5,  y:8,  w:12, h:22},
+  {id:"T3",  name:"Table 3",  sec:"Sala", seats:4, shape:"rect",  x:22, y:8,  w:16, h:26},
+  {id:"T5",  name:"Table 5",  sec:"Sala", seats:4, shape:"rect",  x:44, y:8,  w:16, h:26},
+  {id:"T7",  name:"Table 7",  sec:"Sala", seats:6, shape:"rect",  x:66, y:8,  w:28, h:30},
+  {id:"T9",  name:"Table 9",  sec:"Sala", seats:2, shape:"round", x:5,  y:42, w:12, h:22},
+  {id:"T12", name:"Table 12", sec:"Sala", seats:4, shape:"rect",  x:22, y:44, w:16, h:26},
+  {id:"T14", name:"Table 14", sec:"Sala", seats:4, shape:"rect",  x:44, y:44, w:16, h:26},
+  {id:"T21", name:"Terrazza 21", sec:"Terrazza", seats:4, shape:"rect",  x:8,  y:12, w:20, h:34},
+  {id:"T22", name:"Terrazza 22", sec:"Terrazza", seats:2, shape:"round", x:42, y:14, w:13, h:28},
+  {id:"T23", name:"Terrazza 23", sec:"Terrazza", seats:6, shape:"rect",  x:66, y:10, w:28, h:40},
+  {id:"B1",  name:"Bar 1", sec:"Bar", seats:1, shape:"round", x:12, y:44, w:9, h:20},
+  {id:"B2",  name:"Bar 2", sec:"Bar", seats:1, shape:"round", x:30, y:44, w:9, h:20},
+  {id:"B3",  name:"Bar 3", sec:"Bar", seats:1, shape:"round", x:48, y:44, w:9, h:20}
 ];
+const DECOR = {
+  Sala:[ {x:66,y:46,w:28,h:24,label:"Cucina · pass"}, {x:5,y:74,w:14,h:18,label:"Ingresso"}, {x:24,y:78,w:36,h:14,label:"Stazione servizio"} ],
+  Terrazza:[ {x:8,y:60,w:86,h:12,label:"Fioriere"}, {x:8,y:80,w:30,h:12,label:"Pergolato"} ],
+  Bar:[ {x:6,y:10,w:88,h:24,label:"Banco bar"}, {x:66,y:44,w:28,h:20,label:"Vetrina vini"} ]
+};
 const VOID_REASONS = ["Guest changed mind","Kitchen error","Long wait","Wrong item rung in","Quality issue","Manager comp"];
 const DISCOUNTS = [
   {key:"none", label:"No discount", calc:()=>0},
@@ -639,7 +695,7 @@ const STATIONS = ["ALL","FORNO","SAUTÉ","GRILL","FREDDO","BAR"];
    2. APP STATE
    All in memory. The shape mirrors where the real product goes:
    an order holds lines with course + seat + state, an audit log,
-   and payments — never a single "paid" boolean.
+   and payments, never a single "paid" boolean.
    ============================================================ */
 const state = {
   screen:"service", category:"antipasti", section:"Sala", station:"ALL",
@@ -716,7 +772,7 @@ $("#netBtn").addEventListener("click", ()=>{
   const b=$("#netBtn"); b.classList.toggle("off",!state.online);
   b.textContent = state.online ? "● Online" : "○ Offline";
   if(state.online && state.queued>0){ toast(state.queued+" queued operation"+(state.queued>1?"s":"")+" synced to cloud","good"); state.queued=0; renderCheck(); }
-  if(!state.online) toast("Connection lost — running local-first","warn");
+  if(!state.online) toast("Connection lost, running local-first","warn");
 });
 function tickClock(){ $("#pillClock").textContent=nowStr(); }
 
@@ -725,16 +781,18 @@ function tickClock(){ $("#pillClock").textContent=nowStr(); }
    ============================================================ */
 function go(screen){
   state.screen=screen;
+  document.body.classList.remove("check-open");
   document.querySelectorAll(".screen").forEach(s=>s.classList.toggle("active", s.id==="screen-"+screen));
   document.querySelectorAll(".nav-btn").forEach(b=>b.classList.toggle("active", b.dataset.screen===screen));
   if(screen==="tables") renderFloor();
   if(screen==="kitchen") renderKitchen();
   if(screen==="insights") renderInsights();
 }
+$("#checkHandle").addEventListener("click",()=>document.body.classList.toggle("check-open"));
 document.querySelectorAll(".nav-btn").forEach(b=>b.addEventListener("click",()=>go(b.dataset.screen)));
 
 /* ============================================================
-   6. SERVICE — categories, tiles, the coursed check
+   6. SERVICE, categories, tiles, the coursed check
    ============================================================ */
 function renderCats(){
   $("#catRail").innerHTML = MENU.map(c=>
@@ -758,10 +816,12 @@ function renderCheck(){
   const o=cur();
   $("#pillCheck").textContent = o?`Check #${o.checkNo}`:"No check";
   if(!o){
-    $("#checkWhere").textContent="No table"; $("#checkNo").textContent="—";
+    $("#checkWhere").textContent="No table"; $("#checkNo").textContent="·";
     $("#checkTags").innerHTML=""; $("#checkTotals").innerHTML="";
     $("#checkBody").innerHTML=`<div class="empty-check"><div class="big">▦</div>Select a table on the Tables screen to start a check.</div>`;
-    $("#btnPay").disabled=true; return;
+    $("#btnPay").disabled=true;
+    $("#chLeft").textContent="No check open"; $("#chRight").textContent="";
+    return;
   }
   $("#checkWhere").textContent=o.table.name;
   $("#checkNo").textContent="#"+o.checkNo;
@@ -807,15 +867,18 @@ function renderCheck(){
     (paid?`<div class="trow disc"><span>Paid</span><span class="num">−${money(paid)}</span></div>`:"")+
     `<div class="trow grand"><span>Due</span><span class="num">${money(Math.max(0,orderTotal(o)-paid))}</span></div>`;
   $("#btnPay").disabled = !o.lines.some(l=>l.state!=="voided");
+  const nLive=o.lines.filter(l=>l.state!=="voided").length;
+  $("#chLeft").textContent=o.table.name+" · "+nLive+" item"+(nLive===1?"":"s");
+  $("#chRight").textContent=money(Math.max(0,orderTotal(o)-paid));
   renderBadges();
 }
 
 /* ============================================================
-   7. ITEM CONFIG MODAL — modifiers, seat, course note
+   7. ITEM CONFIG MODAL, modifiers, seat, course note
    ============================================================ */
 function findItem(id){ for(const c of MENU){ const i=c.items.find(x=>x.id===id); if(i) return i; } return null; }
 function openConfig(itemId){
-  const o=cur(); if(!o){ toast("Open a table first — Tables screen","warn"); return; }
+  const o=cur(); if(!o){ toast("Open a table first, Tables screen","warn"); return; }
   const it=findItem(itemId);
   state.draft={item:it, qty:1, seat:1, note:"", picks:{}};
   it.opts.forEach(g=>state.draft.picks[g]=[]);
@@ -838,7 +901,7 @@ function renderConfig(){
         `<button class="opt ${picked.includes(i)?"on":""}" data-g="${gid}" data-i="${i}">${esc(op.n)}${op.p?` <span class="p">+${op.p}</span>`:""}</button>`).join("")}</div></div>`;
   }).join("");
   html+=`<div class="opt-group"><div class="og-head"><span class="og-name">Note to kitchen</span></div>
-    <textarea class="note-in" id="cfgNote" rows="2" placeholder="e.g. birthday — candle on dessert">${esc(d.note)}</textarea></div>`;
+    <textarea class="note-in" id="cfgNote" rows="2" placeholder="e.g. birthday, candle on dessert">${esc(d.note)}</textarea></div>`;
   $("#cfgBody").innerHTML=html;
 
   $("#qMinus").addEventListener("click",()=>{ if(d.qty>1){d.qty--; $("#qVal").textContent=d.qty; syncCfgBtn();} });
@@ -900,7 +963,7 @@ function renderMore(){
   const o=cur();
   const emptyOk = o && !o.lines.length && !o.payments.length;
   $("#moreTitle").textContent="More actions";
-  $("#moreSub").textContent="Two are real — the rest are stubbed on purpose. Each is a real workflow, and which ones matter is the conversation to have.";
+  $("#moreSub").textContent="Two are real, the rest are stubbed on purpose. Each is a real workflow, and which ones matter is the conversation to have.";
   $("#moreBody").innerHTML=
     `<button class="mrow live" id="moreTransfer" ${o?"":"disabled"}><span>Transfer to another table</span><span class="mnote">Works</span></button>`+
     `<button class="mrow live" id="moreCancel" ${emptyOk?"":"disabled"}><span>Cancel this check</span><span class="mnote">${emptyOk?"Works":"empty checks only"}</span></button>`+
@@ -910,7 +973,7 @@ function renderMore(){
   const tr=$("#moreTransfer"); if(tr&&o) tr.addEventListener("click",renderTransfer);
   const cx=$("#moreCancel"); if(cx&&emptyOk) cx.addEventListener("click",()=>{
     delete state.orders[o.id]; state.currentId=null;
-    closeOv("ovMore"); renderCheck(); renderBadges(); toast("Check #"+o.checkNo+" cancelled — "+o.table.name+" reopened");
+    closeOv("ovMore"); renderCheck(); renderBadges(); toast("Check #"+o.checkNo+" cancelled, "+o.table.name+" reopened");
   });
 }
 function renderTransfer(){
@@ -933,7 +996,7 @@ function renderTransfer(){
 $("#btnMore").addEventListener("click",()=>{ renderMore(); openOv("ovMore"); });
 
 /* ============================================================
-   8. FIRING — courses become kitchen tickets
+   8. FIRING, courses become kitchen tickets
    Dispatches are immutable: once sent, a line can only be
    voided (with reason + approval), never silently edited.
    ============================================================ */
@@ -949,7 +1012,7 @@ function sendCourse(o, course, manual){
       allergy:l.mods.some(m=>m.n.startsWith("⚠"))})),
     placed:Date.now(), state:"new" });
   log(o,"Fired to kitchen",COURSE_LABEL[course]+" · "+lines.length+" item"+(lines.length>1?"s":""));
-  if(!state.online){ state.queued++; toast(COURSE_LABEL[course]+" fired — stored locally, will sync","warn"); }
+  if(!state.online){ state.queued++; toast(COURSE_LABEL[course]+" fired, stored locally, will sync","warn"); }
   else toast(COURSE_LABEL[course]+" fired to kitchen","good");
   renderCheck(); renderBadges();
 }
@@ -968,7 +1031,7 @@ $("#btnSend").addEventListener("click",()=>{
 function ticketMin(t){ return Math.round((Date.now()-t.placed)/60000); }
 /* Every step is reversible: Start/Ready have a ↩ back-step, and a
    served ticket stays recallable for 10 minutes before it purges.
-   Fat fingers happen on the line — no state is one tap from gone. */
+   Fat fingers happen on the line, no state is one tap from gone. */
 function renderKitchen(){
   state.tickets=state.tickets.filter(t=>t.state!=="served" || Date.now()-t.servedAt<10*60000);
   $("#stationTabs").innerHTML = STATIONS.map(s=>
@@ -991,20 +1054,20 @@ function renderKitchen(){
       <div class="tk-course">${esc(COURSE_LABEL[t.course]||t.course)}${late?' · <span style="color:var(--red)">LATE</span>':""}${t.state==="served"?' · recallable 10 min':""}</div>
       <div class="tk-items">${t.items.map(i=>`<div class="tk-item">${i.qty}× ${esc(i.name)}<span class="tk-station">${esc(i.station)}</span>
         ${i.mods?`<small>${esc(i.mods)}</small>`:""}${i.note?`<small>✎ ${esc(i.note)}</small>`:""}
-        ${i.allergy?`<small class="allergy">⚠ ALLERGY — see modifiers</small>`:""}</div>`).join("")}</div>
+        ${i.allergy?`<small class="allergy">⚠ ALLERGY, see modifiers</small>`:""}</div>`).join("")}</div>
       <div class="tk-actions">${back}${action}</div></div>`;
   }).join("") : `<div class="empty-check" style="width:100%"><div class="big">▤</div>No open tickets${state.station!=="ALL"?" for "+state.station:""}.</div>`;
   document.querySelectorAll("[data-adv]").forEach(b=>b.addEventListener("click",()=>{
     const t=state.tickets.find(x=>x.id===b.dataset.tk); if(!t) return;
     const to=b.dataset.adv;
-    if(to==="served"){ t.state="served"; t.servedAt=Date.now(); toast(t.id+" served — recallable for 10 min"); }
+    if(to==="served"){ t.state="served"; t.servedAt=Date.now(); toast(t.id+" served, recallable for 10 min"); }
     else { if(t.state==="served") toast(t.id+" recalled to Ready","warn"); t.state=to; delete t.servedAt; }
     renderKitchen(); renderBadges();
   }));
 }
 
 /* ============================================================
-   10. TABLES — floor, seating, table detail
+   10. TABLES, floor, seating, table detail
    ============================================================ */
 function tableStatus(t){
   const o=state.orders[t.id];
@@ -1018,14 +1081,23 @@ function tableStatus(t){
 function renderFloor(){
   $("#secTabs").innerHTML = SECTIONS.map(s=>`<button class="sec-tab ${state.section===s?"active":""}" data-sec="${s}">${s}</button>`).join("");
   document.querySelectorAll("[data-sec]").forEach(b=>b.addEventListener("click",()=>{state.section=b.dataset.sec; renderFloor();}));
-  $("#floor").innerHTML = TABLES.filter(t=>t.sec===state.section).map(t=>{
+  const deco=(DECOR[state.section]||[]).map(d=>
+    `<div class="deco" style="left:${d.x}%;top:${d.y}%;width:${d.w}%;height:${d.h}%">${esc(d.label)}</div>`).join("");
+  const tbls=TABLES.filter(t=>t.sec===state.section).map(t=>{
     const st=tableStatus(t); const o=state.orders[t.id];
-    return `<button class="tbl ${st.cls}" data-tbl="${t.id}">
-      <span><span class="tbl-head"><span class="tbl-name">${esc(t.name)}</span><span class="tbl-time">${o?ago(o.opened):""}</span></span>
-      <span class="tbl-meta">${esc(st.meta)}</span></span>
-      <span class="tbl-foot"><span class="chip ${st.cls==="open"?"mut":st.cls==="seated"?"info":st.cls==="entrees"?"amber":st.cls==="late"?"red":"green"}">${esc(st.label)}</span>
-      <span class="tbl-total num">${o?money(orderTotal(o)):""}</span></span></button>`;
+    const short=t.name.replace("Table ","T").replace("Terrazza ","T").replace("Bar ","B");
+    return `<button class="tblf ${st.cls} ${t.shape} ${state.currentId===t.id?"cur":""}" data-tbl="${t.id}"
+      style="left:${t.x}%;top:${t.y}%;width:${t.w}%;height:${t.h}%" title="${esc(t.name)} · ${esc(st.label)}">
+      <span class="tn">${esc(short)}</span>
+      <span class="tm">${o?o.covers+" cov":t.seats+" seats"}</span>
+      ${o?`<span class="tt">${ago(o.opened)} · ${money(orderTotal(o))}</span>`:""}</button>`;
   }).join("");
+  $("#floor").innerHTML = `<div class="room">${deco}${tbls}</div>`+
+    `<div class="legend">`+
+    [["open","Open","var(--line)"],["seated","Seated","var(--info)"],["entrees","Secondi fired","var(--amber)"],["checkreq","Paying","var(--green)"],["late","Kitchen late","var(--red)"]]
+      .map(([c,l,col])=>`<span class="lg"><span class="sw" style="border-color:${col}"></span>${l}</span>`).join("")+
+    `<span class="lg"><span class="sw" style="border-color:var(--brand)"></span>Current check</span></div>`+
+    `<p class="floor-note">Tap a table to seat a party or open its check. Positions are demo data: in the real product the operator draws their own floor plan once, in setup.</p>`;
   document.querySelectorAll("[data-tbl]").forEach(b=>b.addEventListener("click",()=>openTable(b.dataset.tbl)));
 }
 function openTable(id){
@@ -1040,7 +1112,7 @@ function openTable(id){
       state.orders[id]=newOrder(id,+b.dataset.covers);
       log(state.orders[id],"Check opened",t.name+" · "+b.dataset.covers+" covers");
       state.currentId=id; closeOv("ovTable"); go("service"); renderCheck();
-      toast(t.name+" seated — check #"+state.orders[id].checkNo);
+      toast(t.name+" seated, check #"+state.orders[id].checkNo);
     }));
   } else {
     $("#tblModalSub").textContent="Check #"+o.checkNo+" · "+o.covers+" covers · due "+money(Math.max(0,orderTotal(o)-orderPaid(o)));
@@ -1071,7 +1143,7 @@ $("#btnDiscount").addEventListener("click",()=>{
 $("#discClear").addEventListener("click",()=>{ const o=cur(); if(o&&o.discount!=="none"){ log(o,"Discount removed",""); o.discount="none"; } closeOv("ovDiscount"); renderCheck(); });
 
 /* ============================================================
-   12. VOID — reason + manager PIN, audit-logged
+   12. VOID, reason + manager PIN, audit-logged
    ============================================================ */
 $("#btnVoid").addEventListener("click",()=>{
   const o=cur(); if(!o) return;
@@ -1099,7 +1171,7 @@ $("#voidGo").addEventListener("click",()=>{
     const o=cur(); const l=o.lines.find(x=>x.uid===state.voidPick.uid); if(!l) return;
     l.state="voided"; l.voidReason=state.voidPick.reason;
     if(state.stock[l.itemId]!==undefined) state.stock[l.itemId]+=l.qty;
-    log(o,"Item voided",`${l.qty}× ${l.name} — ${state.voidPick.reason} · approved by MGR-2`);
+    log(o,"Item voided",`${l.qty}× ${l.name}, ${state.voidPick.reason} · approved by MGR-2`);
     renderCheck(); renderTiles(); toast("Voided: "+l.name,"warn");
   });
 });
@@ -1122,7 +1194,7 @@ function renderPin(){
 }
 
 /* ============================================================
-   13. TIMELINE DRAWER — the visible audit trail
+   13. TIMELINE DRAWER, the visible audit trail
    ============================================================ */
 $("#btnTimeline").addEventListener("click",()=>{
   const o=cur(); if(!o) return;
@@ -1134,12 +1206,12 @@ $("#btnTimeline").addEventListener("click",()=>{
 $("#tlClose").addEventListener("click",()=>$("#drawerTl").classList.remove("open"));
 
 /* ============================================================
-   14. PAYMENT — tips, split modes, offline-honest card states
+   14. PAYMENT, tips, split modes, offline-honest card states
    ============================================================ */
 $("#btnPay").addEventListener("click",()=>{
   const o=cur(); if(!o) return;
   const unsent=o.lines.filter(l=>l.state==="unsent").length;
-  if(unsent){ toast(unsent+" unsent item"+(unsent>1?"s":"")+" — send or void before payment","warn"); return; }
+  if(unsent){ toast(unsent+" unsent item"+(unsent>1?"s":"")+", send or void before payment","warn"); return; }
   state.pay={mode:"full", tip:20, even:2};
   $("#paySub").textContent="Check #"+o.checkNo+" · "+o.table.name;
   renderPay(); openOv("ovPay");
@@ -1191,7 +1263,7 @@ function renderPay(){
     const sp=paySplits(o)[i];
     const status=(method==="Card"&&!state.online)?"pending":"authorized";
     o.payments.push({who:sp.who, amount:sp.amount, method, status});
-    if(status==="pending"){ state.queued++; toast(sp.who+" card stored offline — authorizes on reconnect","warn"); }
+    if(status==="pending"){ state.queued++; toast(sp.who+" card stored offline, authorizes on reconnect","warn"); }
     else toast(sp.who+" paid "+money(sp.amount)+" · "+method,"good");
     log(o,"Payment "+(status==="pending"?"queued (offline)":"taken"),sp.who+" · "+method+" · "+money(sp.amount));
     renderPay(); renderCheck();
@@ -1204,13 +1276,13 @@ function renderPay(){
     const pend=o.payments.some(p=>p.status==="pending");
     delete state.orders[o.id]; state.currentId=null;
     closeOv("ovPay"); renderCheck(); renderBadges();
-    toast("Check #"+o.checkNo+" closed"+(pend?" — card queued for sync":""),"good");
+    toast("Check #"+o.checkNo+" closed"+(pend?", card queued for sync":""),"good");
     go("tables");
   });
 }
 
 /* ============================================================
-   15. INSIGHTS — the differentiator, teased with live state
+   15. INSIGHTS, the differentiator, teased with live state
    ============================================================ */
 function renderInsights(){
   const burrata=state.stock["a1"]??0;
@@ -1226,9 +1298,9 @@ function renderInsights(){
     <div class="m-delta ${m.up?"up":"down"}">${m.d}</div></div>`).join("");
   $("#attnCards").innerHTML=[
     {i:"⚠", t:"Burrata will 86 mid-service", p:`Only <b>${burrata} left</b> and it's on 2 open checks. Tuesday average is 11 sold by 9 PM.`, w:"Live count from tonight's orders · suggest: brief servers on the Carpaccio as the alternative"},
-    {i:"🍷", t:"Barolo by the glass is moving", p:"6 glasses in the first seating — pace suggests the open bottle count won't cover the 8 PM turn.", w:"From tonight's beverage fires · suggest: open one bottle ahead"},
+    {i:"🍷", t:"Barolo by the glass is moving", p:"6 glasses in the first seating, pace suggests the open bottle count won't cover the 8 PM turn.", w:"From tonight's beverage fires · suggest: open one bottle ahead"},
     {i:"⏱", t:"Terrazza 23 entrée wait at 15m", p:"Secondi fired 15 minutes ago and the grill station has 3 tickets stacked. This party's antipasti pace was fast.", w:"From KDS timing · suggest: expo check-in, offer a round on pace"},
-    {i:"📉", t:"San Marzano cost up 9% this month", p:"Every pizza and the bruschetta carry it. At tonight's mix that's ≈ $31 of margin.", w:"Demo figure — in the real product this comes from vendor invoices"}
+    {i:"📉", t:"San Marzano cost up 9% this month", p:"Every pizza and the bruschetta carry it. At tonight's mix that's ≈ $31 of margin.", w:"Demo figure, in the real product this comes from vendor invoices"}
   ].map(c=>`<button class="attn-card"><h4>${c.i} ${c.t}</h4><p>${c.p}</p><div class="why">${c.w}</div></button>`).join("");
   document.querySelectorAll(".attn-card").forEach(b=>b.addEventListener("click",()=>toast("Recommendation detail isn't in this prototype yet")));
 }
@@ -1244,7 +1316,7 @@ function renderBadges(){
 
 /* ============================================================
    17. SEED + BOOT
-   The room opens mid-service on purpose — an empty POS demos badly.
+   The room opens mid-service on purpose, an empty POS demos badly.
    ============================================================ */
 function seed(){
   const mk=(tableId,covers,minsAgo)=>{ const o=newOrder(tableId,covers); o.opened=Date.now()-minsAgo*60000; state.orders[tableId]=o; return o; };
@@ -1280,7 +1352,7 @@ function seed(){
   state.tickets.push({id:"K-117", where:"Bar 2", orderId:"B2", course:"ANTIPASTI",
     items:[{qty:1,name:"Bruschetta al Pomodoro",station:"FREDDO",mods:""}], placed:Date.now()-3*60000, state:"new"});
 
-  /* Current check: Table 14 — mid-order, one course held, allergy demo */
+  /* Current check: Table 14, mid-order, one course held, allergy demo */
   const t14=mk("T14",4,9);
   addLine(t14,"b3",2,1,[{n:"Glass"}],"sent"); addLine(t14,"b6",1,2,[],"sent");
   addLine(t14,"a1",1,2,[],"unsent");
