@@ -251,8 +251,20 @@ body.offline .net-banner{display:flex}
 #screen-kitchen{flex-direction:column;padding:14px 18px;overflow:hidden}
 .kds-bar{display:flex;gap:8px;margin-bottom:12px;align-items:center;flex-wrap:wrap}
 .kds-note{margin-left:auto;font-size:12px;color:var(--ink-4)}
+.kds-body{flex:1;display:flex;gap:14px;overflow:hidden;align-items:stretch}
+
+/* Cook-together pane: same dish on multiple tickets, fire once */
+.kds-side{width:236px;flex-shrink:0;overflow-y:auto;padding-bottom:10px}
+.side-title{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);margin:2px 0 8px}
+.agg{background:var(--surface);border-radius:var(--r-tile);box-shadow:var(--ring);padding:11px 13px;margin-bottom:8px}
+.agg-n{font-size:15px;font-weight:700}
+.agg-n b{color:var(--amber)}
+.agg-t{font-size:12px;color:var(--ink-3);margin-top:2px;line-height:1.4}
+.agg-empty{font-size:12.5px;color:var(--ink-4);line-height:1.5;padding:4px 2px}
+
+/* One card per table; dispatches stack inside it in fire order */
 .kds-flow{flex:1;display:flex;gap:12px;overflow-x:auto;align-items:flex-start;padding-bottom:10px}
-.ticket{background:var(--surface);border-radius:var(--r-card);box-shadow:var(--ring);min-width:230px;max-width:250px;overflow:hidden;
+.ticket{background:var(--surface);border-radius:var(--r-card);box-shadow:var(--ring);min-width:252px;max-width:284px;overflow:hidden;
   border-top:4px solid var(--info);flex-shrink:0}
 .ticket.working{border-top-color:var(--amber)}
 .ticket.ready{border-top-color:var(--green)}
@@ -264,16 +276,24 @@ body.offline .net-banner{display:flex}
 .ticket.late .tk-head{background:var(--red-wash)}
 .tk-time{color:var(--ink-3)}
 .ticket.late .tk-time{color:var(--red)}
-.tk-course{font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-4);padding:8px 13px 0}
-.tk-items{padding:4px 13px 8px}
-.tk-item{font-size:15px;font-weight:600;padding:4px 0;line-height:1.3}
-.tk-item small{display:block;font-size:12px;font-weight:500;color:var(--ink-3)}
-.tk-item .allergy{color:var(--red);font-weight:700}
+.batch{padding:0 13px}
+.batch-h{display:flex;align-items:center;gap:7px;font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--ink-4);padding:9px 0 2px}
+.batch-h .bt{margin-left:auto;font-family:var(--mono);letter-spacing:0;text-transform:none;font-weight:600}
+.tki{display:flex;gap:9px;align-items:flex-start;padding:7px 0;border-bottom:1px solid var(--line-subtle);width:100%;text-align:left}
+.tki:active{background:var(--surface-2)}
+.tki .box{width:24px;height:24px;flex-shrink:0;border-radius:8px;border:2px solid var(--line);color:transparent;
+  display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;margin-top:1px}
+.tki.done .box{background:var(--green-wash);border-color:var(--green-line);color:var(--green)}
+.tki-main{flex:1;min-width:0}
+.tki-name{font-size:15px;font-weight:600;line-height:1.3}
+.tki.done .tki-name{text-decoration:line-through;color:var(--ink-4)}
+.tki-sub{display:block;font-size:12px;font-weight:500;color:var(--ink-3)}
+.tki .allergy{display:block;font-size:12px;color:var(--red);font-weight:700}
 .tk-station{font-size:10px;font-weight:700;color:var(--info);background:var(--info-wash);border:1px solid var(--info-line);
   border-radius:var(--r-pill);padding:1px 6px;vertical-align:2px;margin-left:5px}
-.tk-actions{display:flex;gap:8px;padding:4px 12px 12px}
-.tk-actions .btn{min-height:40px;font-size:14px;flex:1;padding:0 10px}
-.tk-actions .tk-back{flex:0 0 46px;background:var(--surface-2);color:var(--ink-2);font-size:16px}
+.tk-actions{display:flex;gap:8px;padding:8px 12px 12px}
+.tk-actions .btn{min-height:42px;font-size:14px;flex:1;padding:0 10px}
 .ticket.served{opacity:.55;border-top-color:var(--line)}
 .ticket.served .tk-head{background:var(--surface-2)}
 
@@ -424,6 +444,11 @@ body.offline .net-banner{display:flex}
   .room{aspect-ratio:4/3;max-height:none}
   .modal{max-height:92dvh}
   .drawer{width:100vw}
+  .kds-body{flex-direction:column;overflow-y:auto}
+  .kds-side{width:100%;display:flex;gap:10px;overflow-x:auto;padding-bottom:4px}
+  .kds-side .side-title{display:none}
+  .agg{min-width:190px;flex-shrink:0;margin-bottom:0}
+  .kds-flow{overflow:visible;flex-wrap:wrap}
 }
 </style>
 </head>
@@ -491,9 +516,15 @@ body.offline .net-banner{display:flex}
       <section class="screen" id="screen-kitchen">
         <div class="kds-bar">
           <div class="sec-tabs" id="stationTabs" style="margin:0"></div>
-          <span class="kds-note">Expo view · no station routing hardware in this prototype</span>
+          <span class="kds-note" id="kdsNote">Tap an item when it's plated. Serve releases the whole table.</span>
         </div>
-        <div class="kds-flow" id="kdsFlow"></div>
+        <div class="kds-body">
+          <aside class="kds-side">
+            <div class="side-title">Cook together</div>
+            <div id="aggList"></div>
+          </aside>
+          <div class="kds-flow" id="kdsFlow"></div>
+        </div>
       </section>
 
       <!-- ================= INSIGHTS ================= -->
@@ -1009,8 +1040,8 @@ function sendCourse(o, course, manual){
   state.tickets.push({ id:"K-"+(state.ticketNo++), where:o.table.name, orderId:o.id, course,
     items:lines.map(l=>({qty:l.qty, name:l.name, station:l.station,
       mods:l.mods.map(m=>m.n).join(", "), note:l.note,
-      allergy:l.mods.some(m=>m.n.startsWith("⚠"))})),
-    placed:Date.now(), state:"new" });
+      allergy:l.mods.some(m=>m.n.startsWith("⚠")), done:false})),
+    placed:Date.now(), state:"open" });
   log(o,"Fired to kitchen",COURSE_LABEL[course]+" · "+lines.length+" item"+(lines.length>1?"s":""));
   if(!state.online){ state.queued++; toast(COURSE_LABEL[course]+" fired, stored locally, will sync","warn"); }
   else toast(COURSE_LABEL[course]+" fired to kitchen","good");
@@ -1029,39 +1060,93 @@ $("#btnSend").addEventListener("click",()=>{
    9. KITCHEN (KDS)
    ============================================================ */
 function ticketMin(t){ return Math.round((Date.now()-t.placed)/60000); }
-/* Every step is reversible: Start/Ready have a ↩ back-step, and a
-   served ticket stays recallable for 10 minutes before it purges.
-   Fat fingers happen on the line, no state is one tap from gone. */
+/* One card per table: dispatches stack inside it in fire order, and
+   recent ones are flagged NEW so the line sees what just landed.
+   Items bump individually (tap toggles, so a mis-tap is its own undo).
+   Serve releases the whole table and stays recallable for 10 minutes.
+   The Cook-together pane batches identical dishes across tables. */
+function stItems(t){ return t.items.filter(i=>state.station==="ALL"||i.station===state.station); }
+function batchDone(t){ return t.items.every(i=>i.done); }
 function renderKitchen(){
   state.tickets=state.tickets.filter(t=>t.state!=="served" || Date.now()-t.servedAt<10*60000);
   $("#stationTabs").innerHTML = STATIONS.map(s=>
     `<button class="sec-tab ${state.station===s?"active":""}" data-st="${s}">${s==="ALL"?"All stations":s}</button>`).join("");
   document.querySelectorAll("[data-st]").forEach(b=>b.addEventListener("click",()=>{state.station=b.dataset.st; renderKitchen();}));
-  const list=state.tickets.filter(t=>state.station==="ALL"||t.items.some(i=>i.station===state.station))
-    .slice().sort((a,b)=>(a.state==="served")-(b.state==="served"));
-  $("#kdsFlow").innerHTML = list.length? list.map(t=>{
-    const m=ticketMin(t);
-    const late = t.state!=="ready" && t.state!=="served" && m>=LATE_MIN;
-    const cls = t.state==="served"?"served":late?"late":(t.state==="working"?"working":(t.state==="ready"?"ready":""));
-    const back = t.state==="working"?`<button class="btn tk-back" data-tk="${t.id}" data-adv="new" title="Back to new">↩</button>`:
-                 t.state==="ready"?`<button class="btn tk-back" data-tk="${t.id}" data-adv="working" title="Back to cooking">↩</button>`:"";
-    const action = t.state==="new"?`<button class="btn btn-secondary" data-tk="${t.id}" data-adv="working">Start</button>`:
-                   t.state==="working"?`<button class="btn btn-primary" data-tk="${t.id}" data-adv="ready">Ready</button>`:
-                   t.state==="ready"?`<button class="btn btn-primary" data-tk="${t.id}" data-adv="served">Serve ✓</button>`:
-                   `<button class="btn btn-secondary" data-tk="${t.id}" data-adv="ready">Recall ↩</button>`;
+  $("#kdsNote").textContent = state.station==="ALL"
+    ? "Tap an item when it's plated. Serve releases the whole table."
+    : state.station+" items only. Serving happens from All stations (expo).";
+
+  const visible=state.tickets.filter(t=>stItems(t).length);
+  const active=visible.filter(t=>t.state!=="served");
+  const served=visible.filter(t=>t.state==="served");
+
+  /* Cook together: identical not-yet-done dishes across tables */
+  const agg={};
+  active.forEach(t=>stItems(t).forEach(i=>{ if(i.done) return;
+    (agg[i.name]=agg[i.name]||{qty:0,station:i.station,wheres:new Set()}); agg[i.name].qty+=i.qty; agg[i.name].wheres.add(t.where); }));
+  const batchable=Object.entries(agg).filter(([_,v])=>v.qty>=2 && v.wheres.size>=2).sort((a,b)=>b[1].qty-a[1].qty);
+  $("#aggList").innerHTML = batchable.length? batchable.map(([n,v])=>
+    `<div class="agg"><div class="agg-n"><b>${v.qty}×</b> ${esc(n)}<span class="tk-station">${esc(v.station)}</span></div>
+     <div class="agg-t">${[...v.wheres].map(esc).join(" · ")}</div></div>`).join("")
+    :`<div class="agg-empty">No duplicate dishes right now. When two tables order the same thing, it shows here so the line can fire them together.</div>`;
+
+  /* Group active dispatches by table, oldest table first */
+  const byTable={};
+  active.forEach(t=>{ (byTable[t.where]=byTable[t.where]||[]).push(t); });
+  const cards=Object.entries(byTable).map(([where,batches])=>{
+    batches.sort((a,b)=>a.placed-b.placed);
+    const items=batches.flatMap(stItems);
+    const allDone=items.length>0 && items.every(i=>i.done);
+    const anyDone=items.some(i=>i.done);
+    const late=batches.some(b=>!batchDone(b) && ticketMin(b)>=LATE_MIN);
+    const cls=late?"late":allDone?"ready":anyDone?"working":"";
+    const oldest=Math.max(...batches.map(ticketMin));
+    const body=batches.map(b=>{
+      const isNew=Date.now()-b.placed<3*60000;
+      return `<div class="batch"><div class="batch-h">${esc(COURSE_LABEL[b.course]||b.course)}
+        ${isNew?'<span class="chip info">New</span>':""}${!batchDone(b)&&ticketMin(b)>=LATE_MIN?'<span class="chip red">Late</span>':""}
+        <span class="bt">${ticketMin(b)}m · ${b.id}</span></div>`+
+        stItems(b).map(i=>{
+          const idx=b.items.indexOf(i);
+          return `<button class="tki ${i.done?"done":""}" data-tg="${b.id}|${idx}">
+            <span class="box">✓</span>
+            <span class="tki-main"><span class="tki-name">${i.qty}× ${esc(i.name)}<span class="tk-station">${esc(i.station)}</span></span>
+            ${i.mods?`<span class="tki-sub">${esc(i.mods)}</span>`:""}${i.note?`<span class="tki-sub">✎ ${esc(i.note)}</span>`:""}
+            ${i.allergy?`<span class="allergy">⚠ ALLERGY, see modifiers</span>`:""}</span></button>`;
+        }).join("")+`</div>`;
+    }).join("");
+    const serveBtn = state.station==="ALL"
+      ? `<div class="tk-actions"><button class="btn ${allDone?"btn-primary":"btn-secondary"}" data-serve="${esc(where)}" ${allDone?"":"disabled"} ${allDone?"":'style="opacity:.5"'}>${allDone?"Serve table ✓":"Serve (finish items first)"}</button></div>`
+      : `<div style="height:8px"></div>`;
     return `<div class="ticket ${cls}">
-      <div class="tk-head"><span>${esc(t.where.toUpperCase())} · ${t.id}</span><span class="tk-time num">${t.state==="served"?"served":m+"m"}</span></div>
-      <div class="tk-course">${esc(COURSE_LABEL[t.course]||t.course)}${late?' · <span style="color:var(--red)">LATE</span>':""}${t.state==="served"?' · recallable 10 min':""}</div>
-      <div class="tk-items">${t.items.map(i=>`<div class="tk-item">${i.qty}× ${esc(i.name)}<span class="tk-station">${esc(i.station)}</span>
-        ${i.mods?`<small>${esc(i.mods)}</small>`:""}${i.note?`<small>✎ ${esc(i.note)}</small>`:""}
-        ${i.allergy?`<small class="allergy">⚠ ALLERGY, see modifiers</small>`:""}</div>`).join("")}</div>
-      <div class="tk-actions">${back}${action}</div></div>`;
-  }).join("") : `<div class="empty-check" style="width:100%"><div class="big">▤</div>No open tickets${state.station!=="ALL"?" for "+state.station:""}.</div>`;
-  document.querySelectorAll("[data-adv]").forEach(b=>b.addEventListener("click",()=>{
-    const t=state.tickets.find(x=>x.id===b.dataset.tk); if(!t) return;
-    const to=b.dataset.adv;
-    if(to==="served"){ t.state="served"; t.servedAt=Date.now(); toast(t.id+" served, recallable for 10 min"); }
-    else { if(t.state==="served") toast(t.id+" recalled to Ready","warn"); t.state=to; delete t.servedAt; }
+      <div class="tk-head"><span>${esc(where.toUpperCase())}</span><span class="tk-time num">${oldest}m</span></div>
+      ${body}${serveBtn}</div>`;
+  }).join("");
+
+  const servedCards=served.sort((a,b)=>b.servedAt-a.servedAt).map(t=>
+    `<div class="ticket served">
+      <div class="tk-head"><span>${esc(t.where.toUpperCase())} · ${t.id}</span><span class="tk-time">served</span></div>
+      <div class="batch"><div class="batch-h">${esc(COURSE_LABEL[t.course]||t.course)}<span class="bt">recallable 10 min</span></div></div>
+      <div class="tk-actions"><button class="btn btn-secondary" data-recall="${t.id}">Recall ↩</button></div></div>`).join("");
+
+  $("#kdsFlow").innerHTML = (cards+servedCards) || `<div class="empty-check" style="width:100%"><div class="big">▤</div>No open tickets${state.station!=="ALL"?" for "+state.station:""}.</div>`;
+
+  document.querySelectorAll("[data-tg]").forEach(b=>b.addEventListener("click",()=>{
+    const [tid,idx]=b.dataset.tg.split("|");
+    const t=state.tickets.find(x=>x.id===tid); if(!t) return;
+    t.items[+idx].done=!t.items[+idx].done;
+    renderKitchen(); renderBadges();
+  }));
+  document.querySelectorAll("[data-serve]").forEach(b=>b.addEventListener("click",()=>{
+    const where=b.dataset.serve;
+    state.tickets.forEach(t=>{ if(t.where===where && t.state!=="served"){ t.state="served"; t.servedAt=Date.now(); } });
+    toast(where+" served, recallable for 10 min");
+    renderKitchen(); renderBadges();
+  }));
+  document.querySelectorAll("[data-recall]").forEach(b=>b.addEventListener("click",()=>{
+    const t=state.tickets.find(x=>x.id===b.dataset.recall); if(!t) return;
+    t.state="open"; delete t.servedAt;
+    toast(t.id+" recalled","warn");
     renderKitchen(); renderBadges();
   }));
 }
@@ -1072,7 +1157,7 @@ function renderKitchen(){
 function tableStatus(t){
   const o=state.orders[t.id];
   if(!o) return {cls:"open", label:"Open", meta:t.seats+" seats"};
-  if(state.tickets.some(k=>k.orderId===o.id && k.state!=="ready" && k.state!=="served" && ticketMin(k)>=LATE_MIN))
+  if(state.tickets.some(k=>k.orderId===o.id && k.state!=="served" && !k.items.every(i=>i.done) && ticketMin(k)>=LATE_MIN))
     return {cls:"late", label:"Kitchen late", meta:o.covers+" covers · "+ago(o.opened)};
   if(orderPaid(o)>0) return {cls:"checkreq", label:"Paying", meta:o.covers+" covers"};
   if(o.lines.some(l=>l.course==="SECONDI"&&l.state==="sent")) return {cls:"entrees", label:"Secondi fired", meta:o.covers+" covers"};
@@ -1286,6 +1371,7 @@ function renderPay(){
    ============================================================ */
 function renderInsights(){
   const burrata=state.stock["a1"]??0;
+  const burrataChecks=Object.values(state.orders).filter(o=>o.lines.some(l=>l.itemId==="a1"&&l.state!=="voided")).length;
   const openChecks=Object.values(state.orders).length;
   const openTotal=Object.values(state.orders).reduce((a,o)=>a+orderTotal(o),0);
   $("#metricRow").innerHTML=[
@@ -1297,7 +1383,7 @@ function renderInsights(){
   ].map(m=>`<div class="metric"><div class="m-label">${m.l}</div><div class="m-value num">${m.v}</div>
     <div class="m-delta ${m.up?"up":"down"}">${m.d}</div></div>`).join("");
   $("#attnCards").innerHTML=[
-    {i:"⚠", t:"Burrata will 86 mid-service", p:`Only <b>${burrata} left</b> and it's on 2 open checks. Tuesday average is 11 sold by 9 PM.`, w:"Live count from tonight's orders · suggest: brief servers on the Carpaccio as the alternative"},
+    {i:"⚠", t:"Burrata will 86 mid-service", p:`Only <b>${burrata} left</b> and it's on ${burrataChecks} open check${burrataChecks===1?"":"s"}. Tuesday average is 11 sold by 9 PM.`, w:"Live count from tonight's orders · suggest: brief servers on the Carpaccio as the alternative"},
     {i:"🍷", t:"Barolo by the glass is moving", p:"6 glasses in the first seating, pace suggests the open bottle count won't cover the 8 PM turn.", w:"From tonight's beverage fires · suggest: open one bottle ahead"},
     {i:"⏱", t:"Terrazza 23 entrée wait at 15m", p:"Secondi fired 15 minutes ago and the grill station has 3 tickets stacked. This party's antipasti pace was fast.", w:"From KDS timing · suggest: expo check-in, offer a round on pace"},
     {i:"📉", t:"San Marzano cost up 9% this month", p:"Every pizza and the bruschetta carry it. At tonight's mix that's ≈ $31 of margin.", w:"Demo figure, in the real product this comes from vendor invoices"}
@@ -1311,7 +1397,7 @@ function renderInsights(){
 function renderBadges(){
   const n=Object.keys(state.orders).length;
   $("#badgeTables").textContent=n||"";
-  $("#badgeKitchen").textContent=state.tickets.filter(t=>t.state!=="served").length||"";
+  $("#badgeKitchen").textContent=new Set(state.tickets.filter(t=>t.state!=="served").map(t=>t.where)).size||"";
 }
 
 /* ============================================================
@@ -1329,16 +1415,19 @@ function seed(){
   addLine(t3,"a1",1,2); addLine(t3,"a2",1,4);
   addLine(t3,"m2",1,1,[{n:"Tagliatelle"}]); addLine(t3,"m3",1,2); addLine(t3,"m1",1,3,[{n:"Rigatoni"}]); addLine(t3,"m4",1,4);
   log(t3,"Fired to kitchen","Primi · 4 items"); log(t3,"Fired to kitchen","Antipasti · 2 items"); log(t3,"Check opened","Table 3 · 4 covers");
+  state.tickets.push({id:"K-113", where:"Table 3", orderId:"T3", course:"ANTIPASTI",
+    items:[{qty:1,name:"Burrata e Prosciutto",station:"FREDDO",mods:"",done:false},{qty:1,name:"Calamari Fritti",station:"SAUTÉ",mods:"",done:true}],
+    placed:Date.now()-11*60000, state:"open"});
   state.tickets.push({id:"K-114", where:"Table 3", orderId:"T3", course:"PRIMI",
-    items:[{qty:1,name:"Ragù alla Bolognese",station:"SAUTÉ",mods:"Tagliatelle"},{qty:1,name:"Linguine alle Vongole",station:"SAUTÉ",mods:""},{qty:1,name:"Cacio e Pepe",station:"SAUTÉ",mods:"Rigatoni"},{qty:1,name:"Risotto ai Funghi",station:"SAUTÉ",mods:""}],
-    placed:Date.now()-7*60000, state:"working"});
+    items:[{qty:1,name:"Ragù alla Bolognese",station:"SAUTÉ",mods:"Tagliatelle",done:true},{qty:1,name:"Linguine alle Vongole",station:"SAUTÉ",mods:"",done:false},{qty:1,name:"Cacio e Pepe",station:"SAUTÉ",mods:"Rigatoni",done:false},{qty:1,name:"Risotto ai Funghi",station:"SAUTÉ",mods:"",done:false}],
+    placed:Date.now()-7*60000, state:"open"});
 
   const t23=mk("T23",6,52);
   addLine(t23,"e1",1,1,[{n:"Medium rare"}]); addLine(t23,"e2",2,3); addLine(t23,"e3",1,5); addLine(t23,"c1",2,1); addLine(t23,"c2",1,4);
   log(t23,"Fired to kitchen","Secondi · 5 items"); log(t23,"Check opened","Terrazza 23 · 6 covers");
   state.tickets.push({id:"K-115", where:"Terrazza 23", orderId:"T23", course:"SECONDI",
-    items:[{qty:1,name:"Bistecca Fiorentina",station:"GRILL",mods:"Medium rare"},{qty:2,name:"Branzino al Forno",station:"GRILL",mods:""},{qty:1,name:"Pollo al Mattone",station:"GRILL",mods:""}],
-    placed:Date.now()-15*60000, state:"working"});
+    items:[{qty:1,name:"Bistecca Fiorentina",station:"GRILL",mods:"Medium rare",done:false},{qty:2,name:"Branzino al Forno",station:"GRILL",mods:"",done:true},{qty:1,name:"Pollo al Mattone",station:"GRILL",mods:"",done:false}],
+    placed:Date.now()-15*60000, state:"open"});
 
   const t12=mk("T12",2,84);
   addLine(t12,"s1",1,1,[{n:"Add anchovy",p:3}]); addLine(t12,"p3",1,1); addLine(t12,"m5",1,2); addLine(t12,"d1",2,1); addLine(t12,"b2",2,2,[{n:"Glass"}]);
@@ -1347,10 +1436,10 @@ function seed(){
   log(t12,"Payment taken","Partial · Card · $60.00"); log(t12,"Discount applied","Industry 10%"); log(t12,"Check opened","Table 12 · 2 covers");
 
   const b2=mk("B2",1,12);
-  addLine(b2,"b5",1,1); addLine(b2,"a3",1,1);
+  addLine(b2,"b5",1,1); addLine(b2,"a1",1,1);
   log(b2,"Fired to kitchen","Antipasti · 1 item"); log(b2,"Check opened","Bar 2 · 1 cover");
   state.tickets.push({id:"K-117", where:"Bar 2", orderId:"B2", course:"ANTIPASTI",
-    items:[{qty:1,name:"Bruschetta al Pomodoro",station:"FREDDO",mods:""}], placed:Date.now()-3*60000, state:"new"});
+    items:[{qty:1,name:"Burrata e Prosciutto",station:"FREDDO",mods:"",done:false}], placed:Date.now()-3*60000, state:"open"});
 
   /* Current check: Table 14, mid-order, one course held, allergy demo */
   const t14=mk("T14",4,9);
@@ -1361,8 +1450,8 @@ function seed(){
   t14.hold["PRIMI"]=true;
   log(t14,"Course held","Primi"); log(t14,"Fired to kitchen","Beverage · 2 items"); log(t14,"Check opened","Table 14 · 4 covers");
   state.tickets.push({id:"K-116", where:"Table 14", orderId:"T14", course:"BEVERAGE",
-    items:[{qty:2,name:"Pinot Grigio",station:"BAR",mods:"Glass"},{qty:1,name:"Acqua Panna",station:"BAR",mods:""}],
-    placed:Date.now()-6*60000, state:"ready"});
+    items:[{qty:2,name:"Pinot Grigio",station:"BAR",mods:"Glass",done:true},{qty:1,name:"Acqua Panna",station:"BAR",mods:"",done:true}],
+    placed:Date.now()-6*60000, state:"open"});
   state.currentId="T14";
 }
 
