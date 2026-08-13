@@ -29,7 +29,13 @@
   --r-sm:8px; --r-tile:12px; --r-card:16px; --r-pill:9999px;
   --tap:44px; --rail:86px; --topbar:60px; --check-w:372px;
   --safe-b:env(safe-area-inset-bottom,0px);
+  /* Visible viewport height. Mobile browsers resolve percentage heights
+     against a viewport that can differ from what the user actually sees
+     once the URL bar is showing, which leaves dead space under the app.
+     dvh fixes it where supported; boot JS pins the exact pixel value. */
+  --vph:100vh;
 }
+@supports (height:100dvh){ :root{ --vph:100dvh; } }
 @media (prefers-color-scheme:dark){ :root:not([data-theme="light"]){
   color-scheme:dark;
   --brand-hover:#b1f286; --brand-wash:rgba(159,232,112,.14);
@@ -63,8 +69,8 @@
    2. APP SHELL
    ============================================================ */
 *{margin:0;padding:0;box-sizing:border-box}
-html,body{height:100%}
-body{background:var(--bg);color:var(--ink);font-family:var(--font);font-size:15px;line-height:1.45;
+html{height:100%}
+body{height:var(--vph);background:var(--bg);color:var(--ink);font-family:var(--font);font-size:15px;line-height:1.45;
   -webkit-font-smoothing:antialiased;overflow:hidden;user-select:none;-webkit-user-select:none;
   transition:background-color .25s ease,color .25s ease}
 button{font-family:var(--font);cursor:pointer;color:inherit;background:none;border:none}
@@ -116,8 +122,8 @@ body.offline .net-banner{display:flex}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
 
 /* Screens */
-.main{position:relative;overflow:hidden;display:flex;flex-direction:column}
-.screens{flex:1;position:relative;overflow:hidden}
+.main{position:relative;overflow:hidden;display:flex;flex-direction:column;min-height:0}
+.screens{flex:1;min-height:0;position:relative;overflow:hidden}
 .screen{position:absolute;inset:0;display:none;overflow:hidden}
 .screen.active{display:flex}
 
@@ -452,7 +458,7 @@ body.offline .net-banner{display:flex}
   .menu-area{padding-bottom:80px}
 
   .check{position:fixed;left:0;right:0;top:auto;bottom:calc(58px + var(--safe-b));width:100%;z-index:140;
-    max-height:calc(100dvh - var(--topbar) - 58px - var(--safe-b));
+    max-height:calc(var(--vph) - var(--topbar) - 58px - var(--safe-b));
     border-left:none;border-top:1px solid var(--line);border-radius:16px 16px 0 0;box-shadow:var(--shadow-lg);
     transform:translateY(calc(100% - 54px));transition:transform .22s ease-out}
   body.check-open .check{transform:none}
@@ -460,14 +466,19 @@ body.offline .net-banner{display:flex}
     padding:0 18px;font-size:15px;font-weight:700;border-bottom:1px solid var(--line-subtle)}
   .check-handle .car{color:var(--ink-3);font-size:12px;margin-left:8px}
 
-  .room{aspect-ratio:4/3;max-height:none}
-  .modal{max-height:92dvh}
+  .room{aspect-ratio:4/3;max-height:none;flex-shrink:0}
+  .modal{max-height:calc(var(--vph) - 32px)}
   .drawer{width:100vw}
-  .kds-body{flex-direction:column;overflow-y:auto}
-  .kds-side{width:100%;display:flex;gap:10px;overflow-x:auto;padding-bottom:4px}
+  #screen-kitchen{padding:12px 14px}
+  .kds-bar{margin-bottom:8px}
+  .kds-note{display:none}
+  .kds-body{flex-direction:column;overflow-y:auto;min-height:0}
+  .kds-side{width:100%;display:flex;gap:10px;overflow-x:auto;padding-bottom:4px;flex-shrink:0}
   .kds-side .side-title{display:none}
   .agg{min-width:190px;flex-shrink:0;margin-bottom:0}
-  .kds-flow{overflow:visible;flex-wrap:wrap}
+  .kds-flow{overflow:visible;flex-wrap:wrap;flex:none}
+  .ticket{max-width:none;width:100%}
+  #screen-tables,#screen-insights{padding:14px}
 }
 </style>
 </head>
@@ -832,6 +843,17 @@ $("#netBtn").addEventListener("click", ()=>{
   if(!state.online) toast("Connection lost, running local-first","warn");
 });
 function tickClock(){ $("#pillClock").textContent=nowStr(); }
+
+/* Pin the shell to the height the phone is actually showing. dvh covers
+   most modern browsers, but the URL bar sliding away still leaves a gap
+   on some Android builds, so the exact pixel value wins. Uses
+   innerHeight, not visualViewport: the latter also shrinks for the
+   on-screen keyboard and pinch-zoom, which would squash the shell. */
+function setViewportH(){
+  document.documentElement.style.setProperty("--vph", window.innerHeight+"px");
+}
+addEventListener("resize", setViewportH);
+addEventListener("orientationchange", ()=>setTimeout(setViewportH,150));
 
 /* ============================================================
    5. NAVIGATION
@@ -1522,6 +1544,7 @@ function seed(){
   state.currentId="T14";
 }
 
+setViewportH();
 applyTheme();
 seed();
 renderCats(); renderTiles(); renderCheck(); renderBadges();
