@@ -23,6 +23,8 @@ This repository is the product-discovery and planning stage of that journey: pro
 
 **Live demo:** [saengsawat.github.io/RestaurantOS](https://saengsawat.github.io/RestaurantOS/). The root `index.html` is a copy of the flagship, so re-copy it after any mockup change or the live demo goes stale.
 
+**Sharing with an operator:** `docs/RestaurantOS_User_Guide.docx` (and a PDF of the same) is a 16-page illustrated walkthrough of every screen, ending with the specific questions we need an operator to answer. Send it with the demo link.
+
 ## Start here
 
 1. **See the product:** open `prototypes/index_RestaurantOS.html`. Service (coursed ordering, seat-level items, hold and fire, live 86 counts), Tables (spatial floor plan, party size, transfers), Kitchen (one card per table, per-item bump, cook-together pane), and Insights, plus split payments, manager-PIN voids, a per-check audit trail, offline simulation with honest pending-upload states, Day/Night themes, and a full phone layout.

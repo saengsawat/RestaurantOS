@@ -8,6 +8,7 @@ The authoritative ticket list (master plan §5.5). Currently tracking Phase 0 wo
 |---|---|---|---|
 | WP-0.1 | Repo under git, layered layout, demo doc (README) | **Done** 2026-08-11 | Orchestrator |
 | WP-0.2 | Operator sessions with Matt (guide: `docs/discovery/operator-session-guide.md`) | **Ready, waiting on scheduling** | Andy + Matt |
+| WP-0.2a | Send Matt the walkthrough (`docs/RestaurantOS_User_Guide.docx` / `.pdf`) plus the live demo link, ahead of the session | **Ready to send** | Andy |
 | WP-0.3 | Discovery notes, labeled OBSERVED/INFERRED | Blocked by WP-0.2 | Andy |
 | WP-0.4 | Pilot-selection criteria (draft in session guide, finalize with Matt) | Draft done | Andy + Matt |
 | WP-0.5 | Freeze D6 (LAN survival P0?) in DECISIONS.md | Blocked by WP-0.2 | Andy |
