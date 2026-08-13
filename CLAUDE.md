@@ -20,7 +20,20 @@ Ignore the CI/lint/test/dependency tooling recommended in the research reports (
 
 **`docs/plans/RestaurantOS_Master_Plan_v2.0.md`**, the project's source of truth for *what happens next*: vision, phased roadmap (discovery → POS PRD → domain model → backlog → build → pilot), the **Agent Operating Model** (roles, model assignment, ticket contracts, review rules for Claude Code agents), work breakdown structure, governance, decision log, and design-language decision. **Consult it before starting any non-trivial work.** `docs/plans/archive/` holds the superseded v1.0.
 
-**`prototypes/index_RestaurantOS.html`** ★, the flagship mockup: "Osteria Nove," a fictional Italian full-service restaurant on the RestaurantOS design system. Four screens (Service / Tables / Kitchen / Insights) plus modals. Features beyond the discovery prototypes: course-based firing with hold/fire, seat-level ordering, live 86/stock counts, offline simulation with honest "pending upload" payment states, manager-PIN void approval, per-check audit trail, split payments (full/even/by-seat), check switching and table transfer, recallable KDS tickets, a spatial floor plan (percent-positioned tables per section, editable in the `TABLES`/`DECOR` data), Day/Night themes, and a mobile layout (bottom tabs + check bottom sheet at ≤820px). Treat it as the default target when the user says "the prototype."
+**`prototypes/index_RestaurantOS.html`** ★, the flagship mockup: "Osteria Nove," a fictional Italian full-service restaurant on the RestaurantOS design system. Four screens (Service / Tables / Kitchen / Insights) plus modals. What it demonstrates beyond the discovery prototypes:
+
+- **Service**: course-based firing with hold/fire, seat-level ordering, live 86/stock counts, check switching (tap the table name in the check header), More menu with working table transfer and cancel-empty-check alongside deliberate stubs.
+- **Tables**: spatial floor plan, tables percent-positioned per section with shapes, decor, status colors, and seat-occupancy dots. Layout lives in the `TABLES`/`DECOR` data so a real room is a data edit. Editable party size (covers) with a guard against shrinking below a seat that has items.
+- **Kitchen**: one card per table with dispatches stacked in fire order and `New` flags, per-item bump (tap to plate, tap to undo), Serve gated on all items done and limited to the all-stations expo view, 10-minute recall, and a cook-together pane aggregating duplicate dishes across tables.
+- **Cross-cutting**: offline simulation with honest "pending upload" payment states, manager-PIN void approval, per-check audit trail, split payments (full/even/by-seat), Day/Night themes, and a mobile layout (bottom tabs + check bottom sheet at ≤820px).
+
+Two implementation notes that are easy to break: the shell is sized with the `--vph` token (`100vh` → `100dvh` → exact `innerHeight` px from boot JS), never `height:100%`, because percentage heights strand content on phones; and stock badges sit in flow on the tile price row rather than floating in a corner, because absolute badges collide with wrapping names.
+
+**`index.html` at the repo root is a published copy of the flagship**, served by GitHub Pages at `saengsawat.github.io/RestaurantOS/`. It is not a separate prototype. After changing the flagship, re-copy it or the live demo goes stale:
+
+```powershell
+Copy-Item prototypes\index_RestaurantOS.html index.html -Force
+``` Treat it as the default target when the user says "the prototype."
 
 **`prototypes/discovery/`**, three first-generation POS mockups (Thai restaurant "Nine Thai Kitchen"): `index.html` (most developed, Linear-derived tokens, day/night), `index_Claude.html` (dark), `index_Codex.html` (light). Kept for comparison; alternate implementations of one brief, **an edit to one never auto-applies to the others.** The multi-check model differs: `index.html`/`index_Claude.html` hold many concurrent checks (`state.orders{}` + `cur()`), `index_Codex.html` holds a single `state.order`.
 

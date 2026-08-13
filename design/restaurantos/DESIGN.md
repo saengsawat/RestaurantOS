@@ -113,6 +113,8 @@ Check lines, totals, tips, splits, drawer counts, and every analytics metric ali
 
 `background: var(--surface); border-radius: 12px; box-shadow: var(--ring); min-height: 72px; padding: 12px 14px;` Item name at UI-label weight, price in tabular numerals at `--ink-3`. Selected state: `--brand-wash` fill + 1.5px `--brand-ink`-toned border (Day) / lime border (Night). 86'd items: `--surface-2` fill, `--ink-4` text, small red `86` badge, never hidden, staff must see what's off.
 
+**Badges never float over text.** Stock badges (`3 left`, `86`) sit in normal flow on the tile's price row, right-aligned opposite the price. An absolutely positioned corner badge collides with long item names the moment the tile narrows, and tiles narrow constantly across phone, handheld, and terminal. The general rule: any badge that shares a card with wrapping text reserves its own space in the layout.
+
 ### Status chips
 
 `border-radius: 9999px; padding: 3px 10px; font: 700 11px/1 var(--font); letter-spacing: .06em; text-transform: uppercase;`, wash background, line border, solid text of the state's triple. Chips are the single loudest element in any row; nothing else competes.
@@ -123,7 +125,17 @@ White (Day) or `--surface` (Night) card, `border-radius: 16px`, ring shadow. Lin
 
 ### KDS ticket
 
-A card whose **top border is the status**: 4px solid in the state color, wash-tinted header showing table/check (mono) and elapsed time. Elapsed time flips to `--red` solid at the late threshold. Items at 16px/600, kitchen reading distance is farther than server reading distance. Bump action is a full-width lime pill at the card's bottom.
+**One card per table, not per fire.** Kitchens think in tables. Each dispatch (a fired course) stacks inside the table's card in fire order with its course name, age, and ticket id; anything fired within the last few minutes carries a `New` chip so the line sees what just landed without a new card appearing on the rail. The underlying dispatch records stay separate and immutable, this is a display projection over them.
+
+Card anatomy: **top border is the status** (4px solid in the state color), wash-tinted header showing the table (mono) and the age of its oldest open dispatch. Items at 16px/600, kitchen reading distance is farther than server reading distance.
+
+**Items bump individually.** Every item is a tappable row with a checkbox: tap when plated, tap again to undo, so a mis-tap on the line is its own remedy. Card state derives from its items rather than being set directly: untouched = info, some plated = amber, all plated = green, past the late threshold with work outstanding = red. The **Serve** action releases the whole table and unlocks only when every item is done.
+
+**Serving belongs to expo.** Station-filtered views (`FORNO`, `SAUTÉ`, …) show only that station's items and no Serve action; releasing a table happens from the all-stations view. Served tables stay recallable for a grace window before they purge, because a table sent out by accident during a rush must be recoverable.
+
+### Cook-together pane
+
+A side rail beside the ticket flow, aggregating identical not-yet-plated dishes across different tables (`2× Burrata e Prosciutto · Table 3, Bar 2`). It is the "someone organizing tickets" job made automatic: the line fires duplicates together instead of scanning every card. Entries disappear as items are plated. Only genuine duplicates appear, meaning quantity ≥ 2 across ≥ 2 tables, so the pane stays quiet when it has nothing useful to say.
 
 ### Modals
 
@@ -142,6 +154,23 @@ Base-8 scale, dense by design: `4, 8, 12, 16, 24, 32` px. Cards pad 16–20px; s
 ### App shell
 
 Left icon rail or sidebar (nav + badge counts), 60px topbar (venue, employee, check meta, clock), content area per screen. On tablets ≤1024px the check collapses to a bottom sheet with a persistent total bar. Safe-area insets respected (`env(safe-area-inset-bottom)`).
+
+### Viewport height (`--vph`)
+
+Never size a full-height POS shell with `height: 100%`. On phones a percentage height resolves against a viewport that does not match the visible area once browser toolbars are involved, which strands the content in a short scroll window with dead space beneath it. Size the shell to `var(--vph)` instead, defined in three layers, strongest last:
+
+```css
+:root{ --vph: 100vh; }
+@supports (height:100dvh){ :root{ --vph: 100dvh; } }
+/* boot JS pins the exact value and keeps it current */
+document.documentElement.style.setProperty("--vph", window.innerHeight+"px");
+```
+
+Use `innerHeight`, not `visualViewport.height`: the latter also shrinks for the on-screen keyboard and pinch-zoom, which would squash the shell mid-typing. Bottom sheets and modal max-heights measure against `--vph` too. Scrolling flex children need `min-height: 0` or they refuse to size down.
+
+### Spatial floor plan
+
+Tables are positioned where they physically sit in the room, as percentages of a room container, with shape (round two-top, rectangular four-top) and non-interactive decor for fixed features (kitchen pass, bar counter, service station). Status is carried by border color plus fill wash, with seat dots showing capacity against current party size. The operator draws their own room once during setup; positions are data, never code.
 
 ### Grid
 
@@ -170,6 +199,19 @@ Elevation is quiet: **ring first, shadow second.**
 
 Cards sit on the canvas with the ring alone. Hover adds `--shadow-sm`. Only modals and the bottom sheet use `--shadow-lg`. In Night mode elevation also steps surface luminance (`--panel` → `--surface` → `--surface-2`), since shadows die on dark grounds. No glassmorphism, no gradients in chrome, the single permitted gradient is a faint brand-wash radial behind empty states.
 
+### Motion
+
+Motion has three jobs and no others: confirm a touch, ease a theme change, and escalate a genuine alarm.
+
+| Purpose | Spec |
+|---|---|
+| Press feedback | `transform: scale(0.97)` within 100ms, on every interactive surface |
+| Theme change | 250ms ease on `background-color`, `color`, `border-color` across shell, panels, cards, modals, drawer |
+| Late escalation | `latePulse`, a 2s expanding ring on overdue KDS cards and floor-plan tables, built from `--red-line` so it is correct in both themes |
+| Modal entry | 160ms scale-and-fade, nothing longer |
+
+Everything else is static. No decorative transitions, no entrance animations on lists, nothing that delays a tap. All animation and transition is disabled under `prefers-reduced-motion: reduce`, which is a single global rule, not per-component opt-in.
+
 ## 7. Do's and Don'ts
 
 ### Do
@@ -190,6 +232,9 @@ Cards sit on the canvas with the ring alone. Hover adds `--shadow-sm`. Only moda
 - Don't use pure white on Night surfaces (`--ink` is `#f2f1ec`, warm).
 - Don't add hover-dependent affordances, fingers don't hover. Anything hover reveals must also be reachable by tap.
 - Don't animate anything on the service-critical path beyond 150ms; a POS that "feels designed" during a rush is a POS that feels slow.
+- Don't position badges absolutely over text that wraps; they collide the moment the container narrows.
+- Don't size a full-height shell with `height: 100%`; use `--vph` (see §5).
+- Don't make a destructive or hard-to-reverse action a single tap on the line. Item bumps toggle, served tables stay recallable, voids need a reason and approval.
 
 ## 8. Responsive Behavior & Touch
 
@@ -198,8 +243,8 @@ Cards sit on the canvas with the ring alone. Hover adds `--shadow-sm`. Only moda
 | Range | Layout |
 |---|---|
 | ≥1280px | Full: sidebar + content + persistent check panel |
-| 768–1279px | Rail nav; check panel collapses to bottom sheet with total bar |
-| <768px (handheld) | Single column; nav becomes bottom tabs; tiles 2-up |
+| 821–1279px | Rail nav collapses to icons; check panel stays docked |
+| ≤820px (handheld) | Nav becomes bottom tabs; check becomes a bottom sheet with a persistent total bar; category rail scrolls horizontally; KDS cards go full width; modals and drawer go full width |
 
 ### Touch layer (non-negotiable)
 
@@ -209,6 +254,15 @@ Cards sit on the canvas with the ring alone. Hover adds `--shadow-sm`. Only moda
 - Neutralize sticky hover on touch devices (`@media (hover: none)`).
 - `viewport-fit=cover`; respect all safe-area insets; the bottom sheet's action bar floats above the home indicator.
 - Destructive actions are two-step everywhere (tap → confirm modal); no swipe-to-delete.
+- Size the shell with `--vph` (§5), never `height: 100%`.
+
+### Keyboard and assistive access
+
+Touch is the primary input, but it is not the only one: managers use keyboards on back-office screens, and accessibility is not optional on a product staff use every shift.
+
+- `:focus-visible` draws a 2px `--brand` outline at 2px offset on every interactive element. Focus is never removed without a replacement.
+- Motion respects `prefers-reduced-motion: reduce` globally (§6).
+- Status is never carried by color alone: every state chip also carries a word (`READY`, `LATE`, `New`), and plated items get a checkmark plus strikethrough, not just a color change.
 
 ## 9. Agent Prompt Guide
 
@@ -221,6 +275,8 @@ Brand lime #9fe870 (fill only, ink text #163300), pill radius 9999px, 48px tall
 Status: info #0a7ea4/#4cc3e8 · amber #a16207/#e3b341 · green #116e3b/#34d399 · red #c22f35/#f0555a (Day/Night), each with wash+line
 Radius: 8 / 12 / 16 / pill · Ring border rgba(14,15,12,.12) · Font: Inter, UI at 600, money tabular-nums
 Touch: 44px min, 48px primary, scale(.97) press
+Shell height: var(--vph), never 100% · Focus: 2px --brand outline
+Motion: 250ms theme, 100ms press, 2s latePulse, nothing else
 ```
 
 ### Example component prompts

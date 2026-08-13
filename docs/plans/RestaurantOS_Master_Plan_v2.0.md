@@ -5,6 +5,7 @@
 **Mission:** Build a restaurant POS that overtakes Toast and Square, by closing the loop from transactions to the operator's daily decisions.
 
 **Changelog**
+- v2.3 (2026-08-12): Flagship mockup matured through founder review: KDS rebuilt on sous-chef feedback (one card per table, per-item bump, cook-together pane), editable party size, spatial floor plan, phone layout fixed. New operator questions added to §9. Design system gained motion, focus, viewport-height, and KDS pattern rules.
 - v2.2 (2026-08-11): Repo reorganized into `docs/` `design/` `prototypes/` layers and placed under git (WP-0.1 partially done). Flagship Italian mockup (`prototypes/index_RestaurantOS.html`) added to assets (§2).
 - v2.1 (2026-08-11): Added Design Theme & Atmosphere (§14), Wise-derived RestaurantOS design system adopted; template at `design/restaurantos/`. Decision D11.
 - v2.0 (2026-08-11): Added Agent Operating Model (§5), Work Breakdown Structure (§7), Governance & Cadence (§8), Quality System (§10), agent-specific risks (§11), Traceability appendix (§13). Deepened phase detail with entry criteria and RACI.
@@ -51,7 +52,8 @@ Every substantive element in this plan is sourced from the Toast deep-research r
 
 | Asset | Status | Feeds into |
 |---|---|---|
-| **Flagship mockup** `prototypes/index_RestaurantOS.html` (Osteria Nove, Italian), coursing, seats, 86 counts, offline sim, audit trail, splits, Day/Night on the D11 design system | Done | Phase 0 operator conversations; the UX hypothesis for Phase 1 PRD |
+| **Flagship mockup** `prototypes/index_RestaurantOS.html` (Osteria Nove, Italian): coursing, seats, 86 counts, spatial floor plan, party size, table-consolidated KDS with per-item bump and cook-together pane, offline sim, audit trail, splits, Day/Night, full phone layout | Done, iterating on founder review | Phase 0 operator conversations; the UX hypothesis for Phase 1 PRD |
+| `docs/discovery/` session guide + founder KDS notes | Done | WP-0.2 agenda; kitchen requirements for Phase 1 PRD |
 | 3 discovery prototypes `prototypes/discovery/` (Thai, first generation) | Done | Kept for comparison, **UX hypotheses, not architecture** **[S]** |
 | Design system `design/restaurantos/` (D11) | Done | All UI work, §14 |
 | `docs/research/Toast-deep-research-report.md` | Done | Domain model, sync protocol, API design, priorities, risk register, pilot questions |
@@ -424,12 +426,28 @@ Decisions never made without operator input, by phase:
 
 | Phase | Reserved for Matt |
 |---|---|
-| 0 | All 21 pilot questions **[T]**; which prototype UX feels right; pilot criteria |
+| 0 | All 21 pilot questions **[T]**; the mockup-raised questions below; which prototype UX feels right; pilot criteria |
 | 1 | PRD review; scope strikes/additions; what "sellable" means to a real operator |
 | 2 | Kitchen state semantics (prep vs expo); payment behaviors (tips post-auth, preauth/tabs, offline-card limit); venue hardware reality |
 | 3–4 | Milestone demos; workflow-reality bug reports |
 | 5 | Pilot venue introduction; shadow-run tolerance; go/no-go on cutover |
 | 6+ | Which intelligence recommendation he'd actually act on **[PRD §14]** |
+
+### Questions the mockup itself raised
+
+Building the flagship forced choices that only an operator can settle. Each is currently a defensible guess, marked `INFERRED`, and each is cheap to change now and expensive to change after Phase 4.
+
+| Question | What we guessed | Why it matters |
+|---|---|---|
+| Should tapping an occupied table open the check directly, or show table actions first? | Actions modal first | One tap on the most repeated action of the shift, against discoverability of transfer and guest count |
+| How long should a just-fired course read as `New` on the KDS? | 3 minutes | Too short and the line misses it; too long and everything looks new |
+| Can a station bump a table out, or only expo? | Expo only, from the all-stations view | Determines whether station screens are cook-only surfaces |
+| How long should a served table stay recallable? | 10 minutes | The recovery window for a mis-bump during a rush |
+| Should an all-plated but unserved table re-escalate? | No | Food dying in the window is a real failure mode with no current alarm |
+| Does a party of 6 or more trigger auto-gratuity, and at what threshold? | Not modeled | Changes check math, not just display **[T]** |
+| Should covers be forced at seating, or optional? | Required to seat | Affects per-cover reporting integrity |
+
+Founder kitchen experience (3 years sous chef) already shaped the KDS design and is logged as `OBSERVED` in `docs/discovery/notes-2026-08-12-andy.md`. Matt's answers either confirm those or override them.
 
 ---
 

@@ -21,7 +21,24 @@ The authoritative ticket list (master plan §5.5). Currently tracking Phase 0 wo
 | WP-1.1 | Draft `docs/prd/RestaurantOS_POS_PRD.md` from the Toast requirements table + discovery notes |
 | WP-1.2 | Matt review cycle, scope signoff (V1 / P1 / P2 / never) |
 
+## Flagship mockup: done since first cut
+
+Tracked here because the mockup is the Phase 0 conversation tool, so its state matters to WP-0.2.
+
+| Date | Change |
+|---|---|
+| 08-11 | Check switching, working table transfer, cancel-empty-check, More menu with stubs |
+| 08-11 | Reversible KDS (back-step, recall window) instead of one-way bump |
+| 08-11 | Spatial floor plan: positioned tables, shapes, decor, legend |
+| 08-11 | Phone layout: bottom tabs, check bottom sheet, horizontal category rail |
+| 08-11 | Em dashes removed repo-wide; style rule recorded (D12) |
+| 08-12 | KDS rebuilt on founder feedback: one card per table, `New` flags, per-item bump, expo-only serve, cook-together pane |
+| 08-12 | Editable party size with seat-assignment guard; seat dots on floor plan |
+| 08-12 | Theme transitions, late pulse, focus-visible, reduced-motion (ported from a Gemini pass, minus its CDN font links) |
+| 08-12 | Phone viewport height fix (`--vph`), stock badge no longer overlaps item names |
+
 ## Non-blocking side items
 
 - Publish the mockup and master plan as private artifacts to share with Matt (optional, on request)
-- Ready-ticket re-escalation on KDS (expo question from 2026-08-11 session, ask Matt)
+- Decide whether to keep or delete `prototypes/index_RestaurantOS_Gemini.html` now that its changes are merged
+- Mockup-raised operator questions are consolidated in master plan section 9 and the session guide (deck A2)

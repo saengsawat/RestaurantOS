@@ -15,14 +15,17 @@ This repository is the product-discovery and planning stage of that journey: pro
 │   └── adr/          architecture decision records (Phase 2, empty until then)
 ├── design/
 │   └── restaurantos/ the RestaurantOS design system: DESIGN.md + Day/Night previews
-└── prototypes/
-    ├── index_RestaurantOS.html   ★ flagship mockup, Osteria Nove (Italian), new design system
-    └── discovery/                first-generation POS mockups (Thai restaurant, three variants)
+├── prototypes/
+│   ├── index_RestaurantOS.html   ★ flagship mockup, Osteria Nove (Italian), new design system
+│   └── discovery/                first-generation POS mockups (Thai restaurant, three variants)
+└── index.html                    published copy of the flagship, served by GitHub Pages
 ```
+
+**Live demo:** [saengsawat.github.io/RestaurantOS](https://saengsawat.github.io/RestaurantOS/). The root `index.html` is a copy of the flagship, so re-copy it after any mockup change or the live demo goes stale.
 
 ## Start here
 
-1. **See the product:** open `prototypes/index_RestaurantOS.html`, Service (coursed ordering, seats, holds), Tables, Kitchen (KDS), Insights, plus payment/split, voids with manager PIN, an audit trail, offline simulation, and Day/Night themes.
+1. **See the product:** open `prototypes/index_RestaurantOS.html`. Service (coursed ordering, seat-level items, hold and fire, live 86 counts), Tables (spatial floor plan, party size, transfers), Kitchen (one card per table, per-item bump, cook-together pane), and Insights, plus split payments, manager-PIN voids, a per-check audit trail, offline simulation with honest pending-upload states, Day/Night themes, and a full phone layout.
 2. **Understand the plan:** read `docs/plans/RestaurantOS_Master_Plan_v2.0.md`, vision, phased roadmap (discovery → PRD → domain model → backlog → build → pilot), and how work is delegated to AI agents.
 3. **Build UI like the product:** follow `design/restaurantos/DESIGN.md`, the design language every RestaurantOS surface uses.
 
