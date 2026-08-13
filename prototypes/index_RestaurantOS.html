@@ -144,8 +144,11 @@ body.offline .net-banner{display:flex}
 .tile:active{transform:scale(.96)}
 .tile-name{display:block;font-size:14.5px;font-weight:600;line-height:1.25}
 .tile-sub{display:block;font-size:11px;color:var(--ink-4);font-weight:550;margin-top:2px}
+/* Stock badge sits in flow on the price row, never floating over the
+   name: a narrow tile wraps the name instead of colliding with it. */
+.tile-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:6px}
 .tile-price{font-size:13.5px;color:var(--ink-3);font-weight:600}
-.tile .low{position:absolute;top:8px;right:8px;font-size:10px;font-weight:700;color:var(--amber);
+.tile .low{flex-shrink:0;white-space:nowrap;font-size:10px;font-weight:700;color:var(--amber);
   background:var(--amber-wash);border:1px solid var(--amber-line);border-radius:var(--r-pill);padding:1px 7px}
 .tile.t86{background:var(--surface-2);box-shadow:none}
 .tile.t86 .tile-name,.tile.t86 .tile-price{color:var(--ink-4)}
@@ -885,8 +888,8 @@ function renderTiles(){
     const is86 = left===0;
     const lowTag = left===undefined?"":(is86?`<span class="low">86</span>`:(left<=5?`<span class="low">${left} left</span>`:""));
     return `<button class="tile ${is86?"t86":""}" data-item="${i.id}" ${is86?"disabled":""}>
-      ${lowTag}<span><span class="tile-name">${esc(i.name)}</span><span class="tile-sub">${esc(i.sub)}</span></span>
-      <span class="tile-price num">${money(i.price)}</span></button>`;
+      <span><span class="tile-name">${esc(i.name)}</span><span class="tile-sub">${esc(i.sub)}</span></span>
+      <span class="tile-foot"><span class="tile-price num">${money(i.price)}</span>${lowTag}</span></button>`;
   }).join("");
   document.querySelectorAll(".tile[data-item]").forEach(t=>t.addEventListener("click",()=>openConfig(t.dataset.item)));
 }
