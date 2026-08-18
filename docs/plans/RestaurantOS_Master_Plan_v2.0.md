@@ -5,6 +5,7 @@
 **Mission:** Build a restaurant POS that overtakes Toast and Square, by closing the loop from transactions to the operator's daily decisions.
 
 **Changelog**
+- v2.4 (2026-08-12): D13 phase overlap: Matt-independent Phase 2 work started. Domain model + 44-table PostgreSQL schema delivered and verified against Postgres 17 (`docs/domain/`). D14 schema conventions. ADR-1/ADR-2 remain frozen on D6.
 - v2.3 (2026-08-12): Flagship mockup matured through founder review: KDS rebuilt on sous-chef feedback (one card per table, per-item bump, cook-together pane), editable party size, spatial floor plan, phone layout fixed. New operator questions added to §9. Design system gained motion, focus, viewport-height, and KDS pattern rules.
 - v2.2 (2026-08-11): Repo reorganized into `docs/` `design/` `prototypes/` layers and placed under git (WP-0.1 partially done). Flagship Italian mockup (`prototypes/index_RestaurantOS.html`) added to assets (§2).
 - v2.1 (2026-08-11): Added Design Theme & Atmosphere (§14), Wise-derived RestaurantOS design system adopted; template at `design/restaurantos/`. Decision D11.

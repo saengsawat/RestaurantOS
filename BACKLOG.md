@@ -15,12 +15,20 @@ The authoritative ticket list (master plan §5.5). Currently tracking Phase 0 wo
 
 **Phase 0 exit:** question deck answered (or explicitly deferred), D6 frozen, pilot criteria final.
 
-## Phase 1 preview (do not start until Phase 0 exits)
+## Phases 1-2, Matt-independent track (opened early per D13)
 
-| WP | Item |
-|---|---|
-| WP-1.1 | Draft `docs/prd/RestaurantOS_POS_PRD.md` from the Toast requirements table + discovery notes |
-| WP-1.2 | Matt review cycle, scope signoff (V1 / P1 / P2 / never) |
+| WP | Item | Status | Owner |
+|---|---|---|---|
+| WP-2.1a | Database schema (`docs/domain/schema.sql`, 44 tables) verified against PostgreSQL 17: clean apply, FK chain, constraint tests | **Done** 2026-08-12 | Orchestrator (Opus-tier work) |
+| WP-2.1b | Domain model doc (`docs/domain/domain-model.md`): aggregates, two state machines, command surface, invariants ledger, Matt-impact table | **Done** 2026-08-12 | Orchestrator |
+| WP-1.1 | Draft `docs/prd/RestaurantOS_POS_PRD.md` from the Toast requirements table, UNKNOWN labels where Matt input pending | Next up | Orchestrator |
+| WP-2.2 | ADR-1 (stack), ADR-2 (edge/LAN) | **Frozen on D6 (Matt)** | Founder + Orchestrator |
+| WP-2.2b | ADR-3 (payment provider), ADR-4 (client platform) | Draftable as comparisons; decision waits | Orchestrator |
+| WP-1.2 | Matt review cycle, scope signoff (V1 / P1 / P2 / never) | Blocked on Matt | Andy + Matt |
+
+## Phase 4 preview: first code
+
+E1 (money engine) + E2 (state machines) + E3 (modifier validation) are pure domain packages with property tests, safe under every open ADR. They start once the founder blesses the app tree location and TypeScript as the domain language (Toast-stack leading candidate; no client framework commitment implied).
 
 ## Flagship mockup: done since first cut
 
