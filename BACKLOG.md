@@ -32,9 +32,11 @@ The authoritative ticket list (master plan §5.5). Currently tracking Phase 0 wo
 |---|---|---|
 | E1 money engine | `app/domain/src/money.ts`: applyRate (single half-up rounding site), allocateEvenly, allocateByWeights (largest remainder, BigInt-exact), lineTotalMinor, computeCheckTotals. 21 tests green incl. properties: conservation, one-cent fairness, determinism, weights-identity, end-to-end split-after-tax conservation | **Done** 2026-08-12 |
 | E1 follow-ups | Tip allocation across splits, cash rounding for non-US currencies, tax-inclusive pricing mode | Backlog, pilot-dependent |
-| E2 state machines | Check + kitchen lifecycles as pure transition functions, exhaustive transition-table tests | **Next** |
-| E3 modifier validation | min/max/defaults/nesting validator over snapshot shape, property tests with generated menus | Next after E2 |
+| E2 state machines | `checkLifecycle.ts` + `kitchenLifecycle.ts`: pure transition functions, guards as booleans from the command layer. Exhaustive tables (all 66 check pairs asserted) + random-walk properties (voided inescapable, closed exits only via approved reopen) | **Done** 2026-08-12 |
+| E3 modifier validation | `modifiers.ts`: min/max/duplicates/nesting/depth validator, error-collecting, total over corrupt snapshots; selectionPriceMinor + defaultSelections. Fixture suite + generated-menu properties | **Done** 2026-08-12 |
 | E4+ | Schema migration tooling, server skeleton | Waits on ADR-1 ratification (D6) |
+
+Suite total: 54 tests green (`app/domain`, vitest + fast-check).
 
 ## Flagship mockup: done since first cut
 

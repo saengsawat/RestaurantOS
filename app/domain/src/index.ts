@@ -22,6 +22,20 @@ export {
 } from "./checkLifecycle.js";
 
 export {
+  validateModifiers,
+  selectionPriceMinor,
+  defaultSelections,
+  type ModifierOption,
+  type ModifierGroup,
+  type MenuItemSpec,
+  type GroupIndex,
+  type SelectedModifier,
+  type ModifierError,
+  type ValidationResult,
+  type ValidateOptions,
+} from "./modifiers.js";
+
+export {
   ORDER_ITEM_STATUSES,
   TICKET_ITEM_STATUSES,
   KITCHEN_TICKET_STATUSES,

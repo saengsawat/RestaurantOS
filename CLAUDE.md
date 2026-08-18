@@ -18,6 +18,8 @@ Ignore the CI/lint/test/dependency tooling recommended in the research reports (
 
 ## Layout & files
 
+**`STATUS.md`** (repo root), the at-a-glance dashboard: phase progress, what is done/in flight, what waits on Andy vs Matt. **Update it at the end of every working session**; it is the founder's first read.
+
 **`docs/plans/RestaurantOS_Master_Plan_v2.0.md`**, the project's source of truth for *what happens next*: vision, phased roadmap (discovery → POS PRD → domain model → backlog → build → pilot), the **Agent Operating Model** (roles, model assignment, ticket contracts, review rules for Claude Code agents), work breakdown structure, governance, decision log, and design-language decision. **Consult it before starting any non-trivial work.** `docs/plans/archive/` holds the superseded v1.0.
 
 **`prototypes/index_RestaurantOS.html`** ★, the flagship mockup: "Osteria Nove," a fictional Italian full-service restaurant on the RestaurantOS design system. Four screens (Service / Tables / Kitchen / Insights) plus modals. What it demonstrates beyond the discovery prototypes:
