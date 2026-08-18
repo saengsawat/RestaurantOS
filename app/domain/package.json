@@ -1,0 +1,21 @@
+{
+  "name": "@restaurantos/domain",
+  "version": "0.1.0",
+  "private": true,
+  "description": "RestaurantOS pure domain logic: money engine, state machines, modifier validation. No I/O.",
+  "type": "module",
+  "main": "src/index.ts",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "fast-check": "^3.19.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  }
+}

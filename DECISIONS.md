@@ -18,3 +18,4 @@ Running log of project decisions. Nothing is decided until it is here. Mirrors m
 | D12 | 2026-08-11 | Writing style: no em dashes in any content (docs, UI, commits, chat) | Decided |
 | D13 | 2026-08-12 | Phase overlap: Matt-independent Phase 1/2 work starts now (domain model, schema, PRD draft). Matt's answers retrofit via change control; anything D6-dependent (edge/LAN, stack ADR) stays frozen | Decided (founder) |
 | D14 | 2026-08-12 | Schema conventions: client-generated UUID ids, BIGINT minor units for all money, TEXT + CHECK for enums, immutable JSONB menu snapshots, org/location ids on every operational table, computed (never stored) totals | Decided, see `docs/domain/schema.sql` header |
+| D15 | 2026-08-12 | Domain language: TypeScript (strict), app tree at `app/`, first package `app/domain` (pure, no I/O). Client framework and server framework remain open (ADR-1 full ratification still waits on D6) | Decided (founder go-ahead) |

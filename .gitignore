@@ -4,3 +4,6 @@ desktop.ini
 .DS_Store
 *.tmp
 
+
+# Node
+node_modules/
