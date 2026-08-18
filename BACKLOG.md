@@ -1,5 +1,3 @@
-89
-
 # BACKLOG.md
 
 The authoritative ticket list (master plan §5.5). Currently tracking Phase 0 work packages; build epics (E1..E18) arrive in Phase 3.
@@ -23,7 +21,7 @@ The authoritative ticket list (master plan §5.5). Currently tracking Phase 0 wo
 | ------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- | ----------------------------- |
 | WP-2.1a | Database schema (`docs/domain/schema.sql`, 44 tables) verified against PostgreSQL 17: clean apply, FK chain, constraint tests           | **Done** 2026-08-12                | Orchestrator (Opus-tier work) |
 | WP-2.1b | Domain model doc (`docs/domain/domain-model.md`): aggregates, two state machines, command surface, invariants ledger, Matt-impact table | **Done** 2026-08-12                | Orchestrator                  |
-| WP-1.1  | Draft`docs/prd/RestaurantOS_POS_PRD.md` from the Toast requirements table, UNKNOWN labels where Matt input pending                      | Next up                                  | Orchestrator                  |
+| WP-1.1  | Draft`docs/prd/RestaurantOS_POS_PRD.md`: 38 FRs traced to epics, defaults on every UNKNOWN so nothing blocks                      | **Draft done** 2026-08-12; Matt review pending (WP-1.2)                                 | Orchestrator                  |
 | WP-2.2  | ADR-1 (stack), ADR-2 (edge/LAN)                                                                                                           | **Frozen on D6 (Matt)**            | Founder + Orchestrator        |
 | WP-2.2b | ADR-3 (payment provider), ADR-4 (client platform)                                                                                         | Draftable as comparisons; decision waits | Orchestrator                  |
 | WP-1.2  | Matt review cycle, scope signoff (V1 / P1 / P2 / never)                                                                                   | Blocked on Matt                          | Andy + Matt                   |
