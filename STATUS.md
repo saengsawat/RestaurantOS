@@ -31,23 +31,24 @@ Phases overlap deliberately (decision D13): everything Matt-independent moves; e
 | **E1 money engine** | 21 property tests: conservation, fairness, determinism |
 | **E2 state machines** (check + kitchen) | Exhaustive transition tables (all 66 check pairs) + random-walk properties |
 | **E3 modifier validation** | 17 tests: fixtures + generated-menu properties, nesting, corrupt-snapshot safety |
-| **API server** (Fastify, D16): the command protocol live over HTTP: open/order/fire/pay/close, idempotent operation ids, 409 version conflicts, modifier refusals with exact errors, offline cards block close | 9 API tests + verified against the running server with curl |
+| **API server** (Fastify, D16): the command protocol live over HTTP: open/order/fire/pay/close, idempotent operation ids, 409 version conflicts, modifier refusals with exact errors, offline cards block close | 10 API tests + verified against the running server with curl |
+| **POS web client v0** at `/pos`: the page experience on the real engine: checks rail, menu, modifier modal (required groups, nesting), seats, send, tip/pay, close, 409 recovery, mobile tabs | Screenshot-verified against the running server with seeded live state |
 
 ## Run it
 
 ```powershell
 cd app\server
 npm install    # first time only
-npm run dev    # then open http://localhost:3000
+npm run dev    # then open http://localhost:3000/pos
 ```
 
-The landing page documents every endpoint with copy-paste PowerShell for a full dinner service. State is in-memory until E4 (PostgreSQL repository); restarting clears it.
+**http://localhost:3000/pos is the real POS web page**: open checks, seat and cover picking, modifier modal with required groups and nesting, send to kitchen, tip + pay (card/cash, offline simulation), close. Every tap is a command to the server; totals, validation, and state rules all come from the tested domain engine. `/` has the API docs. State is in-memory until E4; restarting clears it.
 
-Domain tests alone: `cd app\domain && npm test`
+Domain tests alone: `cd app\domain && npm test` (54). Server + page tests: `cd app\server && npm test` (10).
 
 ## In flight
 
-- **E4 next: the PostgreSQL repository** implementing the server's Store interface against `docs/domain/schema.sql`, which makes state survive restarts. Matt-independent.
+- **E4 next: the PostgreSQL repository** implementing the server's Store interface against `docs/domain/schema.sql`, which makes state survive restarts. Then kitchen tickets + a KDS page. Both Matt-independent.
 
 ## Waiting on Andy
 

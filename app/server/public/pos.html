@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>RestaurantOS POS · connected</title>
+<style>
+/* RestaurantOS design system tokens (design/restaurantos/DESIGN.md) */
+:root{
+  color-scheme:light;
+  --brand:#9fe870;--brand-ink:#163300;--brand-hover:#8ddd5e;--brand-wash:rgba(159,232,112,.18);
+  --bg:#f2f1ec;--panel:#fff;--surface:#fff;--surface-2:#e9ebe4;
+  --ink:#0e0f0c;--ink-2:#3f423d;--ink-3:#5f635c;--ink-4:#787c74;
+  --info:#0a7ea4;--info-wash:rgba(10,126,164,.10);--info-line:rgba(10,126,164,.30);
+  --amber:#a16207;--amber-wash:rgba(161,98,7,.10);--amber-line:rgba(161,98,7,.30);
+  --green:#116e3b;--green-wash:rgba(17,110,59,.10);--green-line:rgba(17,110,59,.32);
+  --red:#c22f35;--red-wash:rgba(194,47,53,.09);--red-line:rgba(194,47,53,.32);
+  --line:rgba(14,15,12,.12);--line-subtle:rgba(14,15,12,.06);
+  --ring:0 0 0 1px rgba(14,15,12,.12);--shadow-lg:0 16px 40px rgba(14,15,12,.16);
+  --overlay:rgba(14,15,12,.45);
+  --font:"Inter",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:ui-monospace,Consolas,monospace;
+  --vph:100vh;
+}
+@supports (height:100dvh){:root{--vph:100dvh}}
+@media (prefers-color-scheme:dark){:root{
+  color-scheme:dark;
+  --bg:#0e0f0c;--panel:#161814;--surface:#1d201b;--surface-2:#282c26;
+  --ink:#f2f1ec;--ink-2:#c9cdc4;--ink-3:#9a9e94;--ink-4:#83877d;
+  --info:#4cc3e8;--info-wash:rgba(76,195,232,.12);--info-line:rgba(76,195,232,.34);
+  --amber:#e3b341;--amber-wash:rgba(227,179,65,.12);--amber-line:rgba(227,179,65,.34);
+  --green:#34d399;--green-wash:rgba(52,211,153,.11);--green-line:rgba(52,211,153,.34);
+  --red:#f0555a;--red-wash:rgba(240,85,90,.12);--red-line:rgba(240,85,90,.36);
+  --line:rgba(242,241,236,.10);--line-subtle:rgba(242,241,236,.05);
+  --ring:0 0 0 1px rgba(242,241,236,.10);--overlay:rgba(0,0,0,.6);
+}}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:var(--vph)}
+body{background:var(--bg);color:var(--ink);font:14.5px/1.45 var(--font);overflow:hidden;
+  -webkit-font-smoothing:antialiased;user-select:none}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+input{font:inherit;color:inherit}
+.num{font-variant-numeric:tabular-nums}
+button:focus-visible,input:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+
+.app{display:grid;grid-template-rows:56px 1fr;height:100%}
+.topbar{display:flex;align-items:center;gap:12px;background:var(--panel);border-bottom:1px solid var(--line);padding:0 16px}
+.logo{width:34px;height:34px;border-radius:999px;background:var(--brand);color:var(--brand-ink);
+  display:flex;align-items:center;justify-content:center;font-weight:800}
+.venue b{font-size:15px}
+.venue small{display:block;font-size:10px;color:var(--ink-4);letter-spacing:.05em;text-transform:uppercase}
+.badge{font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--amber);
+  background:var(--amber-wash);border:1px solid var(--amber-line);border-radius:999px;padding:3px 10px}
+.conn{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;color:var(--ink-3)}
+.conn .dot{width:9px;height:9px;border-radius:50%;background:var(--green)}
+.conn.down .dot{background:var(--red)}
+
+.main{display:grid;grid-template-columns:230px 1fr 360px;min-height:0}
+
+/* checks rail */
+.rail{background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+.rail-h{padding:12px 14px 8px;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
+.rail-list{flex:1;overflow-y:auto;padding:0 10px 10px}
+.chk{width:100%;text-align:left;background:var(--surface);border-radius:12px;box-shadow:var(--ring);
+  padding:10px 12px;margin-bottom:8px;transition:transform .1s}
+.chk:active{transform:scale(.97)}
+.chk.cur{background:var(--brand-wash);box-shadow:0 0 0 1.5px var(--brand)}
+.chk b{font-size:14px}
+.chk .m{display:flex;justify-content:space-between;font-size:12px;color:var(--ink-3);margin-top:2px}
+.newbtn{margin:10px;min-height:46px;border-radius:999px;background:var(--surface-2);font-weight:600}
+.newbtn:active{transform:scale(.97)}
+
+/* menu */
+.menu{overflow-y:auto;padding:14px;min-height:0}
+.course-h{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);margin:14px 2px 8px}
+.course-h:first-child{margin-top:0}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.tile{background:var(--surface);border-radius:12px;box-shadow:var(--ring);min-height:78px;padding:11px 13px;
+  display:flex;flex-direction:column;justify-content:space-between;text-align:left;transition:transform .1s}
+.tile:active{transform:scale(.96)}
+.tile .n{display:block;font-size:14px;font-weight:600;line-height:1.25}
+.tile .p{font-size:13px;color:var(--ink-3);font-weight:600;margin-top:6px}
+
+/* check panel */
+.check{background:var(--panel);border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+.check-h{padding:13px 16px 9px;border-bottom:1px solid var(--line)}
+.check-h .row{display:flex;justify-content:space-between;align-items:baseline}
+.check-h b{font-size:16px}
+.check-h .no{font-family:var(--mono);font-size:12px;color:var(--ink-3)}
+.tags{display:flex;gap:6px;margin-top:7px;flex-wrap:wrap}
+.chip{border-radius:999px;padding:2px 9px;font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;border:1px solid;line-height:1.5}
+.chip.mut{color:var(--ink-3);background:var(--surface-2);border-color:var(--line)}
+.chip.info{color:var(--info);background:var(--info-wash);border-color:var(--info-line)}
+.chip.amber{color:var(--amber);background:var(--amber-wash);border-color:var(--amber-line)}
+.chip.green{color:var(--green);background:var(--green-wash);border-color:var(--green-line)}
+.body{flex:1;overflow-y:auto;padding:4px 16px}
+.li{display:flex;gap:9px;padding:9px 0;border-bottom:1px solid var(--line-subtle)}
+.li .q{font-family:var(--mono);font-size:13px;color:var(--ink-3);min-width:16px}
+.li .mm{flex:1;min-width:0}
+.li .nm{font-size:13.5px;font-weight:600;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.li .md{font-size:12px;color:var(--ink-3)}
+.li .pr{font-size:13.5px;font-weight:600}
+.seat{font-size:10px;font-weight:700;color:var(--info);background:var(--info-wash);border:1px solid var(--info-line);border-radius:999px;padding:0 6px}
+.empty{text-align:center;color:var(--ink-4);font-size:13px;padding:40px 18px}
+.totals{padding:10px 16px;border-top:1px solid var(--line);font-size:13px;color:var(--ink-2)}
+.trow{display:flex;justify-content:space-between;padding:2px 0}
+.trow.g{font-size:20px;font-weight:800;color:var(--ink);padding-top:6px}
+.acts{display:flex;gap:8px;padding:10px 16px 14px}
+.btn{min-height:46px;border-radius:999px;font-size:15px;font-weight:600;padding:0 20px;transition:transform .1s;
+  display:inline-flex;align-items:center;justify-content:center;flex:1}
+.btn:active{transform:scale(.97)}
+.btn-p{background:var(--brand);color:var(--brand-ink)}
+.btn-p:hover{background:var(--brand-hover)}
+.btn-s{background:var(--surface-2)}
+.btn:disabled{opacity:.45;cursor:default}
+
+/* modal */
+.ov{position:fixed;inset:0;background:var(--overlay);display:none;align-items:center;justify-content:center;z-index:100;padding:16px}
+.ov.open{display:flex}
+.modal{background:var(--surface);border-radius:16px;box-shadow:var(--shadow-lg);width:min(520px,100%);
+  max-height:calc(var(--vph) - 40px);display:flex;flex-direction:column;animation:pop .15s ease-out}
+@keyframes pop{from{transform:scale(.97);opacity:.6}to{transform:none;opacity:1}}
+.m-h{display:flex;justify-content:space-between;align-items:center;padding:15px 18px 10px}
+.m-h h3{font-size:18px;font-weight:700}
+.m-h .sub{font-size:12px;color:var(--ink-3)}
+.m-x{min-width:36px;min-height:36px;border-radius:999px;background:var(--surface-2)}
+.m-b{flex:1;overflow-y:auto;padding:2px 18px 10px}
+.m-f{display:flex;gap:8px;padding:10px 18px 16px;border-top:1px solid var(--line-subtle)}
+.m-f .btn{flex:1}
+.og{margin-bottom:12px}
+.og-h{display:flex;justify-content:space-between;margin-bottom:6px;font-size:12.5px;font-weight:700}
+.og-h .req{color:var(--amber);font-weight:700;font-size:11px}
+.og-h .req.ok{color:var(--green)}
+.opts{display:flex;gap:7px;flex-wrap:wrap}
+.opt{min-height:38px;border-radius:999px;padding:6px 14px;font-size:13px;font-weight:600;
+  background:var(--surface-2);color:var(--ink-2);border:1.5px solid transparent}
+.opt:active{transform:scale(.95)}
+.opt.on{background:var(--brand-wash);color:var(--ink);border-color:var(--brand)}
+.childwrap{margin:8px 0 2px 14px;padding-left:10px;border-left:2px solid var(--line)}
+.qty{display:flex;align-items:center;gap:12px;margin:2px 0 12px}
+.qty button{width:42px;height:42px;border-radius:999px;background:var(--surface-2);font-size:19px}
+.qty span{font-size:19px;font-weight:800;min-width:24px;text-align:center}
+.fld{width:100%;min-height:44px;border-radius:10px;border:1px solid var(--line);background:var(--panel);
+  padding:10px 12px;margin-bottom:10px}
+.tip-note{font-size:12px;color:var(--ink-3);margin:6px 0 10px}
+label.ck{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--ink-2);margin:6px 0 10px}
+
+.toasts{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:200;display:flex;flex-direction:column;gap:8px;align-items:center}
+.toast{background:var(--ink);color:var(--bg);border-radius:999px;padding:9px 18px;font-size:13px;font-weight:600;
+  box-shadow:var(--shadow-lg);max-width:min(520px,92vw);text-align:center;animation:rise .18s ease-out}
+.toast.err{background:var(--red);color:#fff}
+.toast.good{background:var(--green);color:#fff}
+@keyframes rise{from{transform:translateY(10px);opacity:0}to{transform:none;opacity:1}}
+
+@media (max-width:900px){
+  .main{grid-template-columns:1fr}
+  .rail,.check{display:none}
+  .main.view-checks .rail{display:flex}
+  .main.view-check .check{display:flex;border-left:none}
+  .main.view-checks .menu,.main.view-check .menu{display:none}
+  .mobile-tabs{display:flex!important}
+}
+.mobile-tabs{display:none;position:fixed;bottom:0;left:0;right:0;background:var(--panel);border-top:1px solid var(--line);z-index:50}
+.mobile-tabs button{flex:1;min-height:52px;font-size:12px;font-weight:600;color:var(--ink-3)}
+.mobile-tabs button.on{color:var(--ink);box-shadow:inset 0 2.5px 0 var(--brand)}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="logo">R</div>
+    <div class="venue"><b>Osteria Nove</b><small>RestaurantOS POS · connected to the real engine</small></div>
+    <span class="badge">Concept · live API</span>
+    <div class="conn" id="conn"><span class="dot"></span><span id="connTxt">server</span></div>
+  </header>
+  <div class="main" id="main">
+    <aside class="rail">
+      <div class="rail-h">Open checks</div>
+      <div class="rail-list" id="railList"></div>
+      <button class="newbtn" id="btnNew">+ New check</button>
+    </aside>
+    <section class="menu" id="menu"></section>
+    <aside class="check">
+      <div class="check-h">
+        <div class="row"><b id="chWhere">No check</b><span class="no" id="chNo"></span></div>
+        <div class="tags" id="chTags"></div>
+      </div>
+      <div class="body" id="chBody"></div>
+      <div class="totals" id="chTotals"></div>
+      <div class="acts">
+        <button class="btn btn-s" id="btnSend">Send ▸</button>
+        <button class="btn btn-p" id="btnPay">Pay</button>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<div class="ov" id="ovNew"><div class="modal">
+  <div class="m-h"><div><h3>New check</h3><div class="sub">Opens on the server</div></div><button class="m-x" data-close="ovNew">✕</button></div>
+  <div class="m-b">
+    <input class="fld" id="newTable" placeholder="Table name, e.g. Table 7">
+    <div class="og"><div class="og-h">Covers</div><div class="opts" id="newCovers"></div></div>
+  </div>
+  <div class="m-f"><button class="btn btn-p" id="newGo">Open check</button></div>
+</div></div>
+
+<div class="ov" id="ovItem"><div class="modal">
+  <div class="m-h"><div><h3 id="itName">Item</h3><div class="sub" id="itSub"></div></div><button class="m-x" data-close="ovItem">✕</button></div>
+  <div class="m-b" id="itBody"></div>
+  <div class="m-f"><button class="btn btn-p" id="itAdd">Add</button></div>
+</div></div>
+
+<div class="ov" id="ovPay"><div class="modal">
+  <div class="m-h"><div><h3>Payment</h3><div class="sub" id="paySub"></div></div><button class="m-x" data-close="ovPay">✕</button></div>
+  <div class="m-b" id="payBody"></div>
+  <div class="m-f" id="payFoot"></div>
+</div></div>
+
+<div class="mobile-tabs" id="mtabs">
+  <button data-v="checks">Checks</button>
+  <button data-v="menu" class="on">Menu</button>
+  <button data-v="check">Check</button>
+</div>
+
+<div class="toasts" id="toasts"></div>
+
+<script>
+/* RestaurantOS POS web client v0.
+   Every mutation is a command to the server with a fresh operationId and
+   the last known aggregate version; the UI is a projection of what the
+   server returns. No business rule lives in this file. */
+const $=s=>document.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const money=n=>"$"+(n/100).toFixed(2);
+const DEVICE=(()=>{try{let d=localStorage.getItem("ros.device");if(!d){d="web-"+crypto.randomUUID().slice(0,8);localStorage.setItem("ros.device",d);}return d;}catch(_){return "web-anon";}})();
+
+const state={menu:null,checks:[],currentId:null,draft:null,pay:null};
+
+function toast(msg,kind){const el=document.createElement("div");el.className="toast"+(kind?" "+kind:"");
+  el.textContent=msg;$("#toasts").appendChild(el);setTimeout(()=>el.remove(),3400);}
+function openOv(id){$("#"+id).classList.add("open");}
+function closeOv(id){$("#"+id).classList.remove("open");}
+document.addEventListener("click",e=>{const c=e.target.closest("[data-close]");if(c)closeOv(c.dataset.close);
+  if(e.target.classList.contains("ov"))e.target.classList.remove("open");});
+
+async function api(path,body){
+  const opts=body?{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({operationId:crypto.randomUUID(),deviceId:DEVICE,...body})}:{};
+  let res;
+  try{res=await fetch(path,opts);}catch(_){setConn(false);throw new Error("server unreachable");}
+  setConn(true);
+  const data=await res.json().catch(()=>({}));
+  if(res.status===409){toast("Someone else changed this check. Refreshed.","err");await refresh();throw new Error("conflict");}
+  if(!res.ok){
+    const detail=(data.modifierErrors||[]).map(e=>e.code+(e.groupId?" ("+e.groupId+")":"")).join(", ");
+    toast((data.reason||"request failed")+(detail?": "+detail:""),"err");
+    throw new Error(data.reason||"rejected");
+  }
+  return data;
+}
+function setConn(ok){$("#conn").classList.toggle("down",!ok);$("#connTxt").textContent=ok?"server":"offline";}
+
+function cur(){return state.checks.find(c=>c.id===state.currentId)||null;}
+
+async function refresh(){
+  const [menu,checks]=await Promise.all([
+    state.menu?Promise.resolve(state.menu):fetch("/v1/menu").then(r=>r.json()),
+    fetch("/v1/checks").then(r=>r.json()).then(d=>d.checks),
+  ]);
+  state.menu=menu;
+  state.checks=checks.filter(c=>c.status!=="closed"&&c.status!=="voided");
+  if(state.currentId&&!cur())state.currentId=null;
+  if(!state.currentId&&state.checks.length)state.currentId=state.checks[0].id;
+  renderAll();
+}
+
+function renderAll(){renderRail();renderMenu();renderCheck();}
+
+function renderRail(){
+  $("#railList").innerHTML=state.checks.length?state.checks.map(c=>
+    `<button class="chk ${c.id===state.currentId?"cur":""}" data-c="${c.id}">
+      <b>${esc(c.tableName)}</b>
+      <span class="m"><span>#${c.checkNo} · ${c.covers} cov</span><span class="num">${money(c.totals.dueMinor)}</span></span>
+    </button>`).join(""):`<div class="empty">No open checks.<br>Start one below.</div>`;
+  document.querySelectorAll("[data-c]").forEach(b=>b.onclick=()=>{state.currentId=b.dataset.c;renderAll();mView("check");});
+}
+
+const COURSE_ORDER=["BEVERAGE","ANTIPASTI","PRIMI","SECONDI","DOLCI"];
+function renderMenu(){
+  if(!state.menu)return;
+  const by={};state.menu.items.forEach(i=>{(by[i.course]=by[i.course]||[]).push(i);});
+  $("#menu").innerHTML=COURSE_ORDER.filter(c=>by[c]).map(c=>
+    `<div class="course-h">${c}</div><div class="grid">`+by[c].map(i=>
+      `<button class="tile" data-i="${i.id}"><span class="n">${esc(i.name)}</span><span class="p num">${money(i.priceMinor)}</span></button>`
+    ).join("")+`</div>`).join("");
+  document.querySelectorAll("[data-i]").forEach(b=>b.onclick=()=>openItem(b.dataset.i));
+}
+
+function renderCheck(){
+  const c=cur();
+  if(!c){$("#chWhere").textContent="No check";$("#chNo").textContent="";$("#chTags").innerHTML="";
+    $("#chBody").innerHTML=`<div class="empty">Open or select a check,<br>then tap menu items.</div>`;
+    $("#chTotals").innerHTML="";$("#btnPay").disabled=true;$("#btnSend").disabled=true;return;}
+  $("#chWhere").textContent=c.tableName;
+  $("#chNo").textContent="#"+c.checkNo;
+  const unsent=c.lines.filter(l=>l.status==="unsent").length;
+  const offline=c.payments.filter(p=>p.status==="accepted_offline").length;
+  $("#chTags").innerHTML=`<span class="chip mut">${c.covers} covers</span>
+    <span class="chip ${c.status==="paid"?"green":"mut"}">${esc(c.status.replace("_"," "))}</span>
+    ${unsent?`<span class="chip info">${unsent} unsent</span>`:""}
+    ${offline?`<span class="chip amber">${offline} pending upload</span>`:""}
+    <span class="chip mut">v${c.version}</span>`;
+  $("#chBody").innerHTML=c.lines.length?c.lines.map(l=>{
+    const mods=describeMods(l.modifiers);
+    return `<div class="li">
+      <span class="q num">${l.quantity}</span>
+      <span class="mm"><span class="nm">${esc(l.capturedName)} <span class="seat">S${l.seatNo}</span>
+        ${l.status==="unsent"?'<span class="chip info">unsent</span>':""}</span>
+        ${mods?`<span class="md">${esc(mods)}</span>`:""}</span>
+      <span class="pr num">${money((l.unitPriceMinor+l.modifierPriceMinor)*l.quantity)}</span></div>`;
+  }).join(""):`<div class="empty">Tap menu items to add them.</div>`;
+  $("#chTotals").innerHTML=
+    `<div class="trow"><span>Subtotal</span><span class="num">${money(c.totals.subtotalMinor)}</span></div>
+     <div class="trow"><span>Tax (8.875% demo)</span><span class="num">${money(c.totals.taxMinor)}</span></div>
+     ${c.totals.paidMinor?`<div class="trow"><span>Paid</span><span class="num">−${money(c.totals.paidMinor)}</span></div>`:""}
+     <div class="trow g"><span>Due</span><span class="num">${money(c.totals.dueMinor)}</span></div>`;
+  $("#btnSend").disabled=!unsent;
+  $("#btnPay").disabled=!c.lines.length;
+  $("#btnPay").textContent=c.totals.dueMinor===0&&c.status==="paid"?"Close check ✓":"Pay";
+}
+
+function describeMods(sels){
+  const names=[];
+  const walk=list=>list.forEach(s=>{
+    const g=state.menu.groups[s.groupId];
+    const o=g&&g.options.find(x=>x.id===s.modifierId);
+    if(o)names.push(o.name);
+    if(s.children)walk(s.children);
+  });
+  walk(sels||[]);
+  return names.join(" · ");
+}
+
+/* ---------- new check ---------- */
+$("#btnNew").onclick=()=>{
+  $("#newTable").value="";
+  $("#newCovers").innerHTML=[1,2,3,4,5,6,7,8].map(n=>
+    `<button class="opt ${n===2?"on":""}" data-n="${n}">${n}</button>`).join("");
+  document.querySelectorAll("#newCovers .opt").forEach(b=>b.onclick=()=>{
+    document.querySelectorAll("#newCovers .opt").forEach(x=>x.classList.toggle("on",x===b));});
+  openOv("ovNew");
+};
+$("#newGo").onclick=async()=>{
+  const tableName=$("#newTable").value.trim()||"Walk-in";
+  const covers=+((document.querySelector("#newCovers .opt.on")||{}).dataset||{n:2}).n||2;
+  const r=await api("/v1/checks",{tableName,covers});
+  closeOv("ovNew");
+  state.currentId=r.check.id;
+  await refresh();
+  toast(tableName+" opened · check #"+r.check.checkNo,"good");
+};
+
+/* ---------- item config ---------- */
+function openItem(itemId){
+  const c=cur();if(!c){toast("Open a check first","err");return;}
+  const item=state.menu.items.find(i=>i.id===itemId);
+  state.draft={item,qty:1,seat:1,picks:{}};
+  $("#itName").textContent=item.name;
+  $("#itSub").textContent=money(item.priceMinor)+" · "+item.course;
+  renderItem();openOv("ovItem");
+}
+function renderItem(){
+  const d=state.draft,c=cur();
+  let html=`<div class="qty"><button id="qm">−</button><span class="num" id="qv">${d.qty}</span><button id="qp">+</button>
+    <span style="flex:1"></span><span style="font-size:12px;color:var(--ink-3)">Seat</span>
+    <div class="opts">${Array.from({length:c.covers},(_,i)=>i+1).map(s=>
+      `<button class="opt ${d.seat===s?"on":""}" data-s="${s}" style="min-width:42px">${s}</button>`).join("")}</div></div>`;
+  html+=d.item.modifierGroupIds.map(gid=>renderGroup(gid,d.picks,"")).join("");
+  $("#itBody").innerHTML=html;
+  $("#qm").onclick=()=>{if(d.qty>1){d.qty--;renderItem();}};
+  $("#qp").onclick=()=>{d.qty++;renderItem();};
+  document.querySelectorAll("[data-s]").forEach(b=>b.onclick=()=>{d.seat=+b.dataset.s;renderItem();});
+  document.querySelectorAll("[data-pick]").forEach(b=>b.onclick=()=>{
+    const [path,gid,oid]=b.dataset.pick.split("|");
+    const key=path+gid;
+    const g=state.menu.groups[gid];
+    const arr=d.picks[key]=d.picks[key]||[];
+    const at=arr.indexOf(oid);
+    if(g.maxSelect===1){d.picks[key]=at>=0?[]:[oid];}
+    else{at>=0?arr.splice(at,1):arr.push(oid);}
+    renderItem();
+  });
+  syncItemBtn();
+}
+function renderGroup(gid,picks,path){
+  const g=state.menu.groups[gid];if(!g)return"";
+  const key=path+gid;
+  const chosen=picks[key]||[];
+  const need=g.minSelect>0;
+  let html=`<div class="og"><div class="og-h"><span>${esc(g.name)}</span>
+    ${need?`<span class="req ${chosen.length>=g.minSelect?"ok":""}">${chosen.length>=g.minSelect?"✓":"required"}</span>`:""}</div>
+    <div class="opts">${g.options.map(o=>
+      `<button class="opt ${chosen.includes(o.id)?"on":""}" data-pick="${path}|${gid}|${o.id}">${esc(o.name)}${o.priceMinor?` +${(o.priceMinor/100).toFixed(2)}`:""}</button>`).join("")}</div>`;
+  for(const oid of chosen){
+    const o=g.options.find(x=>x.id===oid);
+    if(o&&o.childGroupIds&&o.childGroupIds.length){
+      html+=`<div class="childwrap">`+o.childGroupIds.map(cg=>renderGroup(cg,picks,path+gid+"."+oid+".")).join("")+`</div>`;
+    }
+  }
+  return html+`</div>`;
+}
+function collectSelections(gids,picks,path){
+  const out=[];
+  for(const gid of gids){
+    const g=state.menu.groups[gid];if(!g)continue;
+    for(const oid of (picks[path+gid]||[])){
+      const o=g.options.find(x=>x.id===oid);
+      const sel={groupId:gid,modifierId:oid};
+      if(o&&o.childGroupIds&&o.childGroupIds.length){
+        const kids=collectSelections(o.childGroupIds,picks,path+gid+"."+oid+".");
+        if(kids.length)sel.children=kids;
+      }
+      out.push(sel);
+    }
+  }
+  return out;
+}
+function syncItemBtn(){
+  const d=state.draft;
+  // client-side min check for instant feedback; the server re-validates with E3
+  let missing=false;
+  const walk=(gids,path)=>{for(const gid of gids){const g=state.menu.groups[gid];if(!g)continue;
+    const chosen=d.picks[path+gid]||[];
+    if(chosen.length<g.minSelect)missing=true;
+    for(const oid of chosen){const o=g.options.find(x=>x.id===oid);
+      if(o&&o.childGroupIds)walk(o.childGroupIds,path+gid+"."+oid+".");}}};
+  walk(d.item.modifierGroupIds,"");
+  $("#itAdd").disabled=missing;
+  $("#itAdd").textContent=missing?"Choose required options":"Add · "+money(d.item.priceMinor*d.qty);
+}
+$("#itAdd").onclick=async()=>{
+  const d=state.draft,c=cur();if(!d||!c)return;
+  const modifiers=collectSelections(d.item.modifierGroupIds,d.picks,"");
+  await api(`/v1/checks/${c.id}/items`,{itemId:d.item.id,quantity:d.qty,seatNo:d.seat,modifiers,expectedVersion:c.version});
+  closeOv("ovItem");
+  await refresh();
+  toast(d.qty+"× "+d.item.name+" added","good");
+};
+
+/* ---------- send / pay / close ---------- */
+$("#btnSend").onclick=async()=>{
+  const c=cur();if(!c)return;
+  await api(`/v1/checks/${c.id}/send`,{expectedVersion:c.version});
+  await refresh();
+  toast("Fired to kitchen","good");
+};
+$("#btnPay").onclick=()=>{
+  const c=cur();if(!c)return;
+  if(c.totals.dueMinor===0&&c.status==="paid"){return closeCheck();}
+  state.pay={tipPct:20,method:"card",offline:false};
+  renderPay();openOv("ovPay");
+};
+function renderPay(){
+  const c=cur(),p=state.pay;if(!c)return;
+  const tip=Math.round(c.totals.dueMinor*p.tipPct/100);
+  $("#paySub").textContent=c.tableName+" · check #"+c.checkNo;
+  $("#payBody").innerHTML=
+    `<div style="text-align:center;padding:6px 0 12px">
+       <div style="font-size:11px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.05em;font-weight:700">Due now</div>
+       <div class="num" style="font-size:34px;font-weight:800">${money(c.totals.dueMinor+tip)}</div>
+       <div class="tip-note num">check ${money(c.totals.dueMinor)} + tip ${money(tip)}</div></div>
+     <div class="og"><div class="og-h">Tip</div><div class="opts">${[0,18,20,22,25].map(t=>
+       `<button class="opt ${p.tipPct===t?"on":""}" data-tip="${t}">${t===0?"None":t+"%"}</button>`).join("")}</div></div>
+     <div class="og"><div class="og-h">Method</div><div class="opts">
+       <button class="opt ${p.method==="card"?"on":""}" data-m="card">Card</button>
+       <button class="opt ${p.method==="cash"?"on":""}" data-m="cash">Cash</button></div></div>
+     <label class="ck"><input type="checkbox" id="payOff" ${p.offline?"checked":""}> Simulate offline card (books as pending upload; close will refuse)</label>`;
+  $("#payFoot").innerHTML=`<button class="btn btn-p" id="payGo">Charge ${money(c.totals.dueMinor+tip)}</button>`;
+  document.querySelectorAll("[data-tip]").forEach(b=>b.onclick=()=>{p.tipPct=+b.dataset.tip;renderPay();});
+  document.querySelectorAll("[data-m]").forEach(b=>b.onclick=()=>{p.method=b.dataset.m;renderPay();});
+  $("#payOff").onchange=e=>{p.offline=e.target.checked;};
+  $("#payGo").onclick=async()=>{
+    const tip2=Math.round(c.totals.dueMinor*p.tipPct/100);
+    await api(`/v1/checks/${c.id}/payments`,{method:p.method,amountMinor:c.totals.dueMinor,tipMinor:tip2,
+      offline:p.offline,expectedVersion:c.version});
+    closeOv("ovPay");
+    await refresh();
+    toast("Payment taken","good");
+  };
+}
+async function closeCheck(){
+  const c=cur();if(!c)return;
+  await api(`/v1/checks/${c.id}/close`,{expectedVersion:c.version});
+  state.currentId=null;
+  await refresh();
+  toast("Check #"+c.checkNo+" closed","good");
+}
+
+/* ---------- mobile tabs + boot ---------- */
+function mView(v){document.querySelectorAll("#mtabs button").forEach(b=>b.classList.toggle("on",b.dataset.v===v));
+  $("#main").className="main view-"+v;}
+document.querySelectorAll("#mtabs button").forEach(b=>b.onclick=()=>mView(b.dataset.v));
+
+function setViewportH(){document.documentElement.style.setProperty("--vph",window.innerHeight+"px");}
+addEventListener("resize",setViewportH);
+setViewportH();
+refresh().catch(()=>toast("Cannot reach the server. Is it running?","err"));
+setInterval(()=>refresh().catch(()=>{}),8000);
+</script>
+</body>
+</html>

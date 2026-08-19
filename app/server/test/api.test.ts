@@ -172,4 +172,13 @@ describe("reads", () => {
     expect(landing.statusCode).toBe(200);
     expect(landing.body).toContain("RestaurantOS");
   });
+
+  it("serves the POS web client at /pos", async () => {
+    const app = buildServer();
+    const pos = await app.inject({ method: "GET", url: "/pos" });
+    expect(pos.statusCode).toBe(200);
+    expect(pos.headers["content-type"]).toContain("text/html");
+    expect(pos.body).toContain("RestaurantOS POS");
+    expect(pos.body).toContain("operationId");
+  });
 });

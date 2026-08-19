@@ -28,6 +28,9 @@ export function landingPage(): string {
 <body><main>
   <span class="badge">RestaurantOS Server · running</span>
   <h1>The command API is live.</h1>
+  <p style="margin:14px 0 4px"><a href="/pos" style="display:inline-block;background:var(--brand);color:var(--brand-ink);
+    border-radius:999px;padding:12px 26px;font-weight:700;text-decoration:none;font-size:16px">Open the POS →</a></p>
+  <p class="sub" style="margin-top:10px">The page above is the point-of-sale web client: every tap is a real command to this server.</p>
   <p class="sub">Every mutation runs the real domain engine (money, state machines, modifier validation)
   and speaks the sync protocol: idempotent operation ids, optimistic versions. Store: in-memory
   (PostgreSQL repository is the next epic). Restarting the server clears state.</p>

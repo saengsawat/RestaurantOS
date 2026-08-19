@@ -3,9 +3,12 @@
  * Thin HTTP skin over the Engine; no business rule lives in a route.
  */
 import Fastify, { type FastifyInstance } from "fastify";
+import { readFileSync } from "node:fs";
 import { Engine, MemoryStore, type Envelope } from "./engine.js";
 import { GROUPS, MENU, SNAPSHOT_ID } from "./menu.js";
 import { landingPage } from "./landing.js";
+
+const POS_PAGE = readFileSync(new URL("../public/pos.html", import.meta.url), "utf8");
 
 interface EnvelopeBody {
   operationId?: unknown;
@@ -57,6 +60,7 @@ export function buildServer(): FastifyInstance {
   };
 
   app.get("/", async (_req, reply) => reply.type("text/html").send(landingPage()));
+  app.get("/pos", async (_req, reply) => reply.type("text/html").send(POS_PAGE));
   app.get("/health/live", async () => ({ ok: true, service: "restaurantos-server", store: "memory" }));
 
   app.get("/v1/menu", async () => ({ snapshotId: SNAPSHOT_ID, items: MENU, groups: GROUPS }));
