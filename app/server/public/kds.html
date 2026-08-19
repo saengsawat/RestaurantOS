@@ -75,6 +75,9 @@ button:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
 .tki.done .box{background:var(--green-wash);border-color:var(--green-line);color:var(--green)}
 .tki-n{font-size:15px;font-weight:600;line-height:1.3}
 .tki.done .tki-n{text-decoration:line-through;color:var(--ink-4)}
+.tki.voided{opacity:.75}
+.tki.voided .box{border-color:var(--red-line);background:var(--red-wash);color:var(--red)}
+.tki.voided .tki-n{text-decoration:line-through;color:var(--ink-4)}
 .tki-s{display:block;font-size:12px;color:var(--ink-3)}
 .st{font-size:10px;font-weight:700;color:var(--info);background:var(--info-wash);border:1px solid var(--info-line);
   border-radius:999px;padding:1px 6px;margin-left:5px;vertical-align:2px}
@@ -145,7 +148,7 @@ function render(){
 
   /* cook together: identical unplated dishes on 2+ tables */
   const agg={};
-  active.forEach(t=>t.items.forEach(i=>{if(i.done)return;
+  active.forEach(t=>t.items.forEach(i=>{if(i.done||i.voided)return;
     (agg[i.name]=agg[i.name]||{qty:0,station:i.station,tables:new Set()});
     agg[i.name].qty+=i.quantity;agg[i.name].tables.add(t.tableName);}));
   const batch=Object.entries(agg).filter(([,v])=>v.qty>=2&&v.tables.size>=2).sort((a,b)=>b[1].qty-a[1].qty);
@@ -160,21 +163,27 @@ function render(){
   const cards=Object.entries(byTable).map(([table,list])=>{
     list.sort((a,b)=>Date.parse(a.firedAt)-Date.parse(b.firedAt));
     const items=list.flatMap(t=>t.items);
-    const allDone=items.length>0&&items.every(i=>i.done);
-    const anyDone=items.some(i=>i.done);
-    const late=list.some(t=>!t.items.every(i=>i.done)&&Date.now()-Date.parse(t.firedAt)>=LATE_MS);
+    const settled=i=>i.done||i.voided;
+    const allDone=items.length>0&&items.every(settled);
+    const anyDone=items.some(settled);
+    const late=list.some(t=>!t.items.every(settled)&&Date.now()-Date.parse(t.firedAt)>=LATE_MS);
     const cls=late?"late":allDone?"ready":anyDone?"working":"";
     const oldest=Math.max(...list.map(t=>mins(t.firedAt)));
     const body=list.map(t=>{
       const isNew=Date.now()-Date.parse(t.firedAt)<NEW_MS;
-      const tlate=!t.items.every(i=>i.done)&&Date.now()-Date.parse(t.firedAt)>=LATE_MS;
+      const tlate=!t.items.every(i=>i.done||i.voided)&&Date.now()-Date.parse(t.firedAt)>=LATE_MS;
       return `<div class="batch"><div class="batch-h">${esc(t.course)}
         ${isNew?'<span class="chip info">New</span>':""}${tlate?'<span class="chip red">Late</span>':""}
         <span class="bt">${mins(t.firedAt)}m</span></div>`+
-        t.items.map(i=>`<button class="tki ${i.done?"done":""}" data-tg="${t.id}|${i.orderItemId}">
-          <span class="box">✓</span>
-          <span style="flex:1;min-width:0"><span class="tki-n">${i.quantity}× ${esc(i.name)}<span class="st">${esc(i.station)}</span></span>
-          ${i.mods?`<span class="tki-s">${esc(i.mods)}</span>`:""}</span></button>`).join("")+`</div>`;
+        t.items.map(i=>i.voided
+          ?`<div class="tki voided">
+            <span class="box">✕</span>
+            <span style="flex:1;min-width:0"><span class="tki-n">${i.quantity}× ${esc(i.name)}</span><span class="chip red">Void</span>
+            ${i.mods?`<span class="tki-s">${esc(i.mods)}</span>`:""}</span></div>`
+          :`<button class="tki ${i.done?"done":""}" data-tg="${t.id}|${i.orderItemId}">
+            <span class="box">✓</span>
+            <span style="flex:1;min-width:0"><span class="tki-n">${i.quantity}× ${esc(i.name)}<span class="st">${esc(i.station)}</span></span>
+            ${i.mods?`<span class="tki-s">${esc(i.mods)}</span>`:""}</span></button>`).join("")+`</div>`;
     }).join("");
     return `<div class="ticket ${cls}">
       <div class="tk-h"><span>${esc(table.toUpperCase())}</span><span class="tk-time num">${oldest}m</span></div>

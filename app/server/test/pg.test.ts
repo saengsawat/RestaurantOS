@@ -81,8 +81,23 @@ describe.skipIf(!PGBIN)("PostgreSQL persistence (E4)", () => {
 
     // kitchen: bump everything, serve the table
     await app.inject({ method: "POST", url: `/v1/checks/${id}/send`, payload: ENV() });
+
+    // E12: void the fired acqua with reason + approval; the kitchen line flags
+    const state1 = (await app.inject({ method: "GET", url: `/v1/checks/${id}` })).json().check;
+    const acquaLine = state1.lines.find((l: { capturedName: string }) => l.capturedName === "Acqua Panna");
+    const voidRes = await app.inject({ method: "POST", url: `/v1/checks/${id}/items/${acquaLine.id}/void`,
+      payload: ENV({ reason: "guest changed order", managerPin: "1234" }) });
+    expect(voidRes.statusCode).toBe(200);
+
+    // E12: a manager discount, audited into check_adjustment
+    const disc = await app.inject({ method: "POST", url: `/v1/checks/${id}/adjustments`,
+      payload: ENV({ amountMinor: 400, label: "Regular guest", reason: "weekly regular", managerPin: "1234" }) });
+    expect(disc.statusCode).toBe(200);
+    expect(disc.json().check.totals.discountMinor).toBe(400);
+
     const kds = (await app.inject({ method: "GET", url: "/v1/kds" })).json().tickets;
     for (const t of kds) for (const i of t.items) {
+      if (i.voided) continue;
       await app.inject({ method: "POST", url: "/v1/kds/toggle", payload: ENV({ ticketId: t.id, orderItemId: i.orderItemId }) });
     }
     const serve = await app.inject({ method: "POST", url: "/v1/kds/serve", payload: ENV({ tableName: "Table 7" }) });
@@ -117,6 +132,17 @@ describe.skipIf(!PGBIN)("PostgreSQL persistence (E4)", () => {
     const ragu = check.lines.find((l: { capturedName: string }) => l.capturedName === "Ragu alla Bolognese");
     expect(ragu.modifierPriceMinor).toBe(1000); // gf 200 + shrimp 800, survived as a tree
     expect(ragu.modifiers[1].children[0].modifierId).toBe("grill");
+
+    // the void survived with its paperwork (void_has_reason constraint)
+    const acqua2 = check.lines.find((l: { capturedName: string }) => l.capturedName === "Acqua Panna");
+    expect(acqua2.status).toBe("voided");
+    expect(acqua2.voidReason).toBe("guest changed order");
+
+    // the discount survived as a check_adjustment row
+    expect(check.adjustments).toHaveLength(1);
+    expect(check.adjustments[0].label).toBe("Regular guest");
+    expect(check.adjustments[0].reason).toBe("weekly regular");
+    expect(check.totals.discountMinor).toBe(400);
 
     const kds2 = (await app2.inject({ method: "GET", url: "/v1/kds" })).json().tickets;
     expect(kds2.every((t: { status: string }) => t.status === "served")).toBe(true);

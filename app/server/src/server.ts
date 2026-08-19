@@ -138,6 +138,33 @@ export function buildServer(store: Store = new MemoryStore(), storeName = "memor
     );
   });
 
+  app.post("/v1/checks/:id/items/:itemId/void", async (req, reply) => {
+    const { id, itemId } = req.params as { id: string; itemId: string };
+    const body = (req.body ?? {}) as EnvelopeBody & { reason?: unknown; managerPin?: unknown };
+    const envelope = readEnvelope(body);
+    if ("error" in envelope) return reply.code(400).send({ status: "BAD_REQUEST", reason: envelope.error });
+    return respond(reply, await engine.voidItem(envelope, id, {
+      orderItemId: itemId,
+      reason: String(body.reason ?? ""),
+      ...(typeof body.managerPin === "string" ? { managerPin: body.managerPin } : {}),
+    }));
+  });
+
+  app.post("/v1/checks/:id/adjustments", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = (req.body ?? {}) as EnvelopeBody & Record<string, unknown>;
+    const envelope = readEnvelope(body);
+    if ("error" in envelope) return reply.code(400).send({ status: "BAD_REQUEST", reason: envelope.error });
+    return respond(reply, await engine.applyAdjustment(envelope, id, {
+      ...(typeof body.kind === "string" ? { kind: body.kind } : {}),
+      ...(typeof body.label === "string" ? { label: body.label } : {}),
+      ...(body.amountMinor !== undefined ? { amountMinor: Number(body.amountMinor) } : {}),
+      ...(body.percentBp !== undefined ? { percentBp: Number(body.percentBp) } : {}),
+      reason: String(body.reason ?? ""),
+      ...(typeof body.managerPin === "string" ? { managerPin: body.managerPin } : {}),
+    }));
+  });
+
   app.post("/v1/checks/:id/close", async (req, reply) => {
     const { id } = req.params as { id: string };
     const envelope = readEnvelope((req.body ?? {}) as EnvelopeBody);

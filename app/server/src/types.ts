@@ -25,6 +25,18 @@ export interface OrderLine {
   modifiers: readonly SelectedModifier[];
   modifierPriceMinor: number;
   status: OrderItemStatus;
+  voidReason?: string;
+}
+
+/** A discount or comp on the check (E12). Exactly one of amount/percent,
+ *  mirroring check_adjustment's amount_xor_percent constraint. */
+export interface AdjustmentRecord {
+  id: string;
+  kind: "discount" | "comp";
+  label: string;
+  amountMinor?: number;
+  percentBp?: number;
+  reason: string;
 }
 
 export interface PaymentRecord {
@@ -45,6 +57,7 @@ export interface CheckAggregate {
   version: number;
   menuSnapshotId: string;
   lines: OrderLine[];
+  adjustments: AdjustmentRecord[];
   payments: PaymentRecord[];
   openedAt: string;
   closedAt?: string;
@@ -59,6 +72,8 @@ export interface TicketItem {
   mods: string;
   allergy: boolean;
   done: boolean;
+  /** the order item was voided after firing; the cook stops, expo ignores it */
+  voided?: boolean;
 }
 
 export interface KitchenTicket {

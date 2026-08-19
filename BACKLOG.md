@@ -39,10 +39,11 @@ The authoritative ticket list (master plan §5.5). Currently tracking Phase 0 wo
 | E8 dispatch + KDS | Send creates one dispatch ticket per course; `/kds` page: one card per table, New flags, per-item bump, expo-only gated serve, 10-min recall, cook-together pane | **Done** 2026-08-12 |
 | E6 floor | `/v1/floor` + `/tables` page: spatial room per section, live status (open/seated/paying/late) derived from checks + tickets, tap-to-seat opens a real check, occupied tables refuse a second check | **Done** 2026-08-12 |
 | E6 layout editor | "Edit layout" mode on `/tables`: drag a table, drop saves to the server (`/v1/floor/move`, clamped to the room, positions in `dining_table.pos`), every device sees the new room. Follow-ups: resize, add/remove tables, overlap warning | **Done** 2026-08-18 |
+| E12 voids + discounts | Server commands with the paperwork the schema demands: void needs reason + manager approval (demo 4-digit PIN until E15), fired voids flag the kitchen line so the cook stops and serve does not wait on them; discounts/comps are amount XOR percent into `check_adjustment`, capped at subtotal, refused after payment. POS: tap a line to void, % button for discounts; KDS renders voided lines struck + red | **Done** 2026-08-18 |
 | E5 menu domain | Snapshot persisted to menu_snapshot at seed; draft editing + publishing UI still open | Partial |
-| Next | Void/discount commands on the server (E12), payment provider adapter (E13, needs ADR-3), business day close (E14/E16) | Queued |
+| Next | Business day close + drawer sessions (E14/E16), menu publishing (E5 remainder), payment provider adapter (E13, needs ADR-3) | Queued |
 
-Suite total: 69 tests green (54 domain + 15 server incl. PostgreSQL integration).
+Suite total: 71 tests green (54 domain + 17 server incl. PostgreSQL integration).
 
 ## Flagship mockup: done since first cut
 

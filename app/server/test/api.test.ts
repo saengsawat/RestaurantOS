@@ -217,6 +217,97 @@ describe("the kitchen (E8)", () => {
   });
 });
 
+describe("voids and discounts (E12)", () => {
+  it("voiding a sent line needs reason + approval, flags the kitchen, and fixes the money", async () => {
+    const app = buildServer();
+    const check = await openCheck(app);
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items`,
+      payload: { ...ENV(1), itemId: "ragu", quantity: 1, seatNo: 1, modifiers: [{ groupId: "pasta", modifierId: "spag" }] } });
+    const add2 = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items`,
+      payload: { ...ENV(2), itemId: "acqua", quantity: 1, seatNo: 2 } });
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/send`, payload: ENV(3) });
+
+    const lines = add2.json().check.lines as { id: string; capturedName: string }[];
+    const ragu = lines.find((l) => l.capturedName === "Ragu alla Bolognese")!;
+
+    // no reason -> refused; no PIN -> refused; the approval step is real
+    const noReason = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items/${ragu.id}/void`,
+      payload: { ...ENV(4), managerPin: "1234" } });
+    expect(noReason.statusCode).toBe(422);
+    const noPin = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items/${ragu.id}/void`,
+      payload: { ...ENV(5), reason: "guest changed mind" } });
+    expect(noPin.statusCode).toBe(422);
+    expect(noPin.json().reason).toMatch(/approval/);
+
+    const voided = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items/${ragu.id}/void`,
+      payload: { ...ENV(6), reason: "guest changed mind", managerPin: "1234" } });
+    expect(voided.statusCode).toBe(200);
+    const vLine = voided.json().check.lines.find((l: { id: string }) => l.id === ragu.id);
+    expect(vLine.status).toBe("voided");
+    expect(vLine.voidReason).toBe("guest changed mind");
+    // only the acqua remains on the money
+    expect(voided.json().check.totals.subtotalMinor).toBe(600);
+
+    // the kitchen was told: the ticket line is flagged voided
+    const kds = (await app.inject({ method: "GET", url: "/v1/kds" })).json().tickets;
+    const flagged = kds.flatMap((t: { items: { orderItemId: string; voided?: boolean }[] }) => t.items)
+      .find((i: { orderItemId: string }) => i.orderItemId === ragu.id);
+    expect(flagged.voided).toBe(true);
+
+    // and serve does not wait for a voided item: bump the rest, serve succeeds
+    for (const t of kds) for (const i of t.items) {
+      if (i.voided) continue;
+      await app.inject({ method: "POST", url: "/v1/kds/toggle", payload: { ...ENV(700 + Math.random()), ticketId: t.id, orderItemId: i.orderItemId } });
+    }
+    const serve = await app.inject({ method: "POST", url: "/v1/kds/serve", payload: { ...ENV(8), tableName: "Table 14" } });
+    expect(serve.statusCode).toBe(200);
+
+    // a second void of the same line is refused
+    const again = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items/${ragu.id}/void`,
+      payload: { ...ENV(9), reason: "double tap", managerPin: "1234" } });
+    expect(again.statusCode).toBe(422);
+  });
+
+  it("percent and amount discounts change the due; both need reason + approval; paid checks refuse", async () => {
+    const app = buildServer();
+    const check = await openCheck(app);
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items`,
+      payload: { ...ENV(1), itemId: "ragu", quantity: 1, seatNo: 1, modifiers: [{ groupId: "pasta", modifierId: "spag" }] } });
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/send`, payload: ENV(2) });
+
+    // 10% of 2400 = 240 off; taxable 2160; tax 8.875% = 191.7 -> 192
+    const pct = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/adjustments`,
+      payload: { ...ENV(3), percentBp: 1000, reason: "industry guest", managerPin: "4321" } });
+    expect(pct.statusCode).toBe(200);
+    expect(pct.json().check.totals.discountMinor).toBe(240);
+    expect(pct.json().check.totals.dueMinor).toBe(2160 + 192);
+
+    // both amount AND percent in one call is refused (schema XOR)
+    const both = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/adjustments`,
+      payload: { ...ENV(4), amountMinor: 100, percentBp: 500, reason: "confused", managerPin: "4321" } });
+    expect(both.statusCode).toBe(422);
+
+    // no PIN refused
+    const noPin = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/adjustments`,
+      payload: { ...ENV(5), amountMinor: 100, reason: "no approval" } });
+    expect(noPin.statusCode).toBe(422);
+
+    // amount comp stacks with the percent
+    const amt = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/adjustments`,
+      payload: { ...ENV(6), kind: "comp", amountMinor: 500, label: "Kitchen delay", reason: "long wait on primi", managerPin: "4321" } });
+    expect(amt.statusCode).toBe(200);
+    expect(amt.json().check.totals.discountMinor).toBe(740);
+
+    // pay in full, then a further discount is refused
+    const due = amt.json().check.totals.dueMinor as number;
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/payments`,
+      payload: { ...ENV(7), method: "card", amountMinor: due } });
+    const late = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/adjustments`,
+      payload: { ...ENV(8), amountMinor: 100, reason: "too late", managerPin: "4321" } });
+    expect(late.statusCode).toBe(422);
+  });
+});
+
 describe("the floor layout editor (E6)", () => {
   const floorOf = async (app: ReturnType<typeof buildServer>) =>
     (await app.inject({ method: "GET", url: "/v1/floor" })).json().tables as

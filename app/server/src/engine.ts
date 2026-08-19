@@ -26,6 +26,13 @@ import type { CheckAggregate, Envelope, KitchenTicket, Store } from "./types.js"
 export const TAX_RATE = { num: 8_875, den: 100_000 };
 export const RECALL_WINDOW_MS = 10 * 60_000;
 
+/** Until E15 wires employee PIN sessions, manager approval is any 4-digit
+ *  PIN, matching the mockup's demo framing. The command still refuses
+ *  without one, so the approval STEP is real even though the secret is not. */
+export function managerApproved(pin: unknown): boolean {
+  return typeof pin === "string" && /^\d{4}$/.test(pin);
+}
+
 export type CommandOutcome =
   | { kind: "applied"; check?: CheckView; tickets?: KitchenTicket[] }
   | { kind: "replay"; result: CommandOutcome }
@@ -51,7 +58,12 @@ export function toView(check: CheckAggregate): CheckView {
     modifierPricesMinor: [l.modifierPriceMinor],
     voided: l.status === "voided",
   }));
-  const t = computeCheckTotals(lines, [], TAX_RATE);
+  const adjustments = check.adjustments.map((a) =>
+    a.amountMinor !== undefined
+      ? { kind: "amount" as const, amountMinor: a.amountMinor }
+      : { kind: "percent" as const, basisPoints: a.percentBp ?? 0 },
+  );
+  const t = computeCheckTotals(lines, adjustments, TAX_RATE);
   const paid = check.payments.reduce((a, p) => a + p.amountMinor, 0);
   return {
     ...check,
@@ -133,6 +145,7 @@ export class Engine {
       version: 0,
       menuSnapshotId: SNAPSHOT_ID,
       lines: [],
+      adjustments: [],
       payments: [],
       openedAt: new Date().toISOString(),
     };
@@ -228,6 +241,80 @@ export class Engine {
     });
   }
 
+  /** Void a line with reason + manager approval (E12, FR-28). If the item
+   *  already fired, its ticket lines are flagged so the kitchen stops. */
+  async voidItem(
+    envelope: Envelope,
+    checkId: string,
+    input: { orderItemId: string; reason: string; managerPin?: string },
+  ): Promise<CommandOutcome> {
+    return this.run(envelope, checkId, async (check) => {
+      if (check.status === "closed" || check.status === "voided") {
+        return { kind: "rejected", reason: `cannot void items on a ${check.status} check` };
+      }
+      const line = check.lines.find((l) => l.id === input.orderItemId);
+      if (!line) return { kind: "rejected", reason: "no such line on this check" };
+      if (typeof input.reason !== "string" || input.reason.trim().length < 3) {
+        return { kind: "rejected", reason: "a void must carry a reason (min 3 characters)" };
+      }
+      const r = orderItemTransition(line.status, { type: "void_item", approved: managerApproved(input.managerPin) });
+      if (!r.ok) return { kind: "rejected", reason: r.reason };
+      line.status = r.next;
+      line.voidReason = input.reason.trim();
+
+      // FR-28: the kitchen learns immediately on every open ticket
+      for (const ticket of await this.store.listTickets()) {
+        const item = ticket.items.find((i) => i.orderItemId === line.id);
+        if (item && !item.voided) {
+          item.voided = true;
+          await this.store.putTicket(ticket);
+        }
+      }
+      return { kind: "applied", check: toView(check) };
+    });
+  }
+
+  /** Apply a discount or comp (E12). Exactly one of amountMinor/percentBp,
+   *  reason + manager approval required, audited via check_adjustment. */
+  async applyAdjustment(
+    envelope: Envelope,
+    checkId: string,
+    input: { kind?: string; label?: string; amountMinor?: number; percentBp?: number; reason: string; managerPin?: string },
+  ): Promise<CommandOutcome> {
+    return this.run(envelope, checkId, (check) => {
+      if (check.status !== "open" && check.status !== "reopened") {
+        return { kind: "rejected", reason: `discounts apply to open checks only, this one is ${check.status}` };
+      }
+      const hasAmount = input.amountMinor !== undefined;
+      const hasPercent = input.percentBp !== undefined;
+      if (hasAmount === hasPercent) {
+        return { kind: "rejected", reason: "exactly one of amountMinor or percentBp is required" };
+      }
+      if (hasAmount && (!Number.isSafeInteger(input.amountMinor) || input.amountMinor! < 1)) {
+        return { kind: "rejected", reason: "amountMinor must be a positive integer" };
+      }
+      if (hasPercent && (!Number.isSafeInteger(input.percentBp) || input.percentBp! < 1 || input.percentBp! > 10_000)) {
+        return { kind: "rejected", reason: "percentBp must be 1..10000 (10000 = 100%)" };
+      }
+      if (typeof input.reason !== "string" || input.reason.trim().length < 3) {
+        return { kind: "rejected", reason: "an adjustment must carry a reason (min 3 characters)" };
+      }
+      if (!managerApproved(input.managerPin)) {
+        return { kind: "rejected", reason: "discounts require manager approval (4-digit PIN)" };
+      }
+      const kind = input.kind === "comp" ? "comp" as const : "discount" as const;
+      check.adjustments.push({
+        id: randomUUID(),
+        kind,
+        label: input.label?.trim() || (hasPercent ? `${(input.percentBp! / 100).toFixed(input.percentBp! % 100 ? 2 : 0)}% ${kind}` : kind),
+        ...(hasAmount ? { amountMinor: input.amountMinor! } : {}),
+        ...(hasPercent ? { percentBp: input.percentBp! } : {}),
+        reason: input.reason.trim(),
+      });
+      return { kind: "applied", check: toView(check) };
+    });
+  }
+
   async recordPayment(
     envelope: Envelope,
     checkId: string,
@@ -290,6 +377,7 @@ export class Engine {
     if (!ticket) return { kind: "not_found" };
     const item = ticket.items.find((i) => i.orderItemId === orderItemId);
     if (!item) return { kind: "not_found" };
+    if (item.voided) return this.remember(envelope, { kind: "rejected", reason: "this item was voided; nothing to cook" }, "ticket", ticketId);
     const r = ticketItemTransition(item.done ? "done" : "pending", { type: "toggle_done", ticketStatus: ticket.status });
     if (!r.ok) return this.remember(envelope, { kind: "rejected", reason: r.reason }, "ticket", ticketId);
     item.done = r.next === "done";
@@ -303,7 +391,7 @@ export class Engine {
     if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
     const tickets = (await this.activeTickets()).filter((t) => t.tableName === tableName && t.status === "open");
     if (!tickets.length) return this.remember(envelope, { kind: "rejected", reason: "no open tickets for " + tableName }, "table", tableName);
-    const allItemsDone = tickets.every((t) => t.items.every((i) => i.done));
+    const allItemsDone = tickets.every((t) => t.items.every((i) => i.done || i.voided));
     for (const ticket of tickets) {
       const r = kitchenTicketTransition(ticket.status, { type: "serve", allItemsDone, fromExpoView: true });
       if (!r.ok) return this.remember(envelope, { kind: "rejected", reason: r.reason }, "table", tableName);
@@ -374,7 +462,7 @@ export class Engine {
     return tables.map((t) => {
       const check = checks.find((c) => c.tableName === t.name && c.status !== "closed" && c.status !== "voided");
       const open = tickets.filter((k) => check && k.checkId === check.id && k.status === "open");
-      const late = open.some((k) => !k.items.every((i) => i.done) && now - Date.parse(k.firedAt) >= LATE_MS);
+      const late = open.some((k) => !k.items.every((i) => i.done || i.voided) && now - Date.parse(k.firedAt) >= LATE_MS);
       const view = check ? toView(check) : undefined;
       return {
         ...t,

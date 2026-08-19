@@ -94,7 +94,10 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--brand);outline-
 .chip.amber{color:var(--amber);background:var(--amber-wash);border-color:var(--amber-line)}
 .chip.green{color:var(--green);background:var(--green-wash);border-color:var(--green-line)}
 .body{flex:1;overflow-y:auto;padding:4px 16px}
-.li{display:flex;gap:9px;padding:9px 0;border-bottom:1px solid var(--line-subtle)}
+.li{display:flex;gap:9px;padding:9px 0;border-bottom:1px solid var(--line-subtle);width:100%;text-align:left}
+button.li:active{background:var(--surface-2)}
+.li.voided .nm,.li.voided .pr,.li.voided .md{text-decoration:line-through;color:var(--ink-4)}
+.chip.red{color:var(--red);background:var(--red-wash);border-color:var(--red-line)}
 .li .q{font-family:var(--mono);font-size:13px;color:var(--ink-3);min-width:16px}
 .li .mm{flex:1;min-width:0}
 .li .nm{font-size:13.5px;font-weight:600;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
@@ -193,6 +196,7 @@ label.ck{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--ink-
       <div class="body" id="chBody"></div>
       <div class="totals" id="chTotals"></div>
       <div class="acts">
+        <button class="btn btn-s" id="btnDisc" style="flex:0 0 auto;padding:0 16px" title="Discount / comp">%</button>
         <button class="btn btn-s" id="btnSend">Send ▸</button>
         <button class="btn btn-p" id="btnPay">Pay</button>
       </div>
@@ -219,6 +223,31 @@ label.ck{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--ink-
   <div class="m-h"><div><h3>Payment</h3><div class="sub" id="paySub"></div></div><button class="m-x" data-close="ovPay">✕</button></div>
   <div class="m-b" id="payBody"></div>
   <div class="m-f" id="payFoot"></div>
+</div></div>
+
+<div class="ov" id="ovVoid"><div class="modal">
+  <div class="m-h"><div><h3>Void item</h3><div class="sub" id="voidSub"></div></div><button class="m-x" data-close="ovVoid">✕</button></div>
+  <div class="m-b">
+    <div class="og-h">Reason (required, audited)</div>
+    <input class="fld" id="voidReason" placeholder="e.g. guest changed mind">
+    <div class="og-h" style="margin-top:10px">Manager PIN (demo: any 4 digits)</div>
+    <input class="fld" id="voidPin" inputmode="numeric" maxlength="4" placeholder="••••">
+  </div>
+  <div class="m-f"><button class="btn btn-p" id="voidGo">Void item</button></div>
+</div></div>
+
+<div class="ov" id="ovAdj"><div class="modal">
+  <div class="m-h"><div><h3>Discount / comp</h3><div class="sub" id="adjSub"></div></div><button class="m-x" data-close="ovAdj">✕</button></div>
+  <div class="m-b">
+    <div class="og-h">Amount</div>
+    <div class="opts" id="adjOpts"></div>
+    <input class="fld" id="adjAmt" inputmode="decimal" placeholder="Custom amount, e.g. 5.00" style="display:none;margin-top:6px">
+    <div class="og-h" style="margin-top:10px">Reason (required, audited)</div>
+    <input class="fld" id="adjReason" placeholder="e.g. industry guest, long wait on primi">
+    <div class="og-h" style="margin-top:10px">Manager PIN (demo: any 4 digits)</div>
+    <input class="fld" id="adjPin" inputmode="numeric" maxlength="4" placeholder="••••">
+  </div>
+  <div class="m-f"><button class="btn btn-p" id="adjGo">Apply</button></div>
 </div></div>
 
 <div class="mobile-tabs" id="mtabs">
@@ -307,7 +336,7 @@ function renderCheck(){
   const c=cur();
   if(!c){$("#chWhere").textContent="No check";$("#chNo").textContent="";$("#chTags").innerHTML="";
     $("#chBody").innerHTML=`<div class="empty">Open or select a check,<br>then tap menu items.</div>`;
-    $("#chTotals").innerHTML="";$("#btnPay").disabled=true;$("#btnSend").disabled=true;return;}
+    $("#chTotals").innerHTML="";$("#btnPay").disabled=true;$("#btnSend").disabled=true;$("#btnDisc").disabled=true;return;}
   $("#chWhere").textContent=c.tableName;
   $("#chNo").textContent="#"+c.checkNo;
   const unsent=c.lines.filter(l=>l.status==="unsent").length;
@@ -319,19 +348,26 @@ function renderCheck(){
     <span class="chip mut">v${c.version}</span>`;
   $("#chBody").innerHTML=c.lines.length?c.lines.map(l=>{
     const mods=describeMods(l.modifiers);
-    return `<div class="li">
-      <span class="q num">${l.quantity}</span>
+    const voided=l.status==="voided";
+    const inner=`<span class="q num">${l.quantity}</span>
       <span class="mm"><span class="nm">${esc(l.capturedName)} <span class="seat">S${l.seatNo}</span>
-        ${l.status==="unsent"?'<span class="chip info">unsent</span>':""}</span>
-        ${mods?`<span class="md">${esc(mods)}</span>`:""}</span>
-      <span class="pr num">${money((l.unitPriceMinor+l.modifierPriceMinor)*l.quantity)}</span></div>`;
+        ${l.status==="unsent"?'<span class="chip info">unsent</span>':""}
+        ${voided?'<span class="chip red">void</span>':""}</span>
+        ${mods?`<span class="md">${esc(mods)}</span>`:""}
+        ${voided&&l.voidReason?`<span class="md">${esc(l.voidReason)}</span>`:""}</span>
+      <span class="pr num">${money((l.unitPriceMinor+l.modifierPriceMinor)*l.quantity)}</span>`;
+    return voided?`<div class="li voided">${inner}</div>`
+      :`<button class="li" data-l="${l.id}" title="Tap to void (manager)">${inner}</button>`;
   }).join(""):`<div class="empty">Tap menu items to add them.</div>`;
+  document.querySelectorAll("[data-l]").forEach(b=>b.onclick=()=>openVoid(b.dataset.l));
   $("#chTotals").innerHTML=
     `<div class="trow"><span>Subtotal</span><span class="num">${money(c.totals.subtotalMinor)}</span></div>
+     ${c.totals.discountMinor?`<div class="trow"><span>${esc(c.adjustments.map(a=>a.label).join(", ")||"Discount")}</span><span class="num">−${money(c.totals.discountMinor)}</span></div>`:""}
      <div class="trow"><span>Tax (8.875% demo)</span><span class="num">${money(c.totals.taxMinor)}</span></div>
      ${c.totals.paidMinor?`<div class="trow"><span>Paid</span><span class="num">−${money(c.totals.paidMinor)}</span></div>`:""}
      <div class="trow g"><span>Due</span><span class="num">${money(c.totals.dueMinor)}</span></div>`;
   $("#btnSend").disabled=!unsent;
+  $("#btnDisc").disabled=!(c.status==="open"||c.status==="reopened")||!c.lines.length;
   $("#btnPay").disabled=!c.lines.length;
   $("#btnPay").textContent=c.totals.dueMinor===0&&c.status==="paid"?"Close check ✓":"Pay";
 }
@@ -458,6 +494,56 @@ $("#itAdd").onclick=async()=>{
   closeOv("ovItem");
   await refresh();
   toast(d.qty+"× "+d.item.name+" added","good");
+};
+
+/* ---------- void a line (E12): reason + manager approval ---------- */
+let voidLineId=null;
+function openVoid(lineId){
+  const c=cur();if(!c)return;
+  const l=c.lines.find(x=>x.id===lineId);if(!l)return;
+  voidLineId=lineId;
+  $("#voidSub").textContent=l.quantity+"× "+l.capturedName+" · "+money((l.unitPriceMinor+l.modifierPriceMinor)*l.quantity);
+  $("#voidReason").value="";$("#voidPin").value="";
+  openOv("ovVoid");
+}
+$("#voidGo").onclick=async()=>{
+  const c=cur();if(!c||!voidLineId)return;
+  await api(`/v1/checks/${c.id}/items/${voidLineId}/void`,
+    {reason:$("#voidReason").value,managerPin:$("#voidPin").value,expectedVersion:c.version});
+  closeOv("ovVoid");
+  toast("Item voided, kitchen notified","good");
+  await refresh();
+};
+
+/* ---------- discount / comp (E12) ---------- */
+const ADJ_PRESETS=[{bp:1000,t:"10%"},{bp:1500,t:"15%"},{bp:2000,t:"20%"},{bp:0,t:"$ custom"}];
+let adjBp=1000;
+$("#btnDisc").onclick=()=>{
+  const c=cur();if(!c)return;
+  adjBp=1000;
+  $("#adjSub").textContent=c.tableName+" · check #"+c.checkNo;
+  $("#adjReason").value="";$("#adjPin").value="";$("#adjAmt").value="";
+  renderAdjOpts();openOv("ovAdj");
+};
+function renderAdjOpts(){
+  $("#adjOpts").innerHTML=ADJ_PRESETS.map(p=>
+    `<button class="opt ${p.bp===adjBp?"on":""}" data-bp="${p.bp}">${p.t}</button>`).join("");
+  $("#adjAmt").style.display=adjBp===0?"block":"none";
+  document.querySelectorAll("[data-bp]").forEach(b=>b.onclick=()=>{adjBp=+b.dataset.bp;renderAdjOpts();});
+}
+$("#adjGo").onclick=async()=>{
+  const c=cur();if(!c)return;
+  const body={reason:$("#adjReason").value,managerPin:$("#adjPin").value,expectedVersion:c.version};
+  if(adjBp>0){body.percentBp=adjBp;}
+  else{
+    const amt=Math.round(parseFloat($("#adjAmt").value||"0")*100);
+    if(!(amt>0)){toast("Enter a custom amount","err");return;}
+    body.amountMinor=amt;
+  }
+  await api(`/v1/checks/${c.id}/adjustments`,body);
+  closeOv("ovAdj");
+  toast("Discount applied","good");
+  await refresh();
 };
 
 /* ---------- send / pay / close ---------- */

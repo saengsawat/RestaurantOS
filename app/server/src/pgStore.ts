@@ -187,11 +187,18 @@ export class PgStore implements Store {
           [
             l.id, check.id, this.snapshotUuid, uuidFrom(l.itemId), l.capturedName, l.unitPriceMinor, l.course, l.station,
             l.quantity, l.seatNo, l.status,
-            l.status === "voided" ? "voided (reason wiring = E12)" : null,
+            l.status === "voided" ? (l.voidReason ?? "voided") : null,
             l.status === "voided" ? EMP : null,
             l.status === "voided" ? EMP : null,
             EMP, JSON.stringify({ modifiers: l.modifiers, modifierPriceMinor: l.modifierPriceMinor }),
           ],
+        );
+      }
+      for (const a of check.adjustments) {
+        await c.query(
+          `INSERT INTO check_adjustment (id, check_id, kind, captured_name, amount_minor, percent_bp, reason, applied_by, approved_by)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (id) DO NOTHING`,
+          [a.id, check.id, a.kind, a.label, a.amountMinor ?? null, a.percentBp ?? null, a.reason, EMP, EMP],
         );
       }
       for (const p of check.payments) {
@@ -244,8 +251,13 @@ export class PgStore implements Store {
     if (!checks.rowCount) return [];
     const ids = checks.rows.map((r) => r.id as string);
     const lines = await this.pool.query(
-      `SELECT id, check_id, item_id, captured_name, unit_price_minor, course, station_key, quantity, seat_no, status, selections
+      `SELECT id, check_id, item_id, captured_name, unit_price_minor, course, station_key, quantity, seat_no, status, void_reason, selections
        FROM order_item WHERE check_id = ANY($1) ORDER BY created_at`,
+      [ids],
+    );
+    const adjustments = await this.pool.query(
+      `SELECT id, check_id, kind, captured_name, amount_minor, percent_bp, reason
+       FROM check_adjustment WHERE check_id = ANY($1) ORDER BY applied_at`,
       [ids],
     );
     const payments = await this.pool.query(
@@ -280,8 +292,19 @@ export class PgStore implements Store {
             modifiers: (sel.modifiers as never[]) ?? [],
             modifierPriceMinor: sel.modifierPriceMinor ?? 0,
             status: l.status,
+            ...(l.void_reason ? { voidReason: l.void_reason as string } : {}),
           };
         }),
+      adjustments: adjustments.rows
+        .filter((a) => a.check_id === r.id)
+        .map((a) => ({
+          id: a.id as string,
+          kind: a.kind === "comp" ? "comp" as const : "discount" as const,
+          label: a.captured_name as string,
+          ...(a.amount_minor !== null ? { amountMinor: Number(a.amount_minor) } : {}),
+          ...(a.percent_bp !== null ? { percentBp: Number(a.percent_bp) } : {}),
+          reason: (a.reason as string | null) ?? "",
+        })),
       payments: payments.rows
         .filter((p) => p.check_id === r.id)
         .map((p) => ({
@@ -379,7 +402,7 @@ export class PgStore implements Store {
     if (!tickets.rowCount) return [];
     const ids = tickets.rows.map((r) => r.id as string);
     const items = await this.pool.query(
-      `SELECT kti.ticket_id, kti.order_item_id, kti.done, oi.captured_name, oi.quantity, oi.station_key, oi.selections
+      `SELECT kti.ticket_id, kti.order_item_id, kti.done, oi.captured_name, oi.quantity, oi.station_key, oi.selections, oi.status AS oi_status
        FROM kitchen_ticket_item kti JOIN order_item oi ON oi.id = kti.order_item_id
        WHERE kti.ticket_id = ANY($1)`,
       [ids],
@@ -404,6 +427,8 @@ export class PgStore implements Store {
             mods: describeFromSnapshot(sel.modifiers ?? []),
             allergy: false,
             done: i.done as boolean,
+            // derived, not stored: the order item's own status is the truth
+            ...(i.oi_status === "voided" ? { voided: true } : {}),
           };
         }),
     }));
