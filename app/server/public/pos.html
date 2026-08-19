@@ -79,7 +79,15 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--brand);outline-
   display:flex;flex-direction:column;justify-content:space-between;text-align:left;transition:transform .1s}
 .tile:active{transform:scale(.96)}
 .tile .n{display:block;font-size:14px;font-weight:600;line-height:1.25}
-.tile .p{font-size:13px;color:var(--ink-3);font-weight:600;margin-top:6px}
+.tile .p{font-size:13px;color:var(--ink-3);font-weight:600;margin-top:6px;display:flex;align-items:center;gap:6px}
+/* stock badge sits IN FLOW on the price row, never absolute (it collides
+   with wrapping names on narrow tiles; same lesson as the mockup) */
+.stk{margin-left:auto;font-size:10px;font-weight:700;border-radius:999px;padding:1px 7px;
+  color:var(--info);background:var(--info-wash);border:1px solid var(--info-line)}
+.stk.low{color:var(--amber);background:var(--amber-wash);border-color:var(--amber-line)}
+.stk.dead{color:var(--red);background:var(--red-wash);border-color:var(--red-line)}
+.tile.dead{opacity:.55;cursor:default}
+.tile.dead:active{transform:none}
 
 /* check panel */
 .check{background:var(--panel);border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
@@ -178,6 +186,7 @@ label.ck{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--ink-
       <a href="/pos" style="color:var(--ink);background:var(--brand-wash);text-decoration:none;font-size:13px;font-weight:600;padding:8px 14px;border-radius:999px">Service</a>
       <a href="/tables" style="color:var(--ink-3);text-decoration:none;font-size:13px;font-weight:600;padding:8px 14px;border-radius:999px">Tables</a>
       <a href="/kds" style="color:var(--ink-3);text-decoration:none;font-size:13px;font-weight:600;padding:8px 14px;border-radius:999px">Kitchen</a>
+      <a href="/menu" style="color:var(--ink-3);text-decoration:none;font-size:13px;font-weight:600;padding:8px 14px;border-radius:999px">Menu</a>
       <a href="/close" style="color:var(--ink-3);text-decoration:none;font-size:13px;font-weight:600;padding:8px 14px;border-radius:999px">Close</a>
     </nav>
     <div class="conn" id="conn"><span class="dot"></span><span id="connTxt">server</span></div>
@@ -298,8 +307,9 @@ function setConn(ok){$("#conn").classList.toggle("down",!ok);$("#connTxt").textC
 function cur(){return state.checks.find(c=>c.id===state.currentId)||null;}
 
 async function refresh(){
+  // menu refetches every poll: publishes and the 86 board must land live
   const [menu,checks]=await Promise.all([
-    state.menu?Promise.resolve(state.menu):fetch("/v1/menu").then(r=>r.json()),
+    fetch("/v1/menu").then(r=>r.json()),
     fetch("/v1/checks").then(r=>r.json()).then(d=>d.checks),
   ]);
   state.menu=menu;
@@ -326,10 +336,16 @@ const COURSE_ORDER=["BEVERAGE","ANTIPASTI","PRIMI","SECONDI","DOLCI"];
 function renderMenu(){
   if(!state.menu)return;
   const by={};state.menu.items.forEach(i=>{(by[i.course]=by[i.course]||[]).push(i);});
+  const availOf=id=>(state.menu.availability||[]).find(a=>a.itemId===id);
   $("#menu").innerHTML=COURSE_ORDER.filter(c=>by[c]).map(c=>
-    `<div class="course-h">${c}</div><div class="grid">`+by[c].map(i=>
-      `<button class="tile" data-i="${i.id}"><span class="n">${esc(i.name)}</span><span class="p num">${money(i.priceMinor)}</span></button>`
-    ).join("")+`</div>`).join("");
+    `<div class="course-h">${c}</div><div class="grid">`+by[c].map(i=>{
+      const a=availOf(i.id);
+      const dead=a&&a.is86;
+      const counted=a&&a.remaining!==undefined&&a.remaining!==null;
+      const badge=dead?'<span class="stk dead">86</span>':counted?`<span class="stk ${a.remaining<=3?"low":""}">${a.remaining} left</span>`:"";
+      return `<button class="tile ${dead?"dead":""}" data-i="${i.id}" ${dead?"disabled":""}>
+        <span class="n">${esc(i.name)}</span><span class="p num">${money(i.priceMinor)}${badge}</span></button>`;
+    }).join("")+`</div>`).join("");
   document.querySelectorAll("[data-i]").forEach(b=>b.onclick=()=>openItem(b.dataset.i));
 }
 

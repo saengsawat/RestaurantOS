@@ -1,5 +1,17 @@
 /** Zero-setup Store for dev and tests. State dies with the process. */
-import { FLOOR, type CheckAggregate, type DrawerSession, type FloorTable, type KitchenTicket, type OpMeta, type Store } from "./types.js";
+import { GROUPS, MENU, SNAPSHOT_ID } from "./menu.js";
+import {
+  FLOOR,
+  type Availability,
+  type CheckAggregate,
+  type DrawerSession,
+  type FloorTable,
+  type KitchenTicket,
+  type MenuDraft,
+  type MenuSnapshot,
+  type OpMeta,
+  type Store,
+} from "./types.js";
 
 export class MemoryStore implements Store {
   private checks = new Map<string, CheckAggregate>();
@@ -38,4 +50,18 @@ export class MemoryStore implements Store {
 
   async dayStatus(serviceDate: string) { return this.dayStatuses.get(serviceDate) ?? "open"; }
   async setDayStatus(serviceDate: string, status: "open" | "closed") { this.dayStatuses.set(serviceDate, status); }
+
+  private snapshots: MenuSnapshot[] = [
+    { id: SNAPSHOT_ID, version: 1, items: MENU.map((m) => ({ ...m })), groups: GROUPS, publishedAt: new Date().toISOString() },
+  ];
+  private draft: MenuDraft | undefined;
+  private availability = new Map<string, Availability>();
+
+  async getActiveSnapshot() { return this.snapshots[this.snapshots.length - 1]!; }
+  async putSnapshot(snapshot: MenuSnapshot) { this.snapshots.push(snapshot); }
+  async getDraft() { return this.draft; }
+  async putDraft(draft: MenuDraft) { this.draft = draft; }
+  async clearDraft() { this.draft = undefined; }
+  async listAvailability() { return [...this.availability.values()]; }
+  async setAvailability(availability: Availability) { this.availability.set(availability.itemId, availability); }
 }

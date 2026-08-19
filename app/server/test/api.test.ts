@@ -344,6 +344,96 @@ describe("the floor layout editor (E6)", () => {
   });
 });
 
+describe("menu drafts, publishing, and the 86 board (E5)", () => {
+  it("drafts change nothing until a manager publishes; then new orders reprice and old lines never move", async () => {
+    const app = buildServer();
+
+    // a check ordered on v1 captures v1 prices
+    const check = await openCheck(app);
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items`,
+      payload: { ...ENV(1), itemId: "ragu", quantity: 1, seatNo: 1, modifiers: [{ groupId: "pasta", modifierId: "spag" }] } });
+
+    // edit the draft: raise the ragu, add a focaccia
+    const up1 = await app.inject({ method: "POST", url: "/v1/menu/draft/item",
+      payload: { ...ENV(2), itemId: "ragu", name: "Ragu alla Bolognese", priceMinor: 2600, course: "PRIMI", station: "SAUTE", modifierGroupIds: ["pasta", "additions"] } });
+    expect(up1.statusCode).toBe(200);
+    await app.inject({ method: "POST", url: "/v1/menu/draft/item",
+      payload: { ...ENV(3), name: "Focaccia al Rosmarino", priceMinor: 900, course: "ANTIPASTI", station: "FORNO" } });
+
+    // service still runs on v1: the live menu has not moved
+    let menu = (await app.inject({ method: "GET", url: "/v1/menu" })).json();
+    expect(menu.version).toBe(1);
+    expect(menu.items.find((i: { id: string }) => i.id === "ragu").priceMinor).toBe(2400);
+    expect(menu.items.some((i: { id: string }) => i.id === "focaccia-al-rosmarino")).toBe(false);
+
+    // publish needs a manager
+    const noPin = await app.inject({ method: "POST", url: "/v1/menu/publish", payload: ENV(4) });
+    expect(noPin.statusCode).toBe(422);
+    const pub = await app.inject({ method: "POST", url: "/v1/menu/publish", payload: { ...ENV(5), managerPin: "1234" } });
+    expect(pub.statusCode).toBe(200);
+    expect(pub.json().menu.version).toBe(2);
+
+    // now the live menu is v2, and the draft is gone
+    menu = (await app.inject({ method: "GET", url: "/v1/menu" })).json();
+    expect(menu.version).toBe(2);
+    expect(menu.snapshotId).toBe("snap-0002");
+    expect(menu.items.find((i: { id: string }) => i.id === "ragu").priceMinor).toBe(2600);
+    expect((await app.inject({ method: "GET", url: "/v1/menu/draft" })).json().draft).toBeNull();
+
+    // a new order on the same open check prices at v2 and records the snapshot
+    const add2 = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items`,
+      payload: { ...ENV(6), itemId: "ragu", quantity: 1, seatNo: 2, modifiers: [{ groupId: "pasta", modifierId: "spag" }] } });
+    expect(add2.statusCode).toBe(200);
+    const lines = add2.json().check.lines;
+    expect(lines[0].unitPriceMinor).toBe(2400); // the v1 line never moves
+    expect(lines[1].unitPriceMinor).toBe(2600); // the v2 line prices fresh
+    expect(lines[1].menuSnapshotId).toBe("snap-0002");
+
+    // the focaccia is orderable; and a check opened now pins v2
+    const foc = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items`,
+      payload: { ...ENV(7), itemId: "focaccia-al-rosmarino", quantity: 1, seatNo: 1 } });
+    expect(foc.statusCode).toBe(200);
+
+    // remove the calamari on a fresh draft, publish v3, and it stops being orderable
+    await app.inject({ method: "POST", url: "/v1/menu/draft/remove", payload: { ...ENV(8), itemId: "calamari" } });
+    await app.inject({ method: "POST", url: "/v1/menu/publish", payload: { ...ENV(9), managerPin: "1234" } });
+    const gone = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items`,
+      payload: { ...ENV(10), itemId: "calamari", quantity: 1, seatNo: 1 } });
+    expect(gone.statusCode).toBe(422);
+  });
+
+  it("the 86 board is live: no publish needed, counts run down, zero auto-86s", async () => {
+    const app = buildServer();
+    const check = await openCheck(app);
+
+    // 86 the branzino: instantly unorderable
+    await app.inject({ method: "POST", url: "/v1/menu/86", payload: { ...ENV(1), itemId: "branzino", is86: true } });
+    const dead = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items`,
+      payload: { ...ENV(2), itemId: "branzino", quantity: 1, seatNo: 1 } });
+    expect(dead.statusCode).toBe(422);
+    expect(dead.json().reason).toMatch(/86/);
+
+    // bring it back with a count of 2
+    await app.inject({ method: "POST", url: "/v1/menu/86", payload: { ...ENV(3), itemId: "branzino", is86: false, remaining: 2 } });
+    const overAsk = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items`,
+      payload: { ...ENV(4), itemId: "branzino", quantity: 3, seatNo: 1 } });
+    expect(overAsk.statusCode).toBe(422);
+    expect(overAsk.json().reason).toMatch(/only 2/);
+
+    // ordering both runs the count to zero and auto-86s
+    const ok = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items`,
+      payload: { ...ENV(5), itemId: "branzino", quantity: 2, seatNo: 1 } });
+    expect(ok.statusCode).toBe(200);
+    const menu = (await app.inject({ method: "GET", url: "/v1/menu" })).json();
+    const avail = menu.availability.find((a: { itemId: string }) => a.itemId === "branzino");
+    expect(avail.remaining).toBe(0);
+    expect(avail.is86).toBe(true);
+    const late = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items`,
+      payload: { ...ENV(6), itemId: "branzino", quantity: 1, seatNo: 1 } });
+    expect(late.statusCode).toBe(422);
+  });
+});
+
 describe("cash drawers and the business day (E14/E16)", () => {
   it("cash needs a till; the drawer ledger balances; close counts over/short and freezes it", async () => {
     const app = buildServer();

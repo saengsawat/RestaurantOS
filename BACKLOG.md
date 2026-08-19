@@ -40,12 +40,12 @@ The authoritative ticket list (master plan §5.5). Currently tracking Phase 0 wo
 | E6 floor | `/v1/floor` + `/tables` page: spatial room per section, live status (open/seated/paying/late) derived from checks + tickets, tap-to-seat opens a real check, occupied tables refuse a second check | **Done** 2026-08-12 |
 | E6 layout editor | "Edit layout" mode on `/tables`: drag a table, drop saves to the server (`/v1/floor/move`, clamped to the room, positions in `dining_table.pos`), every device sees the new room. Follow-ups: resize, add/remove tables, overlap warning | **Done** 2026-08-18 |
 | E12 voids + discounts | Server commands with the paperwork the schema demands: void needs reason + manager approval (demo 4-digit PIN until E15), fired voids flag the kitchen line so the cook stops and serve does not wait on them; discounts/comps are amount XOR percent into `check_adjustment`, capped at subtotal, refused after payment. POS: tap a line to void, % button for discounts; KDS renders voided lines struck + red | **Done** 2026-08-18 |
-| E5 menu domain | Snapshot persisted to menu_snapshot at seed; draft editing + publishing UI still open | Partial |
+| E5 menu domain | Full loop live at `/menu`: draft editing (add/edit/remove items), manager-gated publish freezing the draft into the next immutable `menu_snapshot` version, service repricing on the new snapshot while ordered lines never move (each line records its snapshot id). Live 86 board on `item_availability`: instant 86, running counts that auto-86 at zero, enforced at add-item, badged on POS tiles. v0 note: draft is a document (migration 0003) until the relational editor arrives; group editing is E5-full | **Done** 2026-08-19 |
 | E14 cash management | Drawer sessions on `/close`: open with counted float (one open session per drawer, like `idx_drawer_one_open`), cash payments refuse without an open till and land as `sale` events, pay-in free / pay-out + drop need a manager, count-and-close freezes expected + over/short forever. Cash events append-only into `cash_event` | **Done** 2026-08-18 |
 | E16 business-day close | `/close` page: live day summary (net, tax, tips, card/cash, voids), blockers list (open checks with jump links, open drawers, offline payments), manager-gated close that seals the day, reopen for corrections. Business day = server-local date of opening (`serviceDateOf`); rollover hour is pilot config. New checks refuse while the day is closed | **Done** 2026-08-18 |
-| Next | Menu publishing (E5 remainder), payment provider adapter (E13, needs ADR-3), transfer/merge (E7 refinements) | Queued |
+| Next | Transfer/merge on the server (E7 refinements), payment provider adapter (E13, needs ADR-3), employee PIN sessions (E15) | Queued |
 
-Suite total: 73 tests green (54 domain + 19 server incl. PostgreSQL integration).
+Suite total: 75 tests green (54 domain + 21 server incl. PostgreSQL integration).
 
 ## Flagship mockup: done since first cut
 

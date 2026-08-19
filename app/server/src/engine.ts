@@ -19,9 +19,10 @@ import {
   type ModifierError,
   type SelectedModifier,
 } from "@restaurantos/domain";
-import { findMenuEntry, GROUPS, SNAPSHOT_ID } from "./menu.js";
+import type { MenuEntry } from "./menu.js";
 import { randomUUID } from "node:crypto";
-import { serviceDateOf, type CashEvent, type CheckAggregate, type DrawerSession, type Envelope, type KitchenTicket, type Store } from "./types.js";
+import { serviceDateOf, type CashEvent, type CheckAggregate, type DrawerSession, type Envelope, type KitchenTicket, type MenuSnapshot, type Store } from "./types.js";
+import type { GroupIndex } from "@restaurantos/domain";
 
 export const TAX_RATE = { num: 8_875, den: 100_000 };
 export const RECALL_WINDOW_MS = 10 * 60_000;
@@ -34,7 +35,7 @@ export function managerApproved(pin: unknown): boolean {
 }
 
 export type CommandOutcome =
-  | { kind: "applied"; check?: CheckView; tickets?: KitchenTicket[]; session?: DrawerSession; day?: unknown }
+  | { kind: "applied"; check?: CheckView; tickets?: KitchenTicket[]; session?: DrawerSession; day?: unknown; menu?: unknown }
   | { kind: "replay"; result: CommandOutcome }
   | { kind: "conflict"; expectedVersion: number | undefined; currentVersion: number }
   | { kind: "rejected"; reason: string; modifierErrors?: readonly ModifierError[] }
@@ -146,7 +147,7 @@ export class Engine {
       covers: input.covers,
       status: "open",
       version: 0,
-      menuSnapshotId: SNAPSHOT_ID,
+      menuSnapshotId: (await this.store.getActiveSnapshot()).id,
       lines: [],
       adjustments: [],
       payments: [],
@@ -162,11 +163,14 @@ export class Engine {
     checkId: string,
     input: { itemId: string; quantity: number; seatNo: number; modifiers?: readonly SelectedModifier[] },
   ): Promise<CommandOutcome> {
-    return this.run(envelope, checkId, (check) => {
+    return this.run(envelope, checkId, async (check) => {
       if (check.status === "closed" || check.status === "voided") {
         return { kind: "rejected", reason: `cannot add items to a ${check.status} check` };
       }
-      const entry = findMenuEntry(input.itemId);
+      // items price from the ACTIVE snapshot at order time (each line records
+      // which one); already-ordered lines keep their captured prices forever
+      const snapshot = await this.store.getActiveSnapshot();
+      const entry = snapshot.items.find((m) => m.id === input.itemId);
       if (!entry) return { kind: "rejected", reason: `unknown menu item ${input.itemId}` };
       if (!Number.isSafeInteger(input.quantity) || input.quantity < 1) {
         return { kind: "rejected", reason: "quantity must be a positive integer" };
@@ -174,12 +178,18 @@ export class Engine {
       if (!Number.isSafeInteger(input.seatNo) || input.seatNo < 1 || input.seatNo > check.covers) {
         return { kind: "rejected", reason: `seatNo must be between 1 and covers (${check.covers})` };
       }
+      // the live 86 board outranks the snapshot (E5)
+      const avail = (await this.store.listAvailability()).find((a) => a.itemId === entry.id);
+      if (avail?.is86) return { kind: "rejected", reason: `${entry.name} is 86'd` };
+      if (avail?.remaining !== undefined && avail.remaining < input.quantity) {
+        return { kind: "rejected", reason: `only ${avail.remaining} of ${entry.name} left` };
+      }
       const selections = input.modifiers ?? [];
-      const validation = validateModifiers(entry, GROUPS, selections);
+      const validation = validateModifiers(entry, snapshot.groups, selections);
       if (!validation.valid) {
         return { kind: "rejected", reason: "modifier validation failed", modifierErrors: validation.errors };
       }
-      const modifierPriceMinor = selectionPriceMinor(GROUPS, selections);
+      const modifierPriceMinor = selectionPriceMinor(snapshot.groups, selections);
       lineTotalMinor(entry.priceMinor, input.quantity, [modifierPriceMinor]);
 
       check.lines.push({
@@ -194,7 +204,12 @@ export class Engine {
         modifiers: selections,
         modifierPriceMinor,
         status: "unsent",
+        menuSnapshotId: snapshot.id,
       });
+      if (avail?.remaining !== undefined) {
+        const remaining = avail.remaining - input.quantity;
+        await this.store.setAvailability({ itemId: entry.id, is86: remaining === 0, remaining });
+      }
       return { kind: "applied", check: toView(check) };
     });
   }
@@ -202,6 +217,7 @@ export class Engine {
   /** Fire unsent lines: one dispatch ticket per course (E8). */
   async send(envelope: Envelope, checkId: string, input: { course?: string }): Promise<CommandOutcome> {
     return this.run(envelope, checkId, async (check) => {
+      const groups = (await this.store.getActiveSnapshot()).groups;
       const targets = check.lines.filter(
         (l) => l.status === "unsent" && (input.course === undefined || l.course === input.course),
       );
@@ -232,8 +248,8 @@ export class Engine {
             name: l.capturedName,
             quantity: l.quantity,
             station: l.station,
-            mods: describeSelections(l.modifiers),
-            allergy: hasAllergy(l.modifiers),
+            mods: describeSelections(groups, l.modifiers),
+            allergy: hasAllergy(groups, l.modifiers),
             done: false,
           })),
         };
@@ -444,6 +460,120 @@ export class Engine {
     return this.remember(envelope, { kind: "applied", tickets: [ticket] }, "ticket", ticketId);
   }
 
+  /* ------------------------------ menu (E5) ------------------------------ */
+
+  private async draftOrStart(): Promise<{ basedOnVersion: number; items: MenuEntry[] }> {
+    const existing = await this.store.getDraft();
+    if (existing) return existing;
+    const active = await this.store.getActiveSnapshot();
+    return { basedOnVersion: active.version, items: active.items.map((m) => ({ ...m })) };
+  }
+
+  /** Add or edit an item on the DRAFT. Service never sees a draft; only
+   *  publishing does (immutable snapshot rule). Groups editing is E5-full. */
+  async menuUpsertItem(
+    envelope: Envelope,
+    input: { itemId?: string; name: string; priceMinor: number; course: string; station: string; modifierGroupIds?: string[] },
+  ): Promise<CommandOutcome> {
+    const replay = await this.store.opResult(envelope.operationId);
+    if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
+    const active = await this.store.getActiveSnapshot();
+    const name = (input.name ?? "").trim();
+    if (name.length < 2) return this.remember(envelope, { kind: "rejected", reason: "name must be at least 2 characters" }, "menu_draft", "draft");
+    if (!Number.isSafeInteger(input.priceMinor) || input.priceMinor < 0) {
+      return this.remember(envelope, { kind: "rejected", reason: "priceMinor must be a non-negative integer" }, "menu_draft", "draft");
+    }
+    const courses = ["BEVERAGE", "ANTIPASTI", "PRIMI", "SECONDI", "DOLCI"];
+    if (!courses.includes(input.course)) {
+      return this.remember(envelope, { kind: "rejected", reason: `course must be one of ${courses.join(", ")}` }, "menu_draft", "draft");
+    }
+    const groupIds = input.modifierGroupIds ?? [];
+    const unknown = groupIds.filter((g) => !active.groups[g]);
+    if (unknown.length) {
+      return this.remember(envelope, { kind: "rejected", reason: `unknown modifier group(s): ${unknown.join(", ")}` }, "menu_draft", "draft");
+    }
+    const draft = await this.draftOrStart();
+    const id = input.itemId?.trim() || name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    const entry: MenuEntry = {
+      id, name, priceMinor: input.priceMinor,
+      course: input.course as MenuEntry["course"],
+      station: (input.station ?? "").trim().toUpperCase() || "SAUTE",
+      modifierGroupIds: groupIds,
+    };
+    const at = draft.items.findIndex((m) => m.id === id);
+    if (at >= 0) draft.items[at] = entry; else draft.items.push(entry);
+    await this.store.putDraft(draft);
+    return this.remember(envelope, { kind: "applied", menu: { draft } }, "menu_draft", "draft");
+  }
+
+  async menuRemoveItem(envelope: Envelope, input: { itemId: string }): Promise<CommandOutcome> {
+    const replay = await this.store.opResult(envelope.operationId);
+    if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
+    const draft = await this.draftOrStart();
+    const at = draft.items.findIndex((m) => m.id === input.itemId);
+    if (at < 0) return this.remember(envelope, { kind: "rejected", reason: `no item ${input.itemId} on the draft` }, "menu_draft", "draft");
+    draft.items.splice(at, 1);
+    await this.store.putDraft(draft);
+    return this.remember(envelope, { kind: "applied", menu: { draft } }, "menu_draft", "draft");
+  }
+
+  async menuDiscardDraft(envelope: Envelope): Promise<CommandOutcome> {
+    const replay = await this.store.opResult(envelope.operationId);
+    if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
+    if (!(await this.store.getDraft())) {
+      return this.remember(envelope, { kind: "rejected", reason: "no draft to discard" }, "menu_draft", "draft");
+    }
+    await this.store.clearDraft();
+    return this.remember(envelope, { kind: "applied", menu: { draft: null } }, "menu_draft", "draft");
+  }
+
+  /** Freeze the draft into the next immutable snapshot version. From this
+   *  moment new orders price on it; nothing already ordered moves a cent. */
+  async menuPublish(envelope: Envelope, input: { managerPin?: string }): Promise<CommandOutcome> {
+    const replay = await this.store.opResult(envelope.operationId);
+    if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
+    const draft = await this.store.getDraft();
+    if (!draft) return this.remember(envelope, { kind: "rejected", reason: "no draft to publish" }, "menu_snapshot", "publish");
+    if (!draft.items.length) return this.remember(envelope, { kind: "rejected", reason: "cannot publish an empty menu" }, "menu_snapshot", "publish");
+    if (!managerApproved(input.managerPin)) {
+      return this.remember(envelope, { kind: "rejected", reason: "publishing the menu requires manager approval (4-digit PIN)" }, "menu_snapshot", "publish");
+    }
+    const active = await this.store.getActiveSnapshot();
+    const snapshot: MenuSnapshot = {
+      id: `snap-${String(active.version + 1).padStart(4, "0")}`,
+      version: active.version + 1,
+      items: draft.items,
+      groups: active.groups,
+      publishedAt: new Date().toISOString(),
+    };
+    await this.store.putSnapshot(snapshot);
+    await this.store.clearDraft();
+    return this.remember(envelope, {
+      kind: "applied",
+      menu: { snapshotId: snapshot.id, version: snapshot.version, items: snapshot.items.length },
+    }, "menu_snapshot", snapshot.id);
+  }
+
+  /** The live 86 board: instant, no publish. remaining 0 auto-86s;
+   *  clearing 86 clears the count unless a new one is given. */
+  async set86(envelope: Envelope, input: { itemId: string; is86?: boolean; remaining?: number }): Promise<CommandOutcome> {
+    const replay = await this.store.opResult(envelope.operationId);
+    if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
+    const active = await this.store.getActiveSnapshot();
+    const entry = active.items.find((m) => m.id === input.itemId);
+    if (!entry) return this.remember(envelope, { kind: "rejected", reason: `unknown menu item ${input.itemId}` }, "availability", input.itemId);
+    if (input.remaining !== undefined && (!Number.isSafeInteger(input.remaining) || input.remaining < 0)) {
+      return this.remember(envelope, { kind: "rejected", reason: "remaining must be a non-negative integer" }, "availability", input.itemId);
+    }
+    const availability = {
+      itemId: entry.id,
+      is86: input.remaining === 0 ? true : (input.is86 ?? false),
+      ...(input.remaining !== undefined ? { remaining: input.remaining } : {}),
+    };
+    await this.store.setAvailability(availability);
+    return this.remember(envelope, { kind: "applied", menu: { availability } }, "availability", input.itemId);
+  }
+
   /* --------------------- cash + business day (E14/E16) --------------------- */
 
   /** Open a physical till with a counted float. One open session per drawer,
@@ -646,6 +776,26 @@ export class Engine {
 
   /* ------------------------------ reads ------------------------------ */
 
+  /** The active menu plus the live 86 board, in one payload for the POS. */
+  async menu() {
+    const [snapshot, availability] = await Promise.all([
+      this.store.getActiveSnapshot(),
+      this.store.listAvailability(),
+    ]);
+    return {
+      snapshotId: snapshot.id,
+      version: snapshot.version,
+      items: snapshot.items,
+      groups: snapshot.groups,
+      availability,
+    };
+  }
+
+  async menuDraft() {
+    const [active, draft] = await Promise.all([this.store.getActiveSnapshot(), this.store.getDraft()]);
+    return { activeVersion: active.version, activeCount: active.items.length, draft: draft ?? null };
+  }
+
   async getCheck(id: string): Promise<CheckView | undefined> {
     const check = await this.store.get(id);
     return check ? toView(check) : undefined;
@@ -688,11 +838,11 @@ function serviceDate(): string {
   return serviceDateOf(new Date().toISOString());
 }
 
-function describeSelections(sels: readonly SelectedModifier[]): string {
+function describeSelections(groups: GroupIndex, sels: readonly SelectedModifier[]): string {
   const names: string[] = [];
   const walk = (list: readonly SelectedModifier[]) => {
     for (const s of list) {
-      const group = GROUPS[s.groupId];
+      const group = groups[s.groupId];
       const option = group?.options.find((o) => o.id === s.modifierId);
       if (option) names.push(option.name);
       if (s.children) walk(s.children);
@@ -702,6 +852,7 @@ function describeSelections(sels: readonly SelectedModifier[]): string {
   return names.join(", ");
 }
 
-function hasAllergy(sels: readonly SelectedModifier[]): boolean {
-  return describeSelections(sels).includes("allergy") || describeSelections(sels).includes("⚠");
+function hasAllergy(groups: GroupIndex, sels: readonly SelectedModifier[]): boolean {
+  const described = describeSelections(groups, sels);
+  return described.includes("allergy") || described.includes("⚠");
 }

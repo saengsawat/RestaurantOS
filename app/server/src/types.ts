@@ -5,7 +5,8 @@
  * MemoryStore satisfies the same contract for zero-setup dev and tests.
  * The engine never knows which one it has.
  */
-import type { CheckStatus, OrderItemStatus, SelectedModifier } from "@restaurantos/domain";
+import type { CheckStatus, GroupIndex, OrderItemStatus, SelectedModifier } from "@restaurantos/domain";
+import type { MenuEntry } from "./menu.js";
 
 export interface Envelope {
   operationId: string;
@@ -26,6 +27,8 @@ export interface OrderLine {
   modifierPriceMinor: number;
   status: OrderItemStatus;
   voidReason?: string;
+  /** the snapshot this line was priced on (may be newer than the check's) */
+  menuSnapshotId?: string;
 }
 
 /** A discount or comp on the check (E12). Exactly one of amount/percent,
@@ -85,6 +88,31 @@ export interface KitchenTicket {
   status: "open" | "served";
   servedAt?: string;
   items: TicketItem[];
+}
+
+/** An immutable published menu (E5). Editing tomorrow's menu never rewrites
+ *  yesterday's check: order lines reference the snapshot they were priced on. */
+export interface MenuSnapshot {
+  id: string; // 'snap-0001', 'snap-0002', ...
+  version: number;
+  items: MenuEntry[];
+  groups: GroupIndex;
+  publishedAt: string;
+}
+
+/** The in-progress menu edit (E5 v0: one draft document per location; the
+ *  relational editor tables in schema §4 replace this in E5-full). */
+export interface MenuDraft {
+  basedOnVersion: number;
+  items: MenuEntry[];
+}
+
+/** Live 86 board (E5): hot state, deliberately OUTSIDE the snapshot, because
+ *  running out of branzino mid-service must not require a menu publish. */
+export interface Availability {
+  itemId: string;
+  is86: boolean;
+  remaining?: number;
 }
 
 /** The business-day date (YYYY-MM-DD) an instant belongs to, in SERVER-LOCAL
@@ -166,6 +194,15 @@ export interface Store {
   /** business_day status for a service date (YYYY-MM-DD); "open" if no row yet */
   dayStatus(serviceDate: string): Promise<"open" | "closed">;
   setDayStatus(serviceDate: string, status: "open" | "closed"): Promise<void>;
+
+  /** the active menu is always the highest published version */
+  getActiveSnapshot(): Promise<MenuSnapshot>;
+  putSnapshot(snapshot: MenuSnapshot): Promise<void>;
+  getDraft(): Promise<MenuDraft | undefined>;
+  putDraft(draft: MenuDraft): Promise<void>;
+  clearDraft(): Promise<void>;
+  listAvailability(): Promise<Availability[]>;
+  setAvailability(availability: Availability): Promise<void>;
 }
 
 /** Osteria Nove's room, seeded into whichever store is active. */

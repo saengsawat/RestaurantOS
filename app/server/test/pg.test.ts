@@ -127,6 +127,13 @@ describe.skipIf(!PGBIN)("PostgreSQL persistence (E4)", () => {
     const dayClose = await app.inject({ method: "POST", url: "/v1/day/close", payload: ENV({ managerPin: "1234" }) });
     expect(dayClose.statusCode).toBe(200);
 
+    // E5: publish menu v2 (price change) and 86 the calamari, both persisted
+    await app.inject({ method: "POST", url: "/v1/menu/draft/item",
+      payload: ENV({ itemId: "tiramisu", name: "Tiramisu della Casa", priceMinor: 1300, course: "DOLCI", station: "FREDDO" }) });
+    const pub = await app.inject({ method: "POST", url: "/v1/menu/publish", payload: ENV({ managerPin: "1234" }) });
+    expect(pub.statusCode).toBe(200);
+    await app.inject({ method: "POST", url: "/v1/menu/86", payload: ENV({ itemId: "calamari", is86: true }) });
+
     /* THE RESTART: a brand-new store + server on the same database.
        Everything must still be there. */
     await store.end();
@@ -184,5 +191,14 @@ describe.skipIf(!PGBIN)("PostgreSQL persistence (E4)", () => {
     const blocked = await app2.inject({ method: "POST", url: "/v1/checks",
       payload: ENV({ tableName: "Table 5", covers: 2 }) });
     expect(blocked.statusCode).toBe(422);
+
+    // menu v2 and the 86 board survived: snapshot rows + item_availability
+    const menu = (await app2.inject({ method: "GET", url: "/v1/menu" })).json();
+    expect(menu.version).toBe(2);
+    expect(menu.snapshotId).toBe("snap-0002");
+    expect(menu.items.find((i: { id: string }) => i.id === "tiramisu").priceMinor).toBe(1300);
+    expect(menu.availability.find((a: { itemId: string }) => a.itemId === "calamari").is86).toBe(true);
+    // and the closed check still reports the v1 snapshot it was opened on
+    expect(check.menuSnapshotId).toBe("snap-0001");
   }, 60_000);
 });

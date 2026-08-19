@@ -11,7 +11,7 @@ Phase 0  Discovery        ████████░░  waiting on Matt sessio
 Phase 1  POS PRD          ██████░░░░  draft v0.1 done, Matt review pending
 Phase 2  Domain + arch    ██████░░░░  schema + domain model done; ADRs frozen on D6
 Phase 3  V1 backlog       ██░░░░░░░░  epic table exists; ticket contracts not yet written
-Phase 4  Build            ███████░░░  E1-E4, E6-E8, E12, E14, E16 done: four live screens + PostgreSQL (73 tests)
+Phase 4  Build            ████████░░  E1-E8, E12, E14, E16 done: five live screens + PostgreSQL (75 tests)
 Phase 5  Pilot            ░░░░░░░░░░  venue not selected
 Phase 6  Intelligence     ░░░░░░░░░░  by design, after pilot
 ```
@@ -42,11 +42,12 @@ npm install    # first time only
 npm run dev    # then open http://localhost:3000/pos
 ```
 
-Four live screens, all real commands to the server:
+Five live screens, all real commands to the server:
 
 - **/pos** Service: checks rail, table picker from the live floor, modifier modal (required groups, nesting), seats, send, tip/pay (offline simulation), close. Tap a line to void it (reason + manager PIN, audited); the % button applies discounts/comps
 - **/tables** Floor: the spatial room per section, live status (open/seated/paying/kitchen-late), tap an open table to seat a party, tap an occupied one to jump to its check. **Edit layout** mode: drag tables to match your real room; each drop saves to the server and shows on every device
 - **/kds** Kitchen: one card per table, New flags, per-item bump, expo-gated Serve, 10-minute recall, cook-together pane. A voided item shows struck-through in red and never blocks Serve
+- **/menu** Menu manager: edit a draft (add/change/remove items), then a manager publish freezes it into the next immutable snapshot version; new orders reprice, ordered lines never move. The live 86 board (instant 86, running counts that auto-86 at zero) needs no publish and shows on POS tiles as "3 left" badges
 - **/close** End of day: this is the lunch+dinner close-out. Open drawers with a counted float, cash payments land in the till (and refuse without one), pay-in/pay-out/drop with reasons, count-and-close freezes over/short, then the manager-gated day close seals the numbers once every check is settled and every drawer counted. Blockers link straight to the offending check
 
 Try the two-device demo: `/pos` on a phone, `/kds` on the laptop, fire an order and watch it land.
@@ -58,11 +59,11 @@ $env:DATABASE_URL = "postgres://postgres:YOURPASSWORD@localhost:5432/restauranto
 npm run dev
 ```
 
-Domain tests: `cd app\domain && npm test` (54). Server tests incl. a throwaway-PostgreSQL integration: `cd app\server && npm test` (19).
+Domain tests: `cd app\domain && npm test` (54). Server tests incl. a throwaway-PostgreSQL integration: `cd app\server && npm test` (21).
 
 ## In flight
 
-- Next queued: menu publishing (E5 remainder), payment provider adapter (E13, wants ADR-3), transfer/merge on the server (E7 refinements).
+- Next queued: transfer/merge on the server (E7 refinements), payment provider adapter (E13, wants ADR-3), employee PIN sessions (E15).
 
 ## Waiting on Andy
 

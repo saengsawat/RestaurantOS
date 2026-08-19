@@ -18,10 +18,13 @@ import { GROUPS, MENU, SNAPSHOT_ID } from "./menu.js";
 import {
   FLOOR,
   serviceDateOf,
+  type Availability,
   type CheckAggregate,
   type DrawerSession,
   type FloorTable,
   type KitchenTicket,
+  type MenuDraft,
+  type MenuSnapshot,
   type OpMeta,
   type Store,
 } from "./types.js";
@@ -37,7 +40,6 @@ const MIGRATIONS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "
 export class PgStore implements Store {
   private pool: pg.Pool;
   private partyByCheck = new Map<string, string>();
-  private snapshotUuid = SNAP;
 
   constructor(connectionString: string) {
     this.pool = new pg.Pool({ connectionString, max: 5 });
@@ -95,7 +97,7 @@ export class PgStore implements Store {
       await c.query(
         `INSERT INTO menu_snapshot (id, org_id, location_id, version, document, published_by)
          VALUES ($1, $2, $3, 1, $4, $5) ON CONFLICT (location_id, version) DO NOTHING`,
-        [SNAP, ORG, LOC, JSON.stringify({ snapshotId: SNAPSHOT_ID, items: MENU, groups: GROUPS }), EMP],
+        [SNAP, ORG, LOC, JSON.stringify({ snapshotId: SNAPSHOT_ID, items: MENU, groups: GROUPS, publishedAt: new Date().toISOString() }), EMP],
       );
       // floor: areas + positioned tables
       for (const area of [...new Set(FLOOR.map((t) => t.area)), "Altro"]) {
@@ -179,7 +181,7 @@ export class PgStore implements Store {
         `INSERT INTO checks (id, org_id, location_id, business_day_id, party_id, check_no, server_id, menu_snapshot_id, status, covers, version, opened_at, closed_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
          ON CONFLICT (id) DO UPDATE SET status = $9, covers = $10, version = $11, closed_at = $13`,
-        [check.id, ORG, LOC, dayId, partyId, check.checkNo, EMP, this.snapshotUuid, check.status, check.covers, check.version, check.openedAt, check.closedAt ?? null],
+        [check.id, ORG, LOC, dayId, partyId, check.checkNo, EMP, snapUuidFor(check.menuSnapshotId), check.status, check.covers, check.version, check.openedAt, check.closedAt ?? null],
       );
       for (const l of check.lines) {
         await c.query(
@@ -187,7 +189,7 @@ export class PgStore implements Store {
            VALUES ($1,$2,$3,$4,$5,$6,'standard',$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
            ON CONFLICT (id) DO UPDATE SET status = $11, void_reason = $12, voided_by = $13, void_approved_by = $14, seat_no = $10`,
           [
-            l.id, check.id, this.snapshotUuid, uuidFrom(l.itemId), l.capturedName, l.unitPriceMinor, l.course, l.station,
+            l.id, check.id, snapUuidFor(l.menuSnapshotId ?? check.menuSnapshotId), uuidFrom(l.itemId), l.capturedName, l.unitPriceMinor, l.course, l.station,
             l.quantity, l.seatNo, l.status,
             l.status === "voided" ? (l.voidReason ?? "voided") : null,
             l.status === "voided" ? EMP : null,
@@ -243,9 +245,11 @@ export class PgStore implements Store {
 
   private async hydrate(where: string, params: unknown[]): Promise<CheckAggregate[]> {
     const checks = await this.pool.query(
-      `SELECT ch.id, ch.check_no, ch.status, ch.covers, ch.version, ch.opened_at, ch.closed_at, dt.name AS table_name
+      `SELECT ch.id, ch.check_no, ch.status, ch.covers, ch.version, ch.opened_at, ch.closed_at, dt.name AS table_name,
+              ms.document->>'snapshotId' AS snap_id
        FROM checks ch
        JOIN party p ON p.id = ch.party_id
+       JOIN menu_snapshot ms ON ms.id = ch.menu_snapshot_id
        LEFT JOIN dining_table dt ON dt.id = p.table_id
        ${where} ORDER BY ch.opened_at`,
       params,
@@ -275,7 +279,7 @@ export class PgStore implements Store {
       covers: r.covers as number,
       status: r.status,
       version: Number(r.version),
-      menuSnapshotId: SNAPSHOT_ID,
+      menuSnapshotId: (r.snap_id as string | null) ?? SNAPSHOT_ID,
       openedAt: new Date(r.opened_at as string).toISOString(),
       ...(r.closed_at ? { closedAt: new Date(r.closed_at as string).toISOString() } : {}),
       lines: lines.rows
@@ -546,6 +550,89 @@ export class PgStore implements Store {
     }));
   }
 
+  /* ------------------------------- menu (E5) ------------------------------- */
+
+  async getActiveSnapshot(): Promise<MenuSnapshot> {
+    const r = await this.pool.query(
+      "SELECT version, document FROM menu_snapshot WHERE location_id = $1 ORDER BY version DESC LIMIT 1",
+      [LOC],
+    );
+    const doc = r.rows[0].document as { snapshotId: string; items: MenuSnapshot["items"]; groups: MenuSnapshot["groups"]; publishedAt?: string };
+    return { id: doc.snapshotId, version: Number(r.rows[0].version), items: doc.items, groups: doc.groups, publishedAt: doc.publishedAt ?? "" };
+  }
+
+  async putSnapshot(snapshot: MenuSnapshot): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO menu_snapshot (id, org_id, location_id, version, document, published_by)
+       VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (location_id, version) DO NOTHING`,
+      [snapUuidFor(snapshot.id), ORG, LOC, snapshot.version,
+       JSON.stringify({ snapshotId: snapshot.id, items: snapshot.items, groups: snapshot.groups, publishedAt: snapshot.publishedAt }), EMP],
+    );
+  }
+
+  async getDraft(): Promise<MenuDraft | undefined> {
+    const r = await this.pool.query("SELECT document FROM menu_draft WHERE location_id = $1", [LOC]);
+    return r.rowCount ? (r.rows[0].document as MenuDraft) : undefined;
+  }
+
+  async putDraft(draft: MenuDraft): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO menu_draft (location_id, document, updated_at) VALUES ($1, $2, now())
+       ON CONFLICT (location_id) DO UPDATE SET document = $2, updated_at = now()`,
+      [LOC, JSON.stringify(draft)],
+    );
+  }
+
+  async clearDraft(): Promise<void> {
+    await this.pool.query("DELETE FROM menu_draft WHERE location_id = $1", [LOC]);
+  }
+
+  /** item_availability wants a menu_item row (FK); until the relational
+   *  editor owns those rows, we create them on demand with the string item
+   *  key bridged through menu_item.description as 'key:<id>'. */
+  private async ensureMenuItem(c: pg.PoolClient, itemKey: string): Promise<string> {
+    const id = uuidFrom("item:" + itemKey);
+    await c.query(
+      "INSERT INTO menu_item (id, org_id, name, description) VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO NOTHING",
+      [id, ORG, itemKey, "key:" + itemKey],
+    );
+    return id;
+  }
+
+  async listAvailability(): Promise<Availability[]> {
+    const r = await this.pool.query(
+      `SELECT mi.description, ia.is_86, ia.remaining
+       FROM item_availability ia JOIN menu_item mi ON mi.id = ia.item_id
+       WHERE ia.location_id = $1 AND mi.description LIKE 'key:%'`,
+      [LOC],
+    );
+    return r.rows.map((row) => ({
+      itemId: (row.description as string).slice(4),
+      is86: row.is_86 as boolean,
+      ...(row.remaining !== null ? { remaining: Number(row.remaining) } : {}),
+    }));
+  }
+
+  async setAvailability(availability: Availability): Promise<void> {
+    const c = await this.pool.connect();
+    try {
+      await c.query("BEGIN");
+      const itemId = await this.ensureMenuItem(c, availability.itemId);
+      await c.query(
+        `INSERT INTO item_availability (location_id, item_id, remaining, is_86, updated_by, updated_at)
+         VALUES ($1,$2,$3,$4,$5, now())
+         ON CONFLICT (location_id, item_id) DO UPDATE SET remaining = $3, is_86 = $4, updated_by = $5, updated_at = now()`,
+        [LOC, itemId, availability.remaining ?? null, availability.is86, EMP],
+      );
+      await c.query("COMMIT");
+    } catch (err) {
+      await c.query("ROLLBACK");
+      throw err;
+    } finally {
+      c.release();
+    }
+  }
+
   async dayStatus(serviceDate: string): Promise<"open" | "closed"> {
     const r = await this.pool.query("SELECT status FROM business_day WHERE location_id = $1 AND service_date = $2", [LOC, serviceDate]);
     return r.rowCount && r.rows[0].status === "closed" ? "closed" : "open";
@@ -578,6 +665,11 @@ function isUuid(s: string): boolean {
 function uuidFrom(s: string): string {
   const h = createHash("sha256").update(s).digest("hex");
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20, 32)}`;
+}
+
+/** The seeded v1 snapshot keeps its fixed uuid; later versions derive theirs. */
+function snapUuidFor(snapshotId: string): string {
+  return snapshotId === SNAPSHOT_ID ? SNAP : uuidFrom("snapshot:" + snapshotId);
 }
 
 import type { SelectedModifier } from "@restaurantos/domain";
