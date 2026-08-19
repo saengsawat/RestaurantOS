@@ -11,7 +11,7 @@ Phase 0  Discovery        ████████░░  waiting on Matt sessio
 Phase 1  POS PRD          ██████░░░░  draft v0.1 done, Matt review pending
 Phase 2  Domain + arch    ██████░░░░  schema + domain model done; ADRs frozen on D6
 Phase 3  V1 backlog       ██░░░░░░░░  epic table exists; ticket contracts not yet written
-Phase 4  Build            ███░░░░░░░  E1 + E2 + E3 done, 54 tests green
+Phase 4  Build            ████░░░░░░  E1-E3 done + a runnable API server (63 tests green)
 Phase 5  Pilot            ░░░░░░░░░░  venue not selected
 Phase 6  Intelligence     ░░░░░░░░░░  by design, after pilot
 ```
@@ -31,12 +31,23 @@ Phases overlap deliberately (decision D13): everything Matt-independent moves; e
 | **E1 money engine** | 21 property tests: conservation, fairness, determinism |
 | **E2 state machines** (check + kitchen) | Exhaustive transition tables (all 66 check pairs) + random-walk properties |
 | **E3 modifier validation** | 17 tests: fixtures + generated-menu properties, nesting, corrupt-snapshot safety |
+| **API server** (Fastify, D16): the command protocol live over HTTP: open/order/fire/pay/close, idempotent operation ids, 409 version conflicts, modifier refusals with exact errors, offline cards block close | 9 API tests + verified against the running server with curl |
 
-Run the code: `cd app\domain && npm install && npm test`
+## Run it
+
+```powershell
+cd app\server
+npm install    # first time only
+npm run dev    # then open http://localhost:3000
+```
+
+The landing page documents every endpoint with copy-paste PowerShell for a full dinner service. State is in-memory until E4 (PostgreSQL repository); restarting clears it.
+
+Domain tests alone: `cd app\domain && npm test`
 
 ## In flight
 
-- Nothing mid-task. Next up on the build track: E4+ waits on ADR-1; the Matt-independent option is drafting ADR-3/ADR-4 comparisons (payment provider, client platform) so decisions are fast when D6 lands.
+- **E4 next: the PostgreSQL repository** implementing the server's Store interface against `docs/domain/schema.sql`, which makes state survive restarts. Matt-independent.
 
 ## Waiting on Andy
 
