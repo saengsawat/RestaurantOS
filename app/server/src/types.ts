@@ -7,6 +7,7 @@
  */
 import type { CheckStatus, GroupIndex, OrderItemStatus, SelectedModifier } from "@restaurantos/domain";
 import type { MenuEntry } from "./menu.js";
+import type { Employee } from "./staff.js";
 
 export interface Envelope {
   operationId: string;
@@ -27,6 +28,8 @@ export interface OrderLine {
   modifierPriceMinor: number;
   status: OrderItemStatus;
   voidReason?: string;
+  voidedBy?: string;
+  voidApprovedBy?: string;
   /** the snapshot this line was priced on (may be newer than the check's) */
   menuSnapshotId?: string;
 }
@@ -40,6 +43,8 @@ export interface AdjustmentRecord {
   amountMinor?: number;
   percentBp?: number;
   reason: string;
+  appliedBy?: string;
+  approvedBy?: string;
 }
 
 export interface PaymentRecord {
@@ -49,6 +54,7 @@ export interface PaymentRecord {
   amountMinor: number;
   tipMinor: number;
   status: "authorized" | "accepted_offline";
+  takenBy?: string;
 }
 
 export interface CheckAggregate {
@@ -147,6 +153,8 @@ export interface DrawerSession {
   countedMinor?: number;
   expectedMinor?: number;
   overShortMinor?: number;
+  openedBy?: string;
+  closedBy?: string;
 }
 
 /** A positioned table on the floor plan (E6). Percent coordinates. */
@@ -168,6 +176,8 @@ export interface OpMeta {
   aggregateType: string;
   aggregateId: string;
   deviceId: string;
+  /** the signed-in employee on the device, when there is one (E15) */
+  employeeId?: string;
 }
 
 export interface Store {
@@ -203,6 +213,9 @@ export interface Store {
   clearDraft(): Promise<void>;
   listAvailability(): Promise<Availability[]>;
   setAvailability(availability: Availability): Promise<void>;
+
+  /** PIN verification (E15): stores compare HASHES, never plaintext */
+  findEmployeeByPin(pin: string): Promise<Employee | undefined>;
 }
 
 /** Osteria Nove's room, seeded into whichever store is active. */

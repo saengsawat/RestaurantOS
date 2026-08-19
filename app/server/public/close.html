@@ -183,11 +183,11 @@ function render(){
       ?`<button class="btn btn-s" id="btnReopen">Reopen day</button>`
       :`<button class="btn ${clear?"btn-p":"btn-s"}" id="btnCloseDay" ${clear?"":"disabled"}>${clear?"Close the day":"Close the day (resolve blockers first)"}</button>`}`;
   if($("#btnCloseDay"))$("#btnCloseDay").onclick=()=>form("Close the day","Manager approval seals today's numbers",[
-    {id:"pin",label:"Manager PIN (demo: any 4 digits)",ph:"••••",num:true}],"Close day",async v=>{
+    {id:"pin",label:"Manager PIN (demo manager: Marco B. · 1122)",ph:"••••",num:true}],"Close day",async v=>{
     const r=await cmd("/v1/day/close",{managerPin:v.pin});
     toast("Day closed. "+r.day.summary.checksClosed+" checks, "+money(r.day.summary.totalMinor)+" total.");});
   if($("#btnReopen"))$("#btnReopen").onclick=()=>form("Reopen the day","For corrections only; everything is audited",[
-    {id:"pin",label:"Manager PIN (demo: any 4 digits)",ph:"••••",num:true}],"Reopen",async v=>{
+    {id:"pin",label:"Manager PIN (demo manager: Marco B. · 1122)",ph:"••••",num:true}],"Reopen",async v=>{
     await cmd("/v1/day/reopen",{managerPin:v.pin});toast("Day reopened");});
 
   const net=s.grossMinor-s.discountMinor;
@@ -227,11 +227,11 @@ function render(){
     async v=>{await cmd("/v1/drawer/event",{sessionId:b.dataset.in,kind:"pay_in",amountMinor:cents(v.amt),reason:v.reason});toast("Pay-in recorded");}));
   document.querySelectorAll("[data-out]").forEach(b=>b.onclick=()=>form("Pay out","Cash leaving the drawer needs a manager",[
     {id:"amt",label:"Amount ($)",ph:"15.00",num:true},{id:"reason",label:"Reason (audited)",ph:"e.g. produce run"},
-    {id:"pin",label:"Manager PIN (demo: any 4 digits)",ph:"••••",num:true}],"Pay out",
+    {id:"pin",label:"Manager PIN (demo manager: Marco B. · 1122)",ph:"••••",num:true}],"Pay out",
     async v=>{await cmd("/v1/drawer/event",{sessionId:b.dataset.out,kind:"pay_out",amountMinor:cents(v.amt),reason:v.reason,managerPin:v.pin});toast("Pay-out recorded");}));
   document.querySelectorAll("[data-drop]").forEach(b=>b.onclick=()=>form("Cash drop","Excess cash to the safe needs a manager",[
     {id:"amt",label:"Amount ($)",ph:"200.00",num:true},{id:"reason",label:"Reason (audited)",ph:"e.g. drawer over limit"},
-    {id:"pin",label:"Manager PIN (demo: any 4 digits)",ph:"••••",num:true}],"Drop to safe",
+    {id:"pin",label:"Manager PIN (demo manager: Marco B. · 1122)",ph:"••••",num:true}],"Drop to safe",
     async v=>{await cmd("/v1/drawer/event",{sessionId:b.dataset.drop,kind:"drop",amountMinor:cents(v.amt),reason:v.reason,managerPin:v.pin});toast("Drop recorded");}));
   document.querySelectorAll("[data-close]").forEach(b=>b.onclick=()=>form("Count and close drawer","Count the physical cash; over/short is frozen at close",[
     {id:"amt",label:"Counted cash ($)",ph:"312.50",num:true}],"Close drawer",

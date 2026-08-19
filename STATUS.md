@@ -11,7 +11,7 @@ Phase 0  Discovery        ████████░░  waiting on Matt sessio
 Phase 1  POS PRD          ██████░░░░  draft v0.1 done, Matt review pending
 Phase 2  Domain + arch    ██████░░░░  schema + domain model done; ADRs frozen on D6
 Phase 3  V1 backlog       ██░░░░░░░░  epic table exists; ticket contracts not yet written
-Phase 4  Build            ████████░░  E1-E8, E12, E14, E16 done: five live screens + PostgreSQL (78 tests)
+Phase 4  Build            █████████░  E1-E8, E12, E14-E16 done: five live screens + PostgreSQL (81 tests)
 Phase 5  Pilot            ░░░░░░░░░░  venue not selected
 Phase 6  Intelligence     ░░░░░░░░░░  by design, after pilot
 ```
@@ -42,6 +42,8 @@ npm install    # first time only
 npm run dev    # then open http://localhost:3000/pos
 ```
 
+**Demo staff (E15):** Gia R. (server, PIN 2468), Marco B. (manager, PIN 1122), Sofia T. (server, 3579). Sign in from the POS header; anything privileged (voids, discounts, pay-outs, day close, menu publish, merges) needs a MANAGER's PIN now, so use Marco's 1122. A server's PIN refuses.
+
 Five live screens, all real commands to the server:
 
 - **/pos** Service: checks rail, table picker from the live floor, modifier modal (required groups, nesting), seats, send, tip/pay (offline simulation), close. Tap a line to void it (reason + manager PIN, audited); the % button applies discounts/comps; the ⋯ button transfers the check to a free table or merges another check into it (manager)
@@ -59,11 +61,11 @@ $env:DATABASE_URL = "postgres://postgres:YOURPASSWORD@localhost:5432/restauranto
 npm run dev
 ```
 
-Domain tests: `cd app\domain && npm test` (54). Server tests incl. a throwaway-PostgreSQL integration: `cd app\server && npm test` (24).
+Domain tests: `cd app\domain && npm test` (54). Server tests incl. a throwaway-PostgreSQL integration: `cd app\server && npm test` (27).
 
 ## In flight
 
-- Next queued: employee PIN sessions + roles (E15, turns every "demo: any 4 digits" into a named manager), payment provider adapter (E13, wants ADR-3).
+- Next queued: payment provider adapter (E13, wants ADR-3 with Matt), reopen-check UI, receipts. The Matt-independent epic list is now essentially built through; remaining work deepens what exists or waits on decisions.
 
 ## Waiting on Andy
 

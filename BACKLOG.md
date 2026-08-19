@@ -44,9 +44,10 @@ The authoritative ticket list (master plan §5.5). Currently tracking Phase 0 wo
 | E5 menu domain | Full loop live at `/menu`: draft editing (add/edit/remove items), manager-gated publish freezing the draft into the next immutable `menu_snapshot` version, service repricing on the new snapshot while ordered lines never move (each line records its snapshot id). Live 86 board on `item_availability`: instant 86, running counts that auto-86 at zero, enforced at add-item, badged on POS tiles. v0 note: draft is a document (migration 0003) until the relational editor arrives; group editing is E5-full | **Done** 2026-08-19 |
 | E14 cash management | Drawer sessions on `/close`: open with counted float (one open session per drawer, like `idx_drawer_one_open`), cash payments refuse without an open till and land as `sale` events, pay-in free / pay-out + drop need a manager, count-and-close freezes expected + over/short forever. Cash events append-only into `cash_event` | **Done** 2026-08-18 |
 | E16 business-day close | `/close` page: live day summary (net, tax, tips, card/cash, voids), blockers list (open checks with jump links, open drawers, offline payments), manager-gated close that seals the day, reopen for corrections. Business day = server-local date of opening (`serviceDateOf`); rollover hour is pilot config. New checks refuse while the day is closed | **Done** 2026-08-18 |
-| Next | Employee PIN sessions + roles (E15), payment provider adapter (E13, needs ADR-3), audit-trail read API (E17?) | Queued |
+| E15 staff identity | Real PIN sessions and roles: hashed PINs on `employee`, roles seeded (`role`, `employee_role`), manager approvals now verify the PIN belongs to an actual manager (a server's PIN refuses with "not recognized as a manager"). Sign in per device (`/v1/session`); payments, voids, discounts, drawers, and the sync journal record WHO (taken_by, void_approved_by, applied_by/approved_by, opened_by/closed_by, sync_operation.employee_id). Demo roster: Gia R. server 2468, Marco B. manager 1122, Sofia T. server 3579. Sign-in UI on POS header | **Done** 2026-08-19 |
+| Next | Payment provider adapter (E13, needs ADR-3 with Matt), reopen-check UI, receipts/printing (E9?) | Queued |
 
-Suite total: 78 tests green (54 domain + 24 server incl. PostgreSQL integration).
+Suite total: 81 tests green (54 domain + 27 server incl. PostgreSQL integration).
 
 ## Flagship mockup: done since first cut
 

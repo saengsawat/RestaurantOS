@@ -20,6 +20,7 @@ import {
   type SelectedModifier,
 } from "@restaurantos/domain";
 import type { MenuEntry } from "./menu.js";
+import { STAFF, type Employee } from "./staff.js";
 import { randomUUID } from "node:crypto";
 import { serviceDateOf, type CashEvent, type CheckAggregate, type DrawerSession, type Envelope, type KitchenTicket, type MenuSnapshot, type Store } from "./types.js";
 import type { GroupIndex } from "@restaurantos/domain";
@@ -27,12 +28,8 @@ import type { GroupIndex } from "@restaurantos/domain";
 export const TAX_RATE = { num: 8_875, den: 100_000 };
 export const RECALL_WINDOW_MS = 10 * 60_000;
 
-/** Until E15 wires employee PIN sessions, manager approval is any 4-digit
- *  PIN, matching the mockup's demo framing. The command still refuses
- *  without one, so the approval STEP is real even though the secret is not. */
-export function managerApproved(pin: unknown): boolean {
-  return typeof pin === "string" && /^\d{4}$/.test(pin);
-}
+// Manager approval is now a real identity check (E15): the PIN must hash to
+// an employee who holds the manager role. See Engine.manager().
 
 export type CommandOutcome =
   | { kind: "applied"; check?: CheckView; tickets?: KitchenTicket[]; session?: DrawerSession; day?: unknown; menu?: unknown }
@@ -82,12 +79,55 @@ export function toView(check: CheckAggregate): CheckView {
 export class Engine {
   constructor(private readonly store: Store) {}
 
+  /* ------------------------- sessions (E15) ------------------------- */
+
+  /** deviceId -> signed-in employee. Deliberately in-memory: a server
+   *  restart signs everyone out, which is the honest behavior. */
+  private sessions = new Map<string, Employee>();
+
+  staff() {
+    return STAFF.map(({ id, name, role, demoPin }) => ({ id, name, role, demoPin }));
+  }
+
+  async signIn(deviceId: string, pin: string): Promise<Employee | undefined> {
+    const employee = await this.store.findEmployeeByPin(pin);
+    if (employee) this.sessions.set(deviceId, employee);
+    return employee;
+  }
+
+  signOut(deviceId: string): void {
+    this.sessions.delete(deviceId);
+  }
+
+  who(deviceId: string): Employee | null {
+    return this.sessions.get(deviceId) ?? null;
+  }
+
+  private actorId(envelope: Envelope): string | undefined {
+    return this.sessions.get(envelope.deviceId)?.id;
+  }
+
+  /** The approval gate: the PIN must belong to an employee with the
+   *  manager role. Returns the approver so commands can record WHO. */
+  private async manager(pin: unknown): Promise<Employee | undefined> {
+    if (typeof pin !== "string" || !pin) return undefined;
+    const employee = await this.store.findEmployeeByPin(pin);
+    return employee?.role === "manager" ? employee : undefined;
+  }
+
+  private managerRefusal(pin: unknown, what: string): string {
+    return typeof pin === "string" && pin
+      ? "PIN not recognized as a manager"
+      : `${what} requires a manager's PIN`;
+  }
+
   private async remember(envelope: Envelope, outcome: CommandOutcome, aggregateType: string, aggregateId: string): Promise<CommandOutcome> {
     await this.store.rememberOp(envelope.operationId, outcome, {
       status: outcome.kind === "applied" ? "applied" : outcome.kind === "conflict" ? "conflict" : "rejected",
       aggregateType,
       aggregateId,
       deviceId: envelope.deviceId,
+      ...(this.actorId(envelope) ? { employeeId: this.actorId(envelope) } : {}),
     });
     return outcome;
   }
@@ -276,10 +316,13 @@ export class Engine {
       if (typeof input.reason !== "string" || input.reason.trim().length < 3) {
         return { kind: "rejected", reason: "a void must carry a reason (min 3 characters)" };
       }
-      const r = orderItemTransition(line.status, { type: "void_item", approved: managerApproved(input.managerPin) });
-      if (!r.ok) return { kind: "rejected", reason: r.reason };
+      const approver = await this.manager(input.managerPin);
+      const r = orderItemTransition(line.status, { type: "void_item", approved: approver !== undefined });
+      if (!r.ok) return { kind: "rejected", reason: approver ? r.reason : this.managerRefusal(input.managerPin, "voiding an item") };
       line.status = r.next;
       line.voidReason = input.reason.trim();
+      line.voidedBy = this.actorId(envelope) ?? approver!.id;
+      line.voidApprovedBy = approver!.id;
 
       // FR-28: the kitchen learns immediately on every open ticket
       for (const ticket of await this.store.listTickets()) {
@@ -300,7 +343,7 @@ export class Engine {
     checkId: string,
     input: { kind?: string; label?: string; amountMinor?: number; percentBp?: number; reason: string; managerPin?: string },
   ): Promise<CommandOutcome> {
-    return this.run(envelope, checkId, (check) => {
+    return this.run(envelope, checkId, async (check) => {
       if (check.status !== "open" && check.status !== "reopened") {
         return { kind: "rejected", reason: `discounts apply to open checks only, this one is ${check.status}` };
       }
@@ -318,8 +361,9 @@ export class Engine {
       if (typeof input.reason !== "string" || input.reason.trim().length < 3) {
         return { kind: "rejected", reason: "an adjustment must carry a reason (min 3 characters)" };
       }
-      if (!managerApproved(input.managerPin)) {
-        return { kind: "rejected", reason: "discounts require manager approval (4-digit PIN)" };
+      const approver = await this.manager(input.managerPin);
+      if (!approver) {
+        return { kind: "rejected", reason: this.managerRefusal(input.managerPin, "a discount") };
       }
       const kind = input.kind === "comp" ? "comp" as const : "discount" as const;
       check.adjustments.push({
@@ -329,6 +373,8 @@ export class Engine {
         ...(hasAmount ? { amountMinor: input.amountMinor! } : {}),
         ...(hasPercent ? { percentBp: input.percentBp! } : {}),
         reason: input.reason.trim(),
+        appliedBy: this.actorId(envelope) ?? approver.id,
+        approvedBy: approver.id,
       });
       return { kind: "applied", check: toView(check) };
     });
@@ -380,8 +426,9 @@ export class Engine {
       if (source.payments.length) {
         return { kind: "rejected", reason: "the source check has payments; settle or refund them before merging" };
       }
-      if (!managerApproved(input.managerPin)) {
-        return { kind: "rejected", reason: "merging checks requires manager approval (4-digit PIN)" };
+      const approver = await this.manager(input.managerPin);
+      if (!approver) {
+        return { kind: "rejected", reason: this.managerRefusal(input.managerPin, "merging checks") };
       }
       const r = checkTransition(source.status, { type: "void_check", approved: true, hasPayments: false });
       if (!r.ok) return { kind: "rejected", reason: r.reason };
@@ -440,6 +487,7 @@ export class Engine {
         amountMinor: input.amountMinor,
         tipMinor: input.tipMinor ?? 0,
         status: input.method === "card" && input.offline ? "accepted_offline" : "authorized",
+        ...(this.actorId(envelope) ? { takenBy: this.actorId(envelope) } : {}),
       });
       check.status = r.next;
       if (drawer) {
@@ -610,8 +658,8 @@ export class Engine {
     const draft = await this.store.getDraft();
     if (!draft) return this.remember(envelope, { kind: "rejected", reason: "no draft to publish" }, "menu_snapshot", "publish");
     if (!draft.items.length) return this.remember(envelope, { kind: "rejected", reason: "cannot publish an empty menu" }, "menu_snapshot", "publish");
-    if (!managerApproved(input.managerPin)) {
-      return this.remember(envelope, { kind: "rejected", reason: "publishing the menu requires manager approval (4-digit PIN)" }, "menu_snapshot", "publish");
+    if (!(await this.manager(input.managerPin))) {
+      return this.remember(envelope, { kind: "rejected", reason: this.managerRefusal(input.managerPin, "publishing the menu") }, "menu_snapshot", "publish");
     }
     const active = await this.store.getActiveSnapshot();
     const snapshot: MenuSnapshot = {
@@ -671,6 +719,7 @@ export class Engine {
       openedAt: new Date().toISOString(),
       openingFloatMinor: input.openingFloatMinor,
       events: [],
+      ...(this.actorId(envelope) ? { openedBy: this.actorId(envelope) } : {}),
     };
     await this.store.putDrawerSession(session);
     return this.remember(envelope, { kind: "applied", session }, "drawer_session", session.id);
@@ -697,8 +746,8 @@ export class Engine {
     if (typeof input.reason !== "string" || input.reason.trim().length < 3) {
       return this.remember(envelope, { kind: "rejected", reason: "a cash event must carry a reason (min 3 characters)" }, "drawer_session", session.id);
     }
-    if (input.kind !== "pay_in" && !managerApproved(input.managerPin)) {
-      return this.remember(envelope, { kind: "rejected", reason: "cash leaving the drawer requires manager approval (4-digit PIN)" }, "drawer_session", session.id);
+    if (input.kind !== "pay_in" && !(await this.manager(input.managerPin))) {
+      return this.remember(envelope, { kind: "rejected", reason: this.managerRefusal(input.managerPin, "cash leaving the drawer") }, "drawer_session", session.id);
     }
     const event: CashEvent = {
       id: randomUUID(),
@@ -727,6 +776,7 @@ export class Engine {
     }
     const expected = session.openingFloatMinor + session.events.reduce((a, e) => a + e.amountMinor, 0);
     session.closedAt = new Date().toISOString();
+    if (this.actorId(envelope)) session.closedBy = this.actorId(envelope);
     session.countedMinor = input.countedMinor;
     session.expectedMinor = expected;
     session.overShortMinor = input.countedMinor - expected;
@@ -743,8 +793,8 @@ export class Engine {
     if (await this.store.dayStatus(date) === "closed") {
       return this.remember(envelope, { kind: "rejected", reason: "the business day is already closed" }, "business_day", date);
     }
-    if (!managerApproved(input.managerPin)) {
-      return this.remember(envelope, { kind: "rejected", reason: "closing the day requires manager approval (4-digit PIN)" }, "business_day", date);
+    if (!(await this.manager(input.managerPin))) {
+      return this.remember(envelope, { kind: "rejected", reason: this.managerRefusal(input.managerPin, "closing the day") }, "business_day", date);
     }
     const report = await this.dayReport();
     const b = report.blockers;
@@ -768,8 +818,8 @@ export class Engine {
     if (await this.store.dayStatus(date) === "open") {
       return this.remember(envelope, { kind: "rejected", reason: "the business day is not closed" }, "business_day", date);
     }
-    if (!managerApproved(input.managerPin)) {
-      return this.remember(envelope, { kind: "rejected", reason: "reopening the day requires manager approval (4-digit PIN)" }, "business_day", date);
+    if (!(await this.manager(input.managerPin))) {
+      return this.remember(envelope, { kind: "rejected", reason: this.managerRefusal(input.managerPin, "reopening the day") }, "business_day", date);
     }
     await this.store.setDayStatus(date, "open");
     return this.remember(envelope, { kind: "applied", day: await this.dayReport() }, "business_day", date);

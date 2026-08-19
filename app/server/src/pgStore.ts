@@ -15,6 +15,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { GROUPS, MENU, SNAPSHOT_ID } from "./menu.js";
+import { pinHash, ROLE_IDS, STAFF, type Employee } from "./staff.js";
 import {
   FLOOR,
   serviceDateOf,
@@ -86,10 +87,24 @@ export class PgStore implements Store {
         "INSERT INTO location (id, org_id, name, timezone) VALUES ($1, $2, 'Osteria Nove', 'America/New_York') ON CONFLICT (id) DO NOTHING",
         [LOC, ORG],
       );
-      await c.query(
-        "INSERT INTO employee (id, org_id, location_id, display_name, pin_hash) VALUES ($1, $2, $3, 'Gia R.', 'seed:no-pin-until-E15') ON CONFLICT (id) DO NOTHING",
-        [EMP, ORG, LOC],
-      );
+      // staff roster (E15): hashed PINs, roles, and role assignments
+      for (const [role, roleId] of Object.entries(ROLE_IDS)) {
+        await c.query(
+          "INSERT INTO role (id, org_id, name) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING",
+          [roleId, ORG, role.charAt(0).toUpperCase() + role.slice(1)],
+        );
+      }
+      for (const s of STAFF) {
+        await c.query(
+          `INSERT INTO employee (id, org_id, location_id, display_name, pin_hash) VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (id) DO UPDATE SET display_name = $4, pin_hash = $5`,
+          [s.id, ORG, LOC, s.name, pinHash(s.demoPin)],
+        );
+        await c.query(
+          "INSERT INTO employee_role (employee_id, role_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+          [s.id, ROLE_IDS[s.role]],
+        );
+      }
       await c.query(
         "INSERT INTO device (id, org_id, location_id, name, kind) VALUES ($1, $2, $3, 'default-terminal', 'terminal') ON CONFLICT (id) DO NOTHING",
         [DEV, ORG, LOC],
@@ -196,8 +211,8 @@ export class PgStore implements Store {
             l.id, check.id, snapUuidFor(l.menuSnapshotId ?? check.menuSnapshotId), uuidFrom(l.itemId), l.capturedName, l.unitPriceMinor, l.course, l.station,
             l.quantity, l.seatNo, l.status,
             l.status === "voided" ? (l.voidReason ?? "voided") : null,
-            l.status === "voided" ? EMP : null,
-            l.status === "voided" ? EMP : null,
+            l.status === "voided" ? (l.voidedBy ?? EMP) : null,
+            l.status === "voided" ? (l.voidApprovedBy ?? EMP) : null,
             EMP, JSON.stringify({ modifiers: l.modifiers, modifierPriceMinor: l.modifierPriceMinor }),
           ],
         );
@@ -206,7 +221,7 @@ export class PgStore implements Store {
         await c.query(
           `INSERT INTO check_adjustment (id, check_id, kind, captured_name, amount_minor, percent_bp, reason, applied_by, approved_by)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (id) DO UPDATE SET check_id = $2`,
-          [a.id, check.id, a.kind, a.label, a.amountMinor ?? null, a.percentBp ?? null, a.reason, EMP, EMP],
+          [a.id, check.id, a.kind, a.label, a.amountMinor ?? null, a.percentBp ?? null, a.reason, a.appliedBy ?? EMP, a.approvedBy ?? EMP],
         );
       }
       for (const p of check.payments) {
@@ -226,7 +241,7 @@ export class PgStore implements Store {
         await c.query(
           `INSERT INTO payment (id, intent_id, attempt_id, method, amount_minor, tip_minor, status, taken_by)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (id) DO NOTHING`,
-          [p.id, intentId, attemptId, p.method, p.amountMinor, p.tipMinor, p.status, EMP],
+          [p.id, intentId, attemptId, p.method, p.amountMinor, p.tipMinor, p.status, p.takenBy ?? EMP],
         );
       }
       await c.query("COMMIT");
@@ -344,9 +359,9 @@ export class PgStore implements Store {
   async rememberOp(operationId: string, result: unknown, meta: OpMeta): Promise<void> {
     const opUuid = isUuid(operationId) ? operationId : uuidFrom("op:" + operationId);
     await this.pool.query(
-      `INSERT INTO sync_operation (operation_id, org_id, location_id, device_id, aggregate_type, aggregate_id, command, status, result, client_ts)
-       VALUES ($1,$2,$3,$4,$5,$6,'{}',$7,$8, now()) ON CONFLICT (operation_id) DO NOTHING`,
-      [opUuid, ORG, LOC, DEV, meta.aggregateType, isUuid(meta.aggregateId) ? meta.aggregateId : uuidFrom(meta.aggregateId), meta.status, JSON.stringify(result)],
+      `INSERT INTO sync_operation (operation_id, org_id, location_id, device_id, employee_id, aggregate_type, aggregate_id, command, status, result, client_ts)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'{}',$8,$9, now()) ON CONFLICT (operation_id) DO NOTHING`,
+      [opUuid, ORG, LOC, DEV, meta.employeeId ?? null, meta.aggregateType, isUuid(meta.aggregateId) ? meta.aggregateId : uuidFrom(meta.aggregateId), meta.status, JSON.stringify(result)],
     );
   }
 
@@ -490,8 +505,8 @@ export class PgStore implements Store {
         `INSERT INTO drawer_session (id, drawer_id, business_day_id, opened_by, opened_at, opening_float_minor, closed_by, closed_at, counted_minor, expected_minor, over_short_minor)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
          ON CONFLICT (id) DO UPDATE SET closed_by = $7, closed_at = $8, counted_minor = $9, expected_minor = $10, over_short_minor = $11`,
-        [session.id, drawerId, dayId, EMP, session.openedAt, session.openingFloatMinor,
-         session.closedAt ? EMP : null, session.closedAt ?? null,
+        [session.id, drawerId, dayId, session.openedBy ?? EMP, session.openedAt, session.openingFloatMinor,
+         session.closedAt ? (session.closedBy ?? EMP) : null, session.closedAt ?? null,
          session.countedMinor ?? null, session.expectedMinor ?? null, session.overShortMinor ?? null],
       );
       for (const e of session.events) {
@@ -635,6 +650,23 @@ export class PgStore implements Store {
     } finally {
       c.release();
     }
+  }
+
+  async findEmployeeByPin(pin: string): Promise<Employee | undefined> {
+    const r = await this.pool.query(
+      `SELECT e.id, e.display_name, r.name AS role
+       FROM employee e
+       JOIN employee_role er ON er.employee_id = e.id
+       JOIN role r ON r.id = er.role_id
+       WHERE e.location_id = $1 AND e.pin_hash = $2 LIMIT 1`,
+      [LOC, pinHash(pin)],
+    );
+    if (!r.rowCount) return undefined;
+    return {
+      id: r.rows[0].id as string,
+      name: r.rows[0].display_name as string,
+      role: (r.rows[0].role as string).toLowerCase() === "manager" ? "manager" : "server",
+    };
   }
 
   async dayStatus(serviceDate: string): Promise<"open" | "closed"> {

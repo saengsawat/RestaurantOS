@@ -80,6 +80,37 @@ export function buildServer(store: Store = new MemoryStore(), storeName = "memor
   app.get("/menu", async (_req, reply) => reply.type("text/html").send(MENU_PAGE));
   app.get("/health/live", async () => ({ ok: true, service: "restaurantos-server", store: storeName }));
 
+  /* -------------------------- sessions (E15) -------------------------- */
+
+  app.get("/v1/staff", async () => ({ staff: engine.staff() }));
+
+  app.post("/v1/session", async (req, reply) => {
+    const body = (req.body ?? {}) as { deviceId?: unknown; pin?: unknown };
+    if (typeof body.deviceId !== "string" || !body.deviceId) {
+      return reply.code(400).send({ status: "BAD_REQUEST", reason: "deviceId is required" });
+    }
+    if (typeof body.pin !== "string" || !body.pin) {
+      return reply.code(400).send({ status: "BAD_REQUEST", reason: "pin is required" });
+    }
+    const employee = await engine.signIn(body.deviceId, body.pin);
+    if (!employee) return reply.code(401).send({ status: "UNAUTHORIZED", reason: "PIN not recognized" });
+    return { employee };
+  });
+
+  app.post("/v1/session/signout", async (req, reply) => {
+    const body = (req.body ?? {}) as { deviceId?: unknown };
+    if (typeof body.deviceId !== "string" || !body.deviceId) {
+      return reply.code(400).send({ status: "BAD_REQUEST", reason: "deviceId is required" });
+    }
+    engine.signOut(body.deviceId);
+    return { ok: true };
+  });
+
+  app.get("/v1/session", async (req) => {
+    const { deviceId } = req.query as { deviceId?: string };
+    return { employee: deviceId ? engine.who(deviceId) : null };
+  });
+
   app.get("/v1/menu", async () => engine.menu());
   app.get("/v1/menu/draft", async () => engine.menuDraft());
   app.get("/v1/floor", async () => ({ tables: await engine.floor() }));

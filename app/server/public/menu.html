@@ -165,7 +165,7 @@ function render(){
     ${d?`<button class="btn btn-s" id="btnDiscard">Discard draft</button>
          <button class="btn btn-p" id="btnPublish">Publish v${menu.version+1}</button>`:""}`;
   if($("#btnPublish"))$("#btnPublish").onclick=()=>form("Publish the menu","v"+(menu.version+1)+" becomes what service runs on; nothing already ordered changes",[
-    {id:"pin",label:"Manager PIN (demo: any 4 digits)",ph:"••••"}],"Publish",async v=>{
+    {id:"pin",label:"Manager PIN (demo manager: Marco B. · 1122)",ph:"••••"}],"Publish",async v=>{
     const r=await cmd("/v1/menu/publish",{managerPin:v.pin});
     toast("Published "+r.menu.snapshotId+" with "+r.menu.items+" items");});
   if($("#btnDiscard"))$("#btnDiscard").onclick=async()=>{await cmd("/v1/menu/draft/discard",{});toast("Draft discarded");await refresh();};

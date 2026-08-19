@@ -91,12 +91,12 @@ describe.skipIf(!PGBIN)("PostgreSQL persistence (E4)", () => {
     const state1 = (await app.inject({ method: "GET", url: `/v1/checks/${id}` })).json().check;
     const acquaLine = state1.lines.find((l: { capturedName: string }) => l.capturedName === "Acqua Panna");
     const voidRes = await app.inject({ method: "POST", url: `/v1/checks/${id}/items/${acquaLine.id}/void`,
-      payload: ENV({ reason: "guest changed order", managerPin: "1234" }) });
+      payload: ENV({ reason: "guest changed order", managerPin: "1122" }) });
     expect(voidRes.statusCode).toBe(200);
 
     // E12: a manager discount, audited into check_adjustment
     const disc = await app.inject({ method: "POST", url: `/v1/checks/${id}/adjustments`,
-      payload: ENV({ amountMinor: 400, label: "Regular guest", reason: "weekly regular", managerPin: "1234" }) });
+      payload: ENV({ amountMinor: 400, label: "Regular guest", reason: "weekly regular", managerPin: "1122" }) });
     expect(disc.statusCode).toBe(200);
     expect(disc.json().check.totals.discountMinor).toBe(400);
 
@@ -125,17 +125,17 @@ describe.skipIf(!PGBIN)("PostgreSQL persistence (E4)", () => {
     expect(drawer.statusCode).toBe(200);
     const sessionId = drawer.json().session.id as string;
     await app.inject({ method: "POST", url: "/v1/drawer/event",
-      payload: ENV({ sessionId, kind: "pay_out", amountMinor: 2500, reason: "produce run", managerPin: "1234" }) });
+      payload: ENV({ sessionId, kind: "pay_out", amountMinor: 2500, reason: "produce run", managerPin: "1122" }) });
     const drawerClose = await app.inject({ method: "POST", url: "/v1/drawer/close",
       payload: ENV({ sessionId, countedMinor: 17500 }) });
     expect(drawerClose.json().session.overShortMinor).toBe(0);
-    const dayClose = await app.inject({ method: "POST", url: "/v1/day/close", payload: ENV({ managerPin: "1234" }) });
+    const dayClose = await app.inject({ method: "POST", url: "/v1/day/close", payload: ENV({ managerPin: "1122" }) });
     expect(dayClose.statusCode).toBe(200);
 
     // E5: publish menu v2 (price change) and 86 the calamari, both persisted
     await app.inject({ method: "POST", url: "/v1/menu/draft/item",
       payload: ENV({ itemId: "tiramisu", name: "Tiramisu della Casa", priceMinor: 1300, course: "DOLCI", station: "FREDDO" }) });
-    const pub = await app.inject({ method: "POST", url: "/v1/menu/publish", payload: ENV({ managerPin: "1234" }) });
+    const pub = await app.inject({ method: "POST", url: "/v1/menu/publish", payload: ENV({ managerPin: "1122" }) });
     expect(pub.statusCode).toBe(200);
     await app.inject({ method: "POST", url: "/v1/menu/86", payload: ENV({ itemId: "calamari", is86: true }) });
 

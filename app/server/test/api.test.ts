@@ -232,15 +232,15 @@ describe("voids and discounts (E12)", () => {
 
     // no reason -> refused; no PIN -> refused; the approval step is real
     const noReason = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items/${ragu.id}/void`,
-      payload: { ...ENV(4), managerPin: "1234" } });
+      payload: { ...ENV(4), managerPin: "1122" } });
     expect(noReason.statusCode).toBe(422);
     const noPin = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items/${ragu.id}/void`,
       payload: { ...ENV(5), reason: "guest changed mind" } });
     expect(noPin.statusCode).toBe(422);
-    expect(noPin.json().reason).toMatch(/approval/);
+    expect(noPin.json().reason).toMatch(/manager/);
 
     const voided = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items/${ragu.id}/void`,
-      payload: { ...ENV(6), reason: "guest changed mind", managerPin: "1234" } });
+      payload: { ...ENV(6), reason: "guest changed mind", managerPin: "1122" } });
     expect(voided.statusCode).toBe(200);
     const vLine = voided.json().check.lines.find((l: { id: string }) => l.id === ragu.id);
     expect(vLine.status).toBe("voided");
@@ -264,7 +264,7 @@ describe("voids and discounts (E12)", () => {
 
     // a second void of the same line is refused
     const again = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items/${ragu.id}/void`,
-      payload: { ...ENV(9), reason: "double tap", managerPin: "1234" } });
+      payload: { ...ENV(9), reason: "double tap", managerPin: "1122" } });
     expect(again.statusCode).toBe(422);
   });
 
@@ -277,14 +277,14 @@ describe("voids and discounts (E12)", () => {
 
     // 10% of 2400 = 240 off; taxable 2160; tax 8.875% = 191.7 -> 192
     const pct = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/adjustments`,
-      payload: { ...ENV(3), percentBp: 1000, reason: "industry guest", managerPin: "4321" } });
+      payload: { ...ENV(3), percentBp: 1000, reason: "industry guest", managerPin: "1122" } });
     expect(pct.statusCode).toBe(200);
     expect(pct.json().check.totals.discountMinor).toBe(240);
     expect(pct.json().check.totals.dueMinor).toBe(2160 + 192);
 
     // both amount AND percent in one call is refused (schema XOR)
     const both = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/adjustments`,
-      payload: { ...ENV(4), amountMinor: 100, percentBp: 500, reason: "confused", managerPin: "4321" } });
+      payload: { ...ENV(4), amountMinor: 100, percentBp: 500, reason: "confused", managerPin: "1122" } });
     expect(both.statusCode).toBe(422);
 
     // no PIN refused
@@ -294,7 +294,7 @@ describe("voids and discounts (E12)", () => {
 
     // amount comp stacks with the percent
     const amt = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/adjustments`,
-      payload: { ...ENV(6), kind: "comp", amountMinor: 500, label: "Kitchen delay", reason: "long wait on primi", managerPin: "4321" } });
+      payload: { ...ENV(6), kind: "comp", amountMinor: 500, label: "Kitchen delay", reason: "long wait on primi", managerPin: "1122" } });
     expect(amt.statusCode).toBe(200);
     expect(amt.json().check.totals.discountMinor).toBe(740);
 
@@ -303,7 +303,7 @@ describe("voids and discounts (E12)", () => {
     await app.inject({ method: "POST", url: `/v1/checks/${check.id}/payments`,
       payload: { ...ENV(7), method: "card", amountMinor: due } });
     const late = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/adjustments`,
-      payload: { ...ENV(8), amountMinor: 100, reason: "too late", managerPin: "4321" } });
+      payload: { ...ENV(8), amountMinor: 100, reason: "too late", managerPin: "1122" } });
     expect(late.statusCode).toBe(422);
   });
 });
@@ -341,6 +341,69 @@ describe("the floor layout editor (E6)", () => {
     const b = buildServer();
     const t2 = (await floorOf(b)).find((t) => t.name === "Table 2")!;
     expect(t2.x).toBe(5); // seed position, untouched
+  });
+});
+
+describe("employees, PINs, and sessions (E15)", () => {
+  it("signs staff in and out per device, and reports who is on it", async () => {
+    const app = buildServer();
+    const staff = (await app.inject({ method: "GET", url: "/v1/staff" })).json().staff;
+    expect(staff.map((s: { name: string }) => s.name)).toContain("Marco B.");
+
+    const bad = await app.inject({ method: "POST", url: "/v1/session",
+      payload: { deviceId: "term-1", pin: "0000" } });
+    expect(bad.statusCode).toBe(401);
+
+    const ok = await app.inject({ method: "POST", url: "/v1/session",
+      payload: { deviceId: "term-1", pin: "2468" } });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json().employee.name).toBe("Gia R.");
+    expect(ok.json().employee.role).toBe("server");
+
+    const who = await app.inject({ method: "GET", url: "/v1/session?deviceId=term-1" });
+    expect(who.json().employee.name).toBe("Gia R.");
+
+    await app.inject({ method: "POST", url: "/v1/session/signout", payload: { deviceId: "term-1" } });
+    const after = await app.inject({ method: "GET", url: "/v1/session?deviceId=term-1" });
+    expect(after.json().employee).toBeNull();
+  });
+
+  it("a server's PIN cannot approve; a manager's can, and the approver is recorded", async () => {
+    const app = buildServer();
+    const check = await openCheck(app);
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items`,
+      payload: { ...ENV(1), itemId: "acqua", quantity: 1, seatNo: 1 } });
+    const lineId = (await app.inject({ method: "GET", url: `/v1/checks/${check.id}` }))
+      .json().check.lines[0].id as string;
+
+    // Gia (server, 2468) tries to self-approve a void: refused
+    const serverPin = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items/${lineId}/void`,
+      payload: { ...ENV(2), reason: "wrong item", managerPin: "2468" } });
+    expect(serverPin.statusCode).toBe(422);
+    expect(serverPin.json().reason).toMatch(/not recognized as a manager/);
+
+    // Marco (manager, 1122) approves, and the void records him
+    const ok = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items/${lineId}/void`,
+      payload: { ...ENV(3), reason: "wrong item", managerPin: "1122" } });
+    expect(ok.statusCode).toBe(200);
+    const line = ok.json().check.lines[0];
+    expect(line.status).toBe("voided");
+    expect(line.voidApprovedBy).toBe("66666666-6666-4666-8666-666666666666"); // Marco B.
+  });
+
+  it("payments are attributed to the signed-in employee on the device", async () => {
+    const app = buildServer();
+    await app.inject({ method: "POST", url: "/v1/session",
+      payload: { deviceId: "test-terminal", pin: "2468" } }); // ENV uses test-terminal
+    const check = await openCheck(app);
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items`,
+      payload: { ...ENV(1), itemId: "acqua", quantity: 1, seatNo: 1 } });
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/send`, payload: ENV(2) });
+    const due = (await app.inject({ method: "GET", url: `/v1/checks/${check.id}` })).json().check.totals.dueMinor as number;
+    const pay = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/payments`,
+      payload: { ...ENV(3), method: "card", amountMinor: due } });
+    expect(pay.statusCode).toBe(200);
+    expect(pay.json().check.payments[0].takenBy).toBe("33333333-3333-3333-3333-333333333333"); // Gia R.
   });
 });
 
@@ -404,7 +467,7 @@ describe("transfer and merge (E7)", () => {
     expect(noPin.statusCode).toBe(422);
 
     const merged = await app.inject({ method: "POST", url: `/v1/checks/${a.id}/merge`,
-      payload: { ...ENV(6), sourceCheckId: b.id, managerPin: "1234" } });
+      payload: { ...ENV(6), sourceCheckId: b.id, managerPin: "1122" } });
     expect(merged.statusCode).toBe(200);
     const c = merged.json().check;
     expect(c.covers).toBe(5); // 2 + 3
@@ -440,7 +503,7 @@ describe("transfer and merge (E7)", () => {
     await app.inject({ method: "POST", url: `/v1/checks/${b.id}/send`, payload: ENV(3) });
     await app.inject({ method: "POST", url: `/v1/checks/${b.id}/payments`, payload: { ...ENV(4), method: "card", amountMinor: 100 } });
     const res = await app.inject({ method: "POST", url: `/v1/checks/${a.id}/merge`,
-      payload: { ...ENV(5), sourceCheckId: b.id, managerPin: "1234" } });
+      payload: { ...ENV(5), sourceCheckId: b.id, managerPin: "1122" } });
     expect(res.statusCode).toBe(422);
     expect(res.json().reason).toMatch(/payments/);
   });
@@ -471,7 +534,7 @@ describe("menu drafts, publishing, and the 86 board (E5)", () => {
     // publish needs a manager
     const noPin = await app.inject({ method: "POST", url: "/v1/menu/publish", payload: ENV(4) });
     expect(noPin.statusCode).toBe(422);
-    const pub = await app.inject({ method: "POST", url: "/v1/menu/publish", payload: { ...ENV(5), managerPin: "1234" } });
+    const pub = await app.inject({ method: "POST", url: "/v1/menu/publish", payload: { ...ENV(5), managerPin: "1122" } });
     expect(pub.statusCode).toBe(200);
     expect(pub.json().menu.version).toBe(2);
 
@@ -498,7 +561,7 @@ describe("menu drafts, publishing, and the 86 board (E5)", () => {
 
     // remove the calamari on a fresh draft, publish v3, and it stops being orderable
     await app.inject({ method: "POST", url: "/v1/menu/draft/remove", payload: { ...ENV(8), itemId: "calamari" } });
-    await app.inject({ method: "POST", url: "/v1/menu/publish", payload: { ...ENV(9), managerPin: "1234" } });
+    await app.inject({ method: "POST", url: "/v1/menu/publish", payload: { ...ENV(9), managerPin: "1122" } });
     const gone = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items`,
       payload: { ...ENV(10), itemId: "calamari", quantity: 1, seatNo: 1 } });
     expect(gone.statusCode).toBe(422);
@@ -572,7 +635,7 @@ describe("cash drawers and the business day (E14/E16)", () => {
       payload: { ...ENV(7), sessionId, kind: "pay_out", amountMinor: 1500, reason: "produce run" } });
     expect(noPin.statusCode).toBe(422);
     const payOut = await app.inject({ method: "POST", url: "/v1/drawer/event",
-      payload: { ...ENV(8), sessionId, kind: "pay_out", amountMinor: 1500, reason: "produce run", managerPin: "1234" } });
+      payload: { ...ENV(8), sessionId, kind: "pay_out", amountMinor: 1500, reason: "produce run", managerPin: "1122" } });
     expect(payOut.statusCode).toBe(200);
 
     // count and close: expected = 20000 float + (due+100) sale − 1500 payout
@@ -597,7 +660,7 @@ describe("cash drawers and the business day (E14/E16)", () => {
     await app.inject({ method: "POST", url: `/v1/checks/${check.id}/send`, payload: ENV(2) });
 
     // blocked: the check is still open
-    const early = await app.inject({ method: "POST", url: "/v1/day/close", payload: { ...ENV(3), managerPin: "1234" } });
+    const early = await app.inject({ method: "POST", url: "/v1/day/close", payload: { ...ENV(3), managerPin: "1122" } });
     expect(early.statusCode).toBe(422);
     expect(early.json().reason).toMatch(/open check/);
 
@@ -611,7 +674,7 @@ describe("cash drawers and the business day (E14/E16)", () => {
     const sessionId = opened.json().session.id as string;
 
     // blocked: the drawer is still open
-    const midway = await app.inject({ method: "POST", url: "/v1/day/close", payload: { ...ENV(7), managerPin: "1234" } });
+    const midway = await app.inject({ method: "POST", url: "/v1/day/close", payload: { ...ENV(7), managerPin: "1122" } });
     expect(midway.statusCode).toBe(422);
     expect(midway.json().reason).toMatch(/drawer/);
 
@@ -622,7 +685,7 @@ describe("cash drawers and the business day (E14/E16)", () => {
     expect(noPin.statusCode).toBe(422);
 
     // all clear: the close carries the sealed summary
-    const done = await app.inject({ method: "POST", url: "/v1/day/close", payload: { ...ENV(10), managerPin: "1234" } });
+    const done = await app.inject({ method: "POST", url: "/v1/day/close", payload: { ...ENV(10), managerPin: "1122" } });
     expect(done.statusCode).toBe(200);
     const day = done.json().day;
     expect(day.status).toBe("closed");
@@ -637,11 +700,11 @@ describe("cash drawers and the business day (E14/E16)", () => {
       payload: { ...ENV(11), tableName: "Table 5", covers: 2 } });
     expect(newCheck.statusCode).toBe(422);
     expect(newCheck.json().reason).toMatch(/closed/);
-    const again = await app.inject({ method: "POST", url: "/v1/day/close", payload: { ...ENV(12), managerPin: "1234" } });
+    const again = await app.inject({ method: "POST", url: "/v1/day/close", payload: { ...ENV(12), managerPin: "1122" } });
     expect(again.statusCode).toBe(422);
 
     // reopen (manager) and service resumes
-    const reopen = await app.inject({ method: "POST", url: "/v1/day/reopen", payload: { ...ENV(13), managerPin: "1234" } });
+    const reopen = await app.inject({ method: "POST", url: "/v1/day/reopen", payload: { ...ENV(13), managerPin: "1122" } });
     expect(reopen.statusCode).toBe(200);
     const resume = await app.inject({ method: "POST", url: "/v1/checks",
       payload: { ...ENV(14), tableName: "Table 5", covers: 2 } });

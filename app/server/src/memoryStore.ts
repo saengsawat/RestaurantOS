@@ -1,5 +1,6 @@
 /** Zero-setup Store for dev and tests. State dies with the process. */
 import { GROUPS, MENU, SNAPSHOT_ID } from "./menu.js";
+import { pinHash, staffByPinHash, type Employee } from "./staff.js";
 import {
   FLOOR,
   type Availability,
@@ -64,4 +65,9 @@ export class MemoryStore implements Store {
   async clearDraft() { this.draft = undefined; }
   async listAvailability() { return [...this.availability.values()]; }
   async setAvailability(availability: Availability) { this.availability.set(availability.itemId, availability); }
+
+  async findEmployeeByPin(pin: string): Promise<Employee | undefined> {
+    const hit = staffByPinHash(pinHash(pin));
+    return hit ? { id: hit.id, name: hit.name, role: hit.role } : undefined;
+  }
 }

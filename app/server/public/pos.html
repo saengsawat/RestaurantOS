@@ -189,6 +189,7 @@ label.ck{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--ink-
       <a href="/menu" style="color:var(--ink-3);text-decoration:none;font-size:13px;font-weight:600;padding:8px 14px;border-radius:999px">Menu</a>
       <a href="/close" style="color:var(--ink-3);text-decoration:none;font-size:13px;font-weight:600;padding:8px 14px;border-radius:999px">Close</a>
     </nav>
+    <button id="btnWho" style="min-height:36px;border-radius:999px;background:var(--surface-2);font-size:13px;font-weight:600;padding:0 14px">Sign in</button>
     <div class="conn" id="conn"><span class="dot"></span><span id="connTxt">server</span></div>
   </header>
   <div class="main" id="main">
@@ -237,6 +238,12 @@ label.ck{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--ink-
   <div class="m-f" id="payFoot"></div>
 </div></div>
 
+<div class="ov" id="ovWho"><div class="modal">
+  <div class="m-h"><div><h3>Who's on this terminal?</h3><div class="sub" id="whoSub">Sign in with your PIN. Approvals still ask for a manager.</div></div><button class="m-x" data-close="ovWho">✕</button></div>
+  <div class="m-b" id="whoBody"></div>
+  <div class="m-f" id="whoFoot"></div>
+</div></div>
+
 <div class="ov" id="ovMore"><div class="modal">
   <div class="m-h"><div><h3>Check actions</h3><div class="sub" id="moreSub"></div></div><button class="m-x" data-close="ovMore">✕</button></div>
   <div class="m-b" id="moreBody"></div>
@@ -248,7 +255,7 @@ label.ck{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--ink-
   <div class="m-b">
     <div class="og-h">Reason (required, audited)</div>
     <input class="fld" id="voidReason" placeholder="e.g. guest changed mind">
-    <div class="og-h" style="margin-top:10px">Manager PIN (demo: any 4 digits)</div>
+    <div class="og-h" style="margin-top:10px">Manager PIN (demo manager: Marco B. · 1122)</div>
     <input class="fld" id="voidPin" inputmode="numeric" maxlength="4" placeholder="••••">
   </div>
   <div class="m-f"><button class="btn btn-p" id="voidGo">Void item</button></div>
@@ -262,7 +269,7 @@ label.ck{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--ink-
     <input class="fld" id="adjAmt" inputmode="decimal" placeholder="Custom amount, e.g. 5.00" style="display:none;margin-top:6px">
     <div class="og-h" style="margin-top:10px">Reason (required, audited)</div>
     <input class="fld" id="adjReason" placeholder="e.g. industry guest, long wait on primi">
-    <div class="og-h" style="margin-top:10px">Manager PIN (demo: any 4 digits)</div>
+    <div class="og-h" style="margin-top:10px">Manager PIN (demo manager: Marco B. · 1122)</div>
     <input class="fld" id="adjPin" inputmode="numeric" maxlength="4" placeholder="••••">
   </div>
   <div class="m-f"><button class="btn btn-p" id="adjGo">Apply</button></div>
@@ -521,6 +528,40 @@ $("#itAdd").onclick=async()=>{
   toast(d.qty+"× "+d.item.name+" added","good");
 };
 
+/* ---------- who's signed in (E15) ---------- */
+let me=null;
+async function loadWho(){
+  try{me=(await fetch("/v1/session?deviceId="+encodeURIComponent(DEVICE)).then(r=>r.json())).employee;}catch(_){me=null;}
+  $("#btnWho").textContent=me?me.name+(me.role==="manager"?" · mgr":""):"Sign in";
+  $("#btnWho").style.background=me?"var(--brand-wash)":"var(--surface-2)";
+}
+$("#btnWho").onclick=async()=>{
+  const staff=(await fetch("/v1/staff").then(r=>r.json())).staff;
+  $("#whoBody").innerHTML=
+    (me?`<div class="og-h">Signed in</div><div style="font-weight:700;margin:2px 0 10px">${esc(me.name)} · ${esc(me.role)}</div>`:"")
+    +`<div class="og-h">Staff (demo PINs shown, concept demo)</div>
+     <div class="opts">${staff.map(s=>`<button class="opt" data-pin="${esc(s.demoPin)}">${esc(s.name)} · ${esc(s.role)} · ${esc(s.demoPin)}</button>`).join("")}</div>
+     <div class="og-h" style="margin-top:10px">PIN</div>
+     <input class="fld" id="whoPin" inputmode="numeric" maxlength="4" placeholder="••••">`;
+  $("#whoFoot").innerHTML=`<button class="btn btn-p" id="whoGo">Sign in</button>`
+    +(me?`<button class="btn btn-s" id="whoOut" style="margin-left:8px">Sign out</button>`:"");
+  document.querySelectorAll("[data-pin]").forEach(b=>b.onclick=()=>{$("#whoPin").value=b.dataset.pin;});
+  $("#whoGo").onclick=async()=>{
+    const res=await fetch("/v1/session",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({deviceId:DEVICE,pin:$("#whoPin").value})});
+    const data=await res.json().catch(()=>({}));
+    if(!res.ok){toast(data.reason||"PIN not recognized","err");return;}
+    closeOv("ovWho");toast("Hi "+data.employee.name,"good");await loadWho();
+  };
+  if($("#whoOut"))$("#whoOut").onclick=async()=>{
+    await fetch("/v1/session/signout",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({deviceId:DEVICE})});
+    closeOv("ovWho");toast("Signed out");await loadWho();
+  };
+  openOv("ovWho");
+};
+loadWho();
+
 /* ---------- transfer / merge (E7) ---------- */
 let mergeSource=null;
 $("#btnMore").onclick=async()=>{
@@ -535,7 +576,7 @@ $("#btnMore").onclick=async()=>{
      <div class="og-h" style="margin-top:10px">Merge another check into this one (manager)</div>
      <div class="opts" id="mgOpts">${others.map(x=>`<button class="opt" data-mg="${x.id}">${esc(x.tableName)} · #${x.checkNo}</button>`).join("")||'<span class="md">No other open checks</span>'}</div>
      <div id="mgPinWrap" style="display:none">
-       <div class="og-h" style="margin-top:10px">Manager PIN (demo: any 4 digits)</div>
+       <div class="og-h" style="margin-top:10px">Manager PIN (demo manager: Marco B. · 1122)</div>
        <input class="fld" id="mgPin" inputmode="numeric" maxlength="4" placeholder="••••">
      </div>`;
   $("#moreFoot").style.display="none";
