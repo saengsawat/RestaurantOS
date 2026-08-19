@@ -344,6 +344,119 @@ describe("the floor layout editor (E6)", () => {
   });
 });
 
+describe("cash drawers and the business day (E14/E16)", () => {
+  it("cash needs a till; the drawer ledger balances; close counts over/short and freezes it", async () => {
+    const app = buildServer();
+    const check = await openCheck(app);
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items`,
+      payload: { ...ENV(1), itemId: "acqua", quantity: 1, seatNo: 1 } });
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/send`, payload: ENV(2) });
+    const due = (await app.inject({ method: "GET", url: `/v1/checks/${check.id}` })).json().check.totals.dueMinor as number;
+
+    // cash with no open drawer is refused: physical money needs a till
+    const noDrawer = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/payments`,
+      payload: { ...ENV(3), method: "cash", amountMinor: due } });
+    expect(noDrawer.statusCode).toBe(422);
+    expect(noDrawer.json().reason).toMatch(/drawer/);
+
+    // open the till with a counted float
+    const opened = await app.inject({ method: "POST", url: "/v1/drawer/open",
+      payload: { ...ENV(4), drawerName: "Front drawer", openingFloatMinor: 20000 } });
+    expect(opened.statusCode).toBe(200);
+    const sessionId = opened.json().session.id as string;
+
+    // one open session per drawer, like idx_drawer_one_open
+    const dup = await app.inject({ method: "POST", url: "/v1/drawer/open",
+      payload: { ...ENV(5), drawerName: "Front drawer", openingFloatMinor: 5000 } });
+    expect(dup.statusCode).toBe(422);
+
+    // now the same cash payment lands, and its sale event hits the ledger
+    const paid = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/payments`,
+      payload: { ...ENV(6), method: "cash", amountMinor: due, tipMinor: 100 } });
+    expect(paid.statusCode).toBe(200);
+
+    // pay-out without a manager is refused; with one it books negative
+    const noPin = await app.inject({ method: "POST", url: "/v1/drawer/event",
+      payload: { ...ENV(7), sessionId, kind: "pay_out", amountMinor: 1500, reason: "produce run" } });
+    expect(noPin.statusCode).toBe(422);
+    const payOut = await app.inject({ method: "POST", url: "/v1/drawer/event",
+      payload: { ...ENV(8), sessionId, kind: "pay_out", amountMinor: 1500, reason: "produce run", managerPin: "1234" } });
+    expect(payOut.statusCode).toBe(200);
+
+    // count and close: expected = 20000 float + (due+100) sale − 1500 payout
+    const expected = 20000 + due + 100 - 1500;
+    const closed = await app.inject({ method: "POST", url: "/v1/drawer/close",
+      payload: { ...ENV(9), sessionId, countedMinor: expected - 200 } });
+    expect(closed.statusCode).toBe(200);
+    expect(closed.json().session.expectedMinor).toBe(expected);
+    expect(closed.json().session.overShortMinor).toBe(-200); // two dollars short, frozen
+
+    // a closed session takes no more cash events
+    const late = await app.inject({ method: "POST", url: "/v1/drawer/event",
+      payload: { ...ENV(10), sessionId, kind: "pay_in", amountMinor: 100, reason: "too late" } });
+    expect(late.statusCode).toBe(422);
+  });
+
+  it("the day close is gated on open checks and drawers, then seals the numbers", async () => {
+    const app = buildServer();
+    const check = await openCheck(app);
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items`,
+      payload: { ...ENV(1), itemId: "ragu", quantity: 1, seatNo: 1, modifiers: [{ groupId: "pasta", modifierId: "spag" }] } });
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/send`, payload: ENV(2) });
+
+    // blocked: the check is still open
+    const early = await app.inject({ method: "POST", url: "/v1/day/close", payload: { ...ENV(3), managerPin: "1234" } });
+    expect(early.statusCode).toBe(422);
+    expect(early.json().reason).toMatch(/open check/);
+
+    // settle the check (card, so no drawer needed), then open a drawer and leave it open
+    const due = (await app.inject({ method: "GET", url: `/v1/checks/${check.id}` })).json().check.totals.dueMinor as number;
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/payments`,
+      payload: { ...ENV(4), method: "card", amountMinor: due, tipMinor: 500 } });
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/close`, payload: ENV(5) });
+    const opened = await app.inject({ method: "POST", url: "/v1/drawer/open",
+      payload: { ...ENV(6), drawerName: "Bar drawer", openingFloatMinor: 10000 } });
+    const sessionId = opened.json().session.id as string;
+
+    // blocked: the drawer is still open
+    const midway = await app.inject({ method: "POST", url: "/v1/day/close", payload: { ...ENV(7), managerPin: "1234" } });
+    expect(midway.statusCode).toBe(422);
+    expect(midway.json().reason).toMatch(/drawer/);
+
+    await app.inject({ method: "POST", url: "/v1/drawer/close", payload: { ...ENV(8), sessionId, countedMinor: 10000 } });
+
+    // no PIN, no close
+    const noPin = await app.inject({ method: "POST", url: "/v1/day/close", payload: ENV(9) });
+    expect(noPin.statusCode).toBe(422);
+
+    // all clear: the close carries the sealed summary
+    const done = await app.inject({ method: "POST", url: "/v1/day/close", payload: { ...ENV(10), managerPin: "1234" } });
+    expect(done.statusCode).toBe(200);
+    const day = done.json().day;
+    expect(day.status).toBe("closed");
+    expect(day.summary.checksClosed).toBe(1);
+    expect(day.summary.totalMinor).toBe(due);
+    expect(day.summary.tipsMinor).toBe(500);
+    expect(day.summary.paidCardMinor).toBe(due);
+    expect(day.drawers[0].overShortMinor).toBe(0);
+
+    // a closed day takes no new checks, and closing twice is refused
+    const newCheck = await app.inject({ method: "POST", url: "/v1/checks",
+      payload: { ...ENV(11), tableName: "Table 5", covers: 2 } });
+    expect(newCheck.statusCode).toBe(422);
+    expect(newCheck.json().reason).toMatch(/closed/);
+    const again = await app.inject({ method: "POST", url: "/v1/day/close", payload: { ...ENV(12), managerPin: "1234" } });
+    expect(again.statusCode).toBe(422);
+
+    // reopen (manager) and service resumes
+    const reopen = await app.inject({ method: "POST", url: "/v1/day/reopen", payload: { ...ENV(13), managerPin: "1234" } });
+    expect(reopen.statusCode).toBe(200);
+    const resume = await app.inject({ method: "POST", url: "/v1/checks",
+      payload: { ...ENV(14), tableName: "Table 5", covers: 2 } });
+    expect(resume.statusCode).toBe(200);
+  });
+});
+
 describe("reads", () => {
   it("serves the menu snapshot and the landing page", async () => {
     const app = buildServer();
@@ -363,10 +476,12 @@ describe("reads", () => {
     expect(pos.body).toContain("operationId");
   });
 
-  it("serves the KDS and Tables pages and the floor", async () => {
+  it("serves the KDS, Tables, and Close pages and the floor", async () => {
     const app = buildServer();
     expect((await app.inject({ method: "GET", url: "/kds" })).statusCode).toBe(200);
     expect((await app.inject({ method: "GET", url: "/tables" })).statusCode).toBe(200);
+    expect((await app.inject({ method: "GET", url: "/close" })).statusCode).toBe(200);
+    expect((await app.inject({ method: "GET", url: "/v1/day" })).json().status).toBe("open");
     const floor = await app.inject({ method: "GET", url: "/v1/floor" });
     expect(floor.json().tables.length).toBe(13);
     expect(floor.json().tables.find((t: { name: string }) => t.name === "Table 7").check).toBeNull();

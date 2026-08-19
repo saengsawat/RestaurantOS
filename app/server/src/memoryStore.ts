@@ -1,5 +1,5 @@
 /** Zero-setup Store for dev and tests. State dies with the process. */
-import { FLOOR, type CheckAggregate, type FloorTable, type KitchenTicket, type OpMeta, type Store } from "./types.js";
+import { FLOOR, type CheckAggregate, type DrawerSession, type FloorTable, type KitchenTicket, type OpMeta, type Store } from "./types.js";
 
 export class MemoryStore implements Store {
   private checks = new Map<string, CheckAggregate>();
@@ -28,4 +28,14 @@ export class MemoryStore implements Store {
     const t = this.floor.find((x) => x.name === name);
     if (t) Object.assign(t, pos);
   }
+
+  private sessions = new Map<string, DrawerSession>();
+  private dayStatuses = new Map<string, "open" | "closed">();
+
+  async listDrawerSessions() { return [...this.sessions.values()]; }
+  async getDrawerSession(id: string) { return this.sessions.get(id); }
+  async putDrawerSession(session: DrawerSession) { this.sessions.set(session.id, session); }
+
+  async dayStatus(serviceDate: string) { return this.dayStatuses.get(serviceDate) ?? "open"; }
+  async setDayStatus(serviceDate: string, status: "open" | "closed") { this.dayStatuses.set(serviceDate, status); }
 }

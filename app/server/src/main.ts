@@ -17,6 +17,7 @@ console.log("  RestaurantOS server running");
 console.log(`  http://localhost:${port}/pos     the POS`);
 console.log(`  http://localhost:${port}/tables  the floor plan`);
 console.log(`  http://localhost:${port}/kds     the kitchen`);
+console.log(`  http://localhost:${port}/close   end of day (drawers + close)`);
 console.log(`  http://localhost:${port}         API docs`);
 console.log("");
 if (storeName === "memory") {

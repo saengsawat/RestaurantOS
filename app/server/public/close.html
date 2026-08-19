@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>RestaurantOS Close Day · connected</title>
+<style>
+:root{
+  color-scheme:light;
+  --brand:#9fe870;--brand-ink:#163300;--brand-wash:rgba(159,232,112,.18);
+  --bg:#f2f1ec;--panel:#fff;--surface:#fff;--surface-2:#e9ebe4;
+  --ink:#0e0f0c;--ink-2:#3f423d;--ink-3:#5f635c;--ink-4:#787c74;
+  --info:#0a7ea4;--info-wash:rgba(10,126,164,.10);--info-line:rgba(10,126,164,.30);
+  --amber:#a16207;--amber-wash:rgba(161,98,7,.10);--amber-line:rgba(161,98,7,.30);
+  --green:#116e3b;--green-wash:rgba(17,110,59,.10);--green-line:rgba(17,110,59,.32);
+  --red:#c22f35;--red-wash:rgba(194,47,53,.09);--red-line:rgba(194,47,53,.32);
+  --line:rgba(14,15,12,.12);--line-subtle:rgba(14,15,12,.06);
+  --ring:0 0 0 1px rgba(14,15,12,.12);--shadow-lg:0 16px 40px rgba(14,15,12,.16);
+  --overlay:rgba(14,15,12,.45);
+  --font:"Inter",ui-sans-serif,system-ui,sans-serif;--mono:ui-monospace,Consolas,monospace;
+  --vph:100vh;
+}
+@supports (height:100dvh){:root{--vph:100dvh}}
+@media (prefers-color-scheme:dark){:root{
+  color-scheme:dark;
+  --bg:#0e0f0c;--panel:#161814;--surface:#1d201b;--surface-2:#282c26;
+  --ink:#f2f1ec;--ink-2:#c9cdc4;--ink-3:#9a9e94;--ink-4:#83877d;
+  --info:#4cc3e8;--info-wash:rgba(76,195,232,.12);--info-line:rgba(76,195,232,.34);
+  --amber:#e3b341;--amber-wash:rgba(227,179,65,.12);--amber-line:rgba(227,179,65,.34);
+  --green:#34d399;--green-wash:rgba(52,211,153,.11);--green-line:rgba(52,211,153,.34);
+  --red:#f0555a;--red-wash:rgba(240,85,90,.12);--red-line:rgba(240,85,90,.36);
+  --line:rgba(242,241,236,.10);--line-subtle:rgba(242,241,236,.05);
+  --ring:0 0 0 1px rgba(242,241,236,.10);--overlay:rgba(0,0,0,.6);
+}}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:var(--vph)}
+body{background:var(--bg);color:var(--ink);font:14.5px/1.45 var(--font);overflow:hidden;user-select:none;
+  -webkit-font-smoothing:antialiased;display:flex;flex-direction:column}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+button:focus-visible,input:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+.num{font-variant-numeric:tabular-nums}
+
+.topbar{display:flex;align-items:center;gap:12px;background:var(--panel);border-bottom:1px solid var(--line);
+  padding:0 16px;min-height:54px}
+.logo{width:32px;height:32px;border-radius:999px;background:var(--brand);color:var(--brand-ink);
+  display:flex;align-items:center;justify-content:center;font-weight:800}
+.t b{font-size:15px}
+.t small{display:block;font-size:10px;color:var(--ink-4);letter-spacing:.05em;text-transform:uppercase}
+.nav{margin-left:auto;display:flex;gap:6px}
+.nav a{color:var(--ink-3);text-decoration:none;font-size:13px;font-weight:600;padding:8px 14px;border-radius:999px}
+.nav a.on{background:var(--brand-wash);color:var(--ink)}
+
+.wrap{flex:1;overflow-y:auto;padding:16px 18px;max-width:1080px;width:100%;margin:0 auto}
+.banner{display:flex;align-items:center;gap:12px;flex-wrap:wrap;border-radius:14px;padding:13px 16px;margin-bottom:14px;
+  box-shadow:var(--ring);background:var(--surface)}
+.banner.closed{background:var(--green-wash);box-shadow:0 0 0 1px var(--green-line)}
+.banner b{font-size:16px}
+.banner .st{font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;border-radius:999px;padding:3px 11px;border:1px solid}
+.banner .st.open{color:var(--info);background:var(--info-wash);border-color:var(--info-line)}
+.banner .st.closed{color:var(--green);background:var(--green-wash);border-color:var(--green-line)}
+.banner .sp{flex:1}
+
+.sec-h{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);margin:16px 2px 8px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.card{background:var(--surface);border-radius:14px;box-shadow:var(--ring);padding:12px 14px}
+.card .k{font-size:11.5px;color:var(--ink-3);font-weight:600}
+.card .v{font-size:21px;font-weight:800;margin-top:2px}
+.card .v.red{color:var(--red)}
+.card .v.green{color:var(--green)}
+.card .s{font-size:11px;color:var(--ink-4)}
+
+.drawers{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px}
+.dr{background:var(--surface);border-radius:14px;box-shadow:var(--ring);padding:13px 15px}
+.dr .h{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px}
+.dr .h b{font-size:15px}
+.dr .rows{font-size:13px;color:var(--ink-2)}
+.dr .rows div{display:flex;justify-content:space-between;padding:2.5px 0}
+.dr .acts{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.chip{border-radius:999px;padding:2px 9px;font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;border:1px solid}
+.chip.green{color:var(--green);background:var(--green-wash);border-color:var(--green-line)}
+.chip.amber{color:var(--amber);background:var(--amber-wash);border-color:var(--amber-line)}
+.chip.red{color:var(--red);background:var(--red-wash);border-color:var(--red-line)}
+.chip.info{color:var(--info);background:var(--info-wash);border-color:var(--info-line)}
+
+.blk{background:var(--surface);border-radius:14px;box-shadow:var(--ring);padding:4px 15px;margin-bottom:10px}
+.blk .row{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid var(--line-subtle);font-size:13.5px}
+.blk .row:last-child{border-bottom:none}
+.blk a{color:var(--info);font-weight:600;text-decoration:none}
+.allclear{color:var(--green);font-weight:600;padding:11px 0;font-size:13.5px}
+
+.btn{min-height:44px;border-radius:999px;font-size:14px;font-weight:600;padding:0 18px;
+  display:inline-flex;align-items:center;justify-content:center;transition:transform .1s}
+.btn:active{transform:scale(.97)}
+.btn-p{background:var(--brand);color:var(--brand-ink)}
+.btn-s{background:var(--surface-2)}
+.btn-sm{min-height:38px;font-size:13px;padding:0 13px}
+.btn:disabled{opacity:.45;cursor:default}
+.btn-danger{background:var(--ink);color:var(--bg)}
+
+.ov{position:fixed;inset:0;background:var(--overlay);display:none;align-items:center;justify-content:center;z-index:100;padding:16px}
+.ov.open{display:flex}
+.modal{background:var(--surface);border-radius:16px;box-shadow:var(--shadow-lg);width:min(400px,100%);animation:pop .15s ease-out}
+@keyframes pop{from{transform:scale(.97);opacity:.6}to{transform:none;opacity:1}}
+.m-h{display:flex;justify-content:space-between;align-items:center;padding:15px 18px 8px}
+.m-h h3{font-size:18px;font-weight:700}
+.m-h .sub{font-size:12px;color:var(--ink-3)}
+.m-x{min-width:36px;min-height:36px;border-radius:999px;background:var(--surface-2)}
+.m-b{padding:2px 18px 6px}
+.m-f{padding:8px 18px 16px}
+.m-f .btn{width:100%}
+.fl{font-size:12.5px;font-weight:700;margin:10px 0 4px}
+.fld{width:100%;min-height:44px;border-radius:10px;border:1px solid var(--line);background:var(--panel);
+  color:var(--ink);font:inherit;padding:0 12px}
+.toasts{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:200;display:flex;flex-direction:column;gap:8px;align-items:center}
+.toast{background:var(--ink);color:var(--bg);border-radius:999px;padding:9px 18px;font-size:13px;font-weight:600;max-width:92vw}
+.toast.err{background:var(--red);color:#fff}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="logo">R</div>
+  <div class="t"><b>Close day · Osteria Nove</b><small>RestaurantOS end of day · live from the server</small></div>
+  <nav class="nav"><a href="/pos">Service</a><a href="/tables">Tables</a><a href="/kds">Kitchen</a><a href="/close" class="on">Close</a></nav>
+</header>
+<div class="wrap">
+  <div class="banner" id="banner"></div>
+
+  <div class="sec-h">Today's numbers (closed checks only, computed live)</div>
+  <div class="grid" id="cards"></div>
+
+  <div class="sec-h">Cash drawers</div>
+  <div class="drawers" id="drawers"></div>
+  <div style="margin-top:10px"><button class="btn btn-s" id="btnOpenDrawer">+ Open a drawer</button></div>
+
+  <div class="sec-h">Before you can close</div>
+  <div class="blk" id="blockers"></div>
+</div>
+
+<div class="ov" id="ovForm"><div class="modal">
+  <div class="m-h"><div><h3 id="fTitle"></h3><div class="sub" id="fSub"></div></div><button class="m-x" onclick="document.getElementById('ovForm').classList.remove('open')">✕</button></div>
+  <div class="m-b" id="fBody"></div>
+  <div class="m-f"><button class="btn btn-p" id="fGo"></button></div>
+</div></div>
+
+<div class="toasts" id="toasts"></div>
+
+<script>
+/* Close-day client (E14/E16): drawers from open float to counted close,
+   the day summary, and the gated business-day close. All numbers are
+   computed by the server; this page only renders and commands. */
+const $=s=>document.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const money=n=>"$"+(n/100).toFixed(2);
+const DEVICE="close-"+(localStorage.getItem("ros.close")||(()=>{const d=crypto.randomUUID().slice(0,8);localStorage.setItem("ros.close",d);return d;})());
+let day=null;
+
+function toast(m,k){const el=document.createElement("div");el.className="toast"+(k?" "+k:"");el.textContent=m;
+  $("#toasts").appendChild(el);setTimeout(()=>el.remove(),3400);}
+
+async function cmd(path,body){
+  const res=await fetch(path,{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({operationId:crypto.randomUUID(),deviceId:DEVICE,...body})});
+  const data=await res.json().catch(()=>({}));
+  if(!res.ok){toast(data.reason||"refused","err");throw new Error("refused");}
+  return data;
+}
+
+async function refresh(){
+  day=await fetch("/v1/day").then(r=>r.json());
+  render();
+}
+
+function hhmm(iso){return new Date(iso).toLocaleTimeString([], {hour:"numeric",minute:"2-digit"});}
+
+function render(){
+  const d=day,s=d.summary,closed=d.status==="closed";
+  const clear=!d.blockers.openChecks.length&&!d.blockers.openDrawers.length&&!d.blockers.offlinePayments;
+
+  $("#banner").className="banner"+(closed?" closed":"");
+  $("#banner").innerHTML=`<b>Business day ${esc(d.serviceDate)}</b>
+    <span class="st ${closed?"closed":"open"}">${closed?"Closed":"Open"}</span><span class="sp"></span>
+    ${closed
+      ?`<button class="btn btn-s" id="btnReopen">Reopen day</button>`
+      :`<button class="btn ${clear?"btn-p":"btn-s"}" id="btnCloseDay" ${clear?"":"disabled"}>${clear?"Close the day":"Close the day (resolve blockers first)"}</button>`}`;
+  if($("#btnCloseDay"))$("#btnCloseDay").onclick=()=>form("Close the day","Manager approval seals today's numbers",[
+    {id:"pin",label:"Manager PIN (demo: any 4 digits)",ph:"••••",num:true}],"Close day",async v=>{
+    const r=await cmd("/v1/day/close",{managerPin:v.pin});
+    toast("Day closed. "+r.day.summary.checksClosed+" checks, "+money(r.day.summary.totalMinor)+" total.");});
+  if($("#btnReopen"))$("#btnReopen").onclick=()=>form("Reopen the day","For corrections only; everything is audited",[
+    {id:"pin",label:"Manager PIN (demo: any 4 digits)",ph:"••••",num:true}],"Reopen",async v=>{
+    await cmd("/v1/day/reopen",{managerPin:v.pin});toast("Day reopened");});
+
+  const net=s.grossMinor-s.discountMinor;
+  $("#cards").innerHTML=[
+    ["Net sales",money(net),s.discountMinor?`gross ${money(s.grossMinor)} − disc ${money(s.discountMinor)}`:""],
+    ["Tax collected",money(s.taxMinor),""],
+    ["Total",money(s.totalMinor),`${s.checksClosed} checks · ${s.covers} covers`],
+    ["Card",money(s.paidCardMinor),""],
+    ["Cash",money(s.paidCashMinor),""],
+    ["Tips",money(s.tipsMinor),"reconciled at clock-out"],
+    ["Voids",s.voidCount+(s.voidCount?` (${money(s.voidValueMinor)})`:""),s.voidCount?"all with reason + approver":""],
+  ].map(([k,v,sub])=>`<div class="card"><div class="k">${k}</div><div class="v num">${v}</div>${sub?`<div class="s">${sub}</div>`:""}</div>`).join("");
+
+  $("#drawers").innerHTML=d.drawers.length?d.drawers.map(dr=>{
+    const open=!dr.closedAt;
+    const os=dr.overShortMinor;
+    return `<div class="dr">
+      <div class="h"><b>${esc(dr.drawerName)}</b>${open
+        ?'<span class="chip info">Open</span>'
+        :os===0?'<span class="chip green">Balanced</span>':`<span class="chip ${os>0?"amber":"red"}">${os>0?"Over":"Short"} ${money(Math.abs(os))}</span>`}</div>
+      <div class="rows">
+        <div><span>Opened</span><span>${hhmm(dr.openedAt)} · float ${money(dr.openingFloatMinor)}</span></div>
+        <div><span>Cash events</span><span>${dr.events.length}</span></div>
+        <div><span>${open?"Expected in drawer now":"Expected at close"}</span><span class="num">${money(dr.expectedSoFarMinor)}</span></div>
+        ${open?"":`<div><span>Counted</span><span class="num">${money(dr.countedMinor)}</span></div>`}
+      </div>
+      ${open?`<div class="acts">
+        <button class="btn btn-s btn-sm" data-in="${dr.id}">Pay in</button>
+        <button class="btn btn-s btn-sm" data-out="${dr.id}">Pay out</button>
+        <button class="btn btn-s btn-sm" data-drop="${dr.id}">Drop</button>
+        <button class="btn btn-p btn-sm" data-close="${dr.id}">Count + close</button>
+      </div>`:""}</div>`;
+  }).join(""):`<div class="dr"><div class="rows">No drawer sessions today. Open one to take cash payments.</div></div>`;
+
+  document.querySelectorAll("[data-in]").forEach(b=>b.onclick=()=>form("Pay in","Cash added to the drawer",[
+    {id:"amt",label:"Amount ($)",ph:"20.00",num:true},{id:"reason",label:"Reason (audited)",ph:"e.g. change from the bank"}],"Add cash",
+    async v=>{await cmd("/v1/drawer/event",{sessionId:b.dataset.in,kind:"pay_in",amountMinor:cents(v.amt),reason:v.reason});toast("Pay-in recorded");}));
+  document.querySelectorAll("[data-out]").forEach(b=>b.onclick=()=>form("Pay out","Cash leaving the drawer needs a manager",[
+    {id:"amt",label:"Amount ($)",ph:"15.00",num:true},{id:"reason",label:"Reason (audited)",ph:"e.g. produce run"},
+    {id:"pin",label:"Manager PIN (demo: any 4 digits)",ph:"••••",num:true}],"Pay out",
+    async v=>{await cmd("/v1/drawer/event",{sessionId:b.dataset.out,kind:"pay_out",amountMinor:cents(v.amt),reason:v.reason,managerPin:v.pin});toast("Pay-out recorded");}));
+  document.querySelectorAll("[data-drop]").forEach(b=>b.onclick=()=>form("Cash drop","Excess cash to the safe needs a manager",[
+    {id:"amt",label:"Amount ($)",ph:"200.00",num:true},{id:"reason",label:"Reason (audited)",ph:"e.g. drawer over limit"},
+    {id:"pin",label:"Manager PIN (demo: any 4 digits)",ph:"••••",num:true}],"Drop to safe",
+    async v=>{await cmd("/v1/drawer/event",{sessionId:b.dataset.drop,kind:"drop",amountMinor:cents(v.amt),reason:v.reason,managerPin:v.pin});toast("Drop recorded");}));
+  document.querySelectorAll("[data-close]").forEach(b=>b.onclick=()=>form("Count and close drawer","Count the physical cash; over/short is frozen at close",[
+    {id:"amt",label:"Counted cash ($)",ph:"312.50",num:true}],"Close drawer",
+    async v=>{const r=await cmd("/v1/drawer/close",{sessionId:b.dataset.close,countedMinor:cents(v.amt)});
+      const os=r.session.overShortMinor;
+      toast(os===0?"Drawer balanced to the cent":(os>0?"Over ":"Short ")+money(Math.abs(os)),os===0?"":"err");}));
+
+  $("#blockers").innerHTML=(()=>{
+    const b=d.blockers,rows=[];
+    b.openChecks.forEach(c=>rows.push(`<div class="row"><span>${esc(c.tableName)} · check #${c.checkNo} · ${esc(c.status.replace("_"," "))} · due ${money(c.dueMinor)}</span><a href="/pos?check=${c.id}">Open in Service ▸</a></div>`));
+    b.openDrawers.forEach(n=>rows.push(`<div class="row"><span>${esc(n)} is still open</span><span>count + close it above</span></div>`));
+    if(b.offlinePayments)rows.push(`<div class="row"><span>${b.offlinePayments} offline card payment(s) pending upload</span><span>they must authorize first</span></div>`);
+    return rows.length?rows.join(""):`<div class="allclear">All clear. Every check settled, every drawer counted.</div>`;
+  })();
+}
+
+function cents(v){const n=Math.round(parseFloat(v||"0")*100);return Number.isFinite(n)?n:0;}
+
+/* one reusable modal: title, fields, verb, submit */
+function form(title,sub,fields,verb,go){
+  $("#fTitle").textContent=title;$("#fSub").textContent=sub;
+  $("#fBody").innerHTML=fields.map(f=>
+    `<div class="fl">${esc(f.label)}</div><input class="fld" id="f_${f.id}" placeholder="${esc(f.ph)}" ${f.num?'inputmode="decimal"':""}>`).join("");
+  $("#fGo").textContent=verb;
+  $("#fGo").onclick=async()=>{
+    const v={};fields.forEach(f=>v[f.id]=$("#f_"+f.id).value.trim());
+    await go(v);
+    $("#ovForm").classList.remove("open");
+    await refresh();
+  };
+  $("#ovForm").classList.add("open");
+  setTimeout(()=>$("#f_"+fields[0].id).focus(),50);
+}
+
+$("#btnOpenDrawer").onclick=()=>form("Open a drawer","Count the opening float before service",[
+  {id:"name",label:"Drawer",ph:"Front drawer"},{id:"amt",label:"Opening float ($)",ph:"200.00",num:true}],"Open drawer",
+  async v=>{await cmd("/v1/drawer/open",{drawerName:v.name||"Front drawer",openingFloatMinor:cents(v.amt)});toast("Drawer open");});
+
+function setViewportH(){document.documentElement.style.setProperty("--vph",window.innerHeight+"px");}
+addEventListener("resize",setViewportH);setViewportH();
+refresh().catch(()=>toast("Cannot reach the server","err"));
+setInterval(()=>{if(!$("#ovForm").classList.contains("open"))refresh().catch(()=>{});},5000);
+</script>
+</body>
+</html>

@@ -87,6 +87,40 @@ export interface KitchenTicket {
   items: TicketItem[];
 }
 
+/** The business-day date (YYYY-MM-DD) an instant belongs to, in SERVER-LOCAL
+ *  time: an 11 PM check must not land on tomorrow's day just because UTC
+ *  rolled over. v0 simplification: rollover at local midnight; the real
+ *  rollover hour (a 1 AM check belongs to yesterday) is pilot config. */
+export function serviceDateOf(iso: string): string {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/** One signed movement of physical cash (E14). Append-only: a mistake is
+ *  corrected by a compensating event, never an edit. */
+export interface CashEvent {
+  id: string;
+  kind: "sale" | "pay_in" | "pay_out" | "drop";
+  amountMinor: number; // signed: pay_out and drop are negative
+  paymentId?: string;
+  reason?: string;
+  at: string;
+}
+
+/** A physical till from open count to close count (E14).
+ *  expected/overShort are computed and FROZEN at close, never recomputed. */
+export interface DrawerSession {
+  id: string;
+  drawerName: string;
+  openedAt: string;
+  openingFloatMinor: number;
+  events: CashEvent[];
+  closedAt?: string;
+  countedMinor?: number;
+  expectedMinor?: number;
+  overShortMinor?: number;
+}
+
 /** A positioned table on the floor plan (E6). Percent coordinates. */
 export interface FloorTable {
   name: string;
@@ -124,6 +158,14 @@ export interface Store {
 
   listFloor(): Promise<FloorTable[]>;
   moveTable(name: string, pos: { x: number; y: number; w: number; h: number }): Promise<void>;
+
+  listDrawerSessions(): Promise<DrawerSession[]>;
+  getDrawerSession(id: string): Promise<DrawerSession | undefined>;
+  putDrawerSession(session: DrawerSession): Promise<void>;
+
+  /** business_day status for a service date (YYYY-MM-DD); "open" if no row yet */
+  dayStatus(serviceDate: string): Promise<"open" | "closed">;
+  setDayStatus(serviceDate: string, status: "open" | "closed"): Promise<void>;
 }
 
 /** Osteria Nove's room, seeded into whichever store is active. */

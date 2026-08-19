@@ -114,6 +114,19 @@ describe.skipIf(!PGBIN)("PostgreSQL persistence (E4)", () => {
       payload: ENV({ tableName: "Table 2", x: 40, y: 56 }) });
     expect(move.statusCode).toBe(200);
 
+    // E14/E16: run a till and close the business day
+    const drawer = await app.inject({ method: "POST", url: "/v1/drawer/open",
+      payload: ENV({ drawerName: "Front drawer", openingFloatMinor: 20000 }) });
+    expect(drawer.statusCode).toBe(200);
+    const sessionId = drawer.json().session.id as string;
+    await app.inject({ method: "POST", url: "/v1/drawer/event",
+      payload: ENV({ sessionId, kind: "pay_out", amountMinor: 2500, reason: "produce run", managerPin: "1234" }) });
+    const drawerClose = await app.inject({ method: "POST", url: "/v1/drawer/close",
+      payload: ENV({ sessionId, countedMinor: 17500 }) });
+    expect(drawerClose.json().session.overShortMinor).toBe(0);
+    const dayClose = await app.inject({ method: "POST", url: "/v1/day/close", payload: ENV({ managerPin: "1234" }) });
+    expect(dayClose.statusCode).toBe(200);
+
     /* THE RESTART: a brand-new store + server on the same database.
        Everything must still be there. */
     await store.end();
@@ -155,5 +168,21 @@ describe.skipIf(!PGBIN)("PostgreSQL persistence (E4)", () => {
     const t2 = floor.find((t: { name: string }) => t.name === "Table 2");
     expect(t2.x).toBe(40);
     expect(t2.y).toBe(56);
+
+    // the closed business day and the counted drawer survived the restart:
+    // day status from business_day, ledger from drawer_session + cash_event
+    const day = (await app2.inject({ method: "GET", url: "/v1/day" })).json();
+    expect(day.status).toBe("closed");
+    expect(day.drawers).toHaveLength(1);
+    expect(day.drawers[0].openingFloatMinor).toBe(20000);
+    expect(day.drawers[0].expectedMinor).toBe(17500);
+    expect(day.drawers[0].overShortMinor).toBe(0);
+    expect(day.drawers[0].events).toHaveLength(1);
+    expect(day.drawers[0].events[0].reason).toBe("produce run");
+
+    // a closed day refuses new checks even after the restart
+    const blocked = await app2.inject({ method: "POST", url: "/v1/checks",
+      payload: ENV({ tableName: "Table 5", covers: 2 }) });
+    expect(blocked.statusCode).toBe(422);
   }, 60_000);
 });

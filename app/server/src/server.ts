@@ -14,6 +14,7 @@ const page = (name: string) => readFileSync(new URL(`../public/${name}`, import.
 const POS_PAGE = page("pos.html");
 const KDS_PAGE = page("kds.html");
 const TABLES_PAGE = page("tables.html");
+const CLOSE_PAGE = page("close.html");
 
 interface EnvelopeBody {
   operationId?: unknown;
@@ -43,6 +44,8 @@ function respond(reply: FastifyReply, outcome: CommandOutcome): unknown {
         status: "APPLIED",
         ...(outcome.check ? { check: outcome.check } : {}),
         ...(outcome.tickets ? { tickets: outcome.tickets } : {}),
+        ...(outcome.session ? { session: outcome.session } : {}),
+        ...(outcome.day ? { day: outcome.day } : {}),
       });
     case "replay":
       return respond(reply, outcome.result);
@@ -72,6 +75,7 @@ export function buildServer(store: Store = new MemoryStore(), storeName = "memor
   app.get("/pos", async (_req, reply) => reply.type("text/html").send(POS_PAGE));
   app.get("/kds", async (_req, reply) => reply.type("text/html").send(KDS_PAGE));
   app.get("/tables", async (_req, reply) => reply.type("text/html").send(TABLES_PAGE));
+  app.get("/close", async (_req, reply) => reply.type("text/html").send(CLOSE_PAGE));
   app.get("/health/live", async () => ({ ok: true, service: "restaurantos-server", store: storeName }));
 
   app.get("/v1/menu", async () => ({ snapshotId: SNAPSHOT_ID, items: MENU, groups: GROUPS }));
@@ -170,6 +174,53 @@ export function buildServer(store: Store = new MemoryStore(), storeName = "memor
     const envelope = readEnvelope((req.body ?? {}) as EnvelopeBody);
     if ("error" in envelope) return reply.code(400).send({ status: "BAD_REQUEST", reason: envelope.error });
     return respond(reply, await engine.close(envelope, id));
+  });
+
+  /* ------------------------ cash + business day ------------------------ */
+
+  app.get("/v1/day", async () => engine.dayReport());
+
+  app.post("/v1/drawer/open", async (req, reply) => {
+    const body = (req.body ?? {}) as EnvelopeBody & { drawerName?: unknown; openingFloatMinor?: unknown };
+    const envelope = readEnvelope(body);
+    if ("error" in envelope) return reply.code(400).send({ status: "BAD_REQUEST", reason: envelope.error });
+    return respond(reply, await engine.openDrawer(envelope, {
+      drawerName: String(body.drawerName ?? ""), openingFloatMinor: Number(body.openingFloatMinor),
+    }));
+  });
+
+  app.post("/v1/drawer/event", async (req, reply) => {
+    const body = (req.body ?? {}) as EnvelopeBody & Record<string, unknown>;
+    const envelope = readEnvelope(body);
+    if ("error" in envelope) return reply.code(400).send({ status: "BAD_REQUEST", reason: envelope.error });
+    return respond(reply, await engine.drawerEvent(envelope, {
+      sessionId: String(body.sessionId ?? ""), kind: String(body.kind ?? ""),
+      amountMinor: Number(body.amountMinor), reason: String(body.reason ?? ""),
+      ...(typeof body.managerPin === "string" ? { managerPin: body.managerPin } : {}),
+    }));
+  });
+
+  app.post("/v1/drawer/close", async (req, reply) => {
+    const body = (req.body ?? {}) as EnvelopeBody & { sessionId?: unknown; countedMinor?: unknown };
+    const envelope = readEnvelope(body);
+    if ("error" in envelope) return reply.code(400).send({ status: "BAD_REQUEST", reason: envelope.error });
+    return respond(reply, await engine.closeDrawer(envelope, {
+      sessionId: String(body.sessionId ?? ""), countedMinor: Number(body.countedMinor),
+    }));
+  });
+
+  app.post("/v1/day/close", async (req, reply) => {
+    const body = (req.body ?? {}) as EnvelopeBody & { managerPin?: unknown };
+    const envelope = readEnvelope(body);
+    if ("error" in envelope) return reply.code(400).send({ status: "BAD_REQUEST", reason: envelope.error });
+    return respond(reply, await engine.closeDay(envelope, typeof body.managerPin === "string" ? { managerPin: body.managerPin } : {}));
+  });
+
+  app.post("/v1/day/reopen", async (req, reply) => {
+    const body = (req.body ?? {}) as EnvelopeBody & { managerPin?: unknown };
+    const envelope = readEnvelope(body);
+    if ("error" in envelope) return reply.code(400).send({ status: "BAD_REQUEST", reason: envelope.error });
+    return respond(reply, await engine.reopenDay(envelope, typeof body.managerPin === "string" ? { managerPin: body.managerPin } : {}));
   });
 
   app.post("/v1/floor/move", async (req, reply) => {

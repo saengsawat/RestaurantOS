@@ -17,7 +17,9 @@ import path from "node:path";
 import { GROUPS, MENU, SNAPSHOT_ID } from "./menu.js";
 import {
   FLOOR,
+  serviceDateOf,
   type CheckAggregate,
+  type DrawerSession,
   type FloorTable,
   type KitchenTicket,
   type OpMeta,
@@ -123,8 +125,8 @@ export class PgStore implements Store {
     }
   }
 
-  private async ensureBusinessDay(c: pg.PoolClient, isoDate: string): Promise<string> {
-    const date = isoDate.slice(0, 10);
+  /** date is a YYYY-MM-DD business-day date (server-local, via serviceDateOf) */
+  private async ensureBusinessDay(c: pg.PoolClient, date: string): Promise<string> {
     const found = await c.query("SELECT id FROM business_day WHERE location_id = $1 AND service_date = $2", [LOC, date]);
     if (found.rowCount) return found.rows[0].id as string;
     const inserted = await c.query(
@@ -157,7 +159,7 @@ export class PgStore implements Store {
     const c = await this.pool.connect();
     try {
       await c.query("BEGIN");
-      const dayId = await this.ensureBusinessDay(c, check.openedAt);
+      const dayId = await this.ensureBusinessDay(c, serviceDateOf(check.openedAt));
       let partyId = this.partyByCheck.get(check.id);
       if (!partyId) {
         const existing = await c.query("SELECT party_id FROM checks WHERE id = $1", [check.id]);
@@ -456,6 +458,111 @@ export class PgStore implements Store {
        WHERE da.id = dt.area_id AND da.location_id = $2 AND dt.name = $3`,
       [JSON.stringify(pos), LOC, name],
     );
+  }
+
+  /* ------------------------- cash + business day ------------------------- */
+
+  private async ensureDrawer(c: pg.PoolClient, name: string): Promise<string> {
+    const found = await c.query("SELECT id FROM cash_drawer WHERE location_id = $1 AND name = $2", [LOC, name]);
+    if (found.rowCount) return found.rows[0].id as string;
+    const inserted = await c.query(
+      "INSERT INTO cash_drawer (id, org_id, location_id, name) VALUES (gen_random_uuid(), $1, $2, $3) RETURNING id",
+      [ORG, LOC, name],
+    );
+    return inserted.rows[0].id as string;
+  }
+
+  async putDrawerSession(session: DrawerSession): Promise<void> {
+    const c = await this.pool.connect();
+    try {
+      await c.query("BEGIN");
+      const drawerId = await this.ensureDrawer(c, session.drawerName);
+      const dayId = await this.ensureBusinessDay(c, serviceDateOf(session.openedAt));
+      await c.query(
+        `INSERT INTO drawer_session (id, drawer_id, business_day_id, opened_by, opened_at, opening_float_minor, closed_by, closed_at, counted_minor, expected_minor, over_short_minor)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+         ON CONFLICT (id) DO UPDATE SET closed_by = $7, closed_at = $8, counted_minor = $9, expected_minor = $10, over_short_minor = $11`,
+        [session.id, drawerId, dayId, EMP, session.openedAt, session.openingFloatMinor,
+         session.closedAt ? EMP : null, session.closedAt ?? null,
+         session.countedMinor ?? null, session.expectedMinor ?? null, session.overShortMinor ?? null],
+      );
+      for (const e of session.events) {
+        await c.query(
+          `INSERT INTO cash_event (id, drawer_session_id, kind, amount_minor, payment_id, reason, employee_id, created_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (id) DO NOTHING`,
+          [e.id, session.id, e.kind, e.amountMinor, e.paymentId ?? null, e.reason ?? null, EMP, e.at],
+        );
+      }
+      await c.query("COMMIT");
+    } catch (err) {
+      await c.query("ROLLBACK");
+      throw err;
+    } finally {
+      c.release();
+    }
+  }
+
+  async getDrawerSession(id: string): Promise<DrawerSession | undefined> {
+    return (await this.hydrateSessions("WHERE ds.id = $1", [id]))[0];
+  }
+
+  async listDrawerSessions(): Promise<DrawerSession[]> {
+    return this.hydrateSessions("", []);
+  }
+
+  private async hydrateSessions(where: string, params: unknown[]): Promise<DrawerSession[]> {
+    const sessions = await this.pool.query(
+      `SELECT ds.id, ds.opened_at, ds.opening_float_minor, ds.closed_at, ds.counted_minor, ds.expected_minor, ds.over_short_minor, cd.name AS drawer_name
+       FROM drawer_session ds JOIN cash_drawer cd ON cd.id = ds.drawer_id
+       ${where} ORDER BY ds.opened_at`,
+      params,
+    );
+    if (!sessions.rowCount) return [];
+    const ids = sessions.rows.map((r) => r.id as string);
+    const events = await this.pool.query(
+      `SELECT id, drawer_session_id, kind, amount_minor, payment_id, reason, created_at
+       FROM cash_event WHERE drawer_session_id = ANY($1) ORDER BY created_at`,
+      [ids],
+    );
+    return sessions.rows.map((r) => ({
+      id: r.id as string,
+      drawerName: r.drawer_name as string,
+      openedAt: new Date(r.opened_at as string).toISOString(),
+      openingFloatMinor: Number(r.opening_float_minor),
+      ...(r.closed_at ? { closedAt: new Date(r.closed_at as string).toISOString() } : {}),
+      ...(r.counted_minor !== null ? { countedMinor: Number(r.counted_minor) } : {}),
+      ...(r.expected_minor !== null ? { expectedMinor: Number(r.expected_minor) } : {}),
+      ...(r.over_short_minor !== null ? { overShortMinor: Number(r.over_short_minor) } : {}),
+      events: events.rows
+        .filter((e) => e.drawer_session_id === r.id)
+        .map((e) => ({
+          id: e.id as string,
+          kind: e.kind,
+          amountMinor: Number(e.amount_minor),
+          ...(e.payment_id ? { paymentId: e.payment_id as string } : {}),
+          ...(e.reason ? { reason: e.reason as string } : {}),
+          at: new Date(e.created_at as string).toISOString(),
+        })),
+    }));
+  }
+
+  async dayStatus(serviceDate: string): Promise<"open" | "closed"> {
+    const r = await this.pool.query("SELECT status FROM business_day WHERE location_id = $1 AND service_date = $2", [LOC, serviceDate]);
+    return r.rowCount && r.rows[0].status === "closed" ? "closed" : "open";
+  }
+
+  async setDayStatus(serviceDate: string, status: "open" | "closed"): Promise<void> {
+    const c = await this.pool.connect();
+    try {
+      await this.ensureBusinessDay(c, serviceDate);
+      await c.query(
+        `UPDATE business_day SET status = $1, closed_at = $2, closed_by = $3
+         WHERE location_id = $4 AND service_date = $5`,
+        [status, status === "closed" ? new Date().toISOString() : null, status === "closed" ? EMP : null, LOC, serviceDate],
+      );
+    } finally {
+      c.release();
+    }
   }
 }
 

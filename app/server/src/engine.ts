@@ -21,7 +21,7 @@ import {
 } from "@restaurantos/domain";
 import { findMenuEntry, GROUPS, SNAPSHOT_ID } from "./menu.js";
 import { randomUUID } from "node:crypto";
-import type { CheckAggregate, Envelope, KitchenTicket, Store } from "./types.js";
+import { serviceDateOf, type CashEvent, type CheckAggregate, type DrawerSession, type Envelope, type KitchenTicket, type Store } from "./types.js";
 
 export const TAX_RATE = { num: 8_875, den: 100_000 };
 export const RECALL_WINDOW_MS = 10 * 60_000;
@@ -34,7 +34,7 @@ export function managerApproved(pin: unknown): boolean {
 }
 
 export type CommandOutcome =
-  | { kind: "applied"; check?: CheckView; tickets?: KitchenTicket[] }
+  | { kind: "applied"; check?: CheckView; tickets?: KitchenTicket[]; session?: DrawerSession; day?: unknown }
   | { kind: "replay"; result: CommandOutcome }
   | { kind: "conflict"; expectedVersion: number | undefined; currentVersion: number }
   | { kind: "rejected"; reason: string; modifierErrors?: readonly ModifierError[] }
@@ -125,6 +125,9 @@ export class Engine {
 
     if (!Number.isSafeInteger(input.covers) || input.covers < 1) {
       return this.remember(envelope, { kind: "rejected", reason: "covers must be a positive integer" }, "check", "new");
+    }
+    if (await this.store.dayStatus(serviceDate()) === "closed") {
+      return this.remember(envelope, { kind: "rejected", reason: "the business day is closed; reopen it from the Close screen first" }, "check", "new");
     }
     const floor = await this.store.listFloor();
     const floorTable = floor.find((t) => t.name === input.tableName);
@@ -320,7 +323,7 @@ export class Engine {
     checkId: string,
     input: { method: "card" | "cash"; amountMinor: number; tipMinor?: number; label?: string; offline?: boolean },
   ): Promise<CommandOutcome> {
-    return this.run(envelope, checkId, (check) => {
+    return this.run(envelope, checkId, async (check) => {
       if (!Number.isSafeInteger(input.amountMinor) || input.amountMinor < 1) {
         return { kind: "rejected", reason: "amountMinor must be a positive integer" };
       }
@@ -329,6 +332,15 @@ export class Engine {
       const hasUnsentLines = check.lines.some((l) => l.status === "unsent");
       const r = checkTransition(check.status, { type: "payment_recorded", coversTotal, hasUnsentLines });
       if (!r.ok) return { kind: "rejected", reason: r.reason };
+
+      // cash needs a till: physical money must land in an open drawer (E14)
+      let drawer: DrawerSession | undefined;
+      if (input.method === "cash") {
+        drawer = (await this.store.listDrawerSessions()).find((s) => !s.closedAt);
+        if (!drawer) {
+          return { kind: "rejected", reason: "no open cash drawer; open one on the Close screen before taking cash" };
+        }
+      }
 
       check.payments.push({
         id: randomUUID(),
@@ -339,6 +351,19 @@ export class Engine {
         status: input.method === "card" && input.offline ? "accepted_offline" : "authorized",
       });
       check.status = r.next;
+      if (drawer) {
+        // v0: the guest's full cash (incl. tip) goes into the till; tips are
+        // reconciled at clock-out (E15). No paymentId link yet: the payment
+        // row persists after this body, so the reason carries the check no.
+        drawer.events.push({
+          id: randomUUID(),
+          kind: "sale",
+          amountMinor: input.amountMinor + (input.tipMinor ?? 0),
+          reason: `cash sale, check #${check.checkNo}`,
+          at: new Date().toISOString(),
+        });
+        await this.store.putDrawerSession(drawer);
+      }
       return { kind: "applied", check: toView(check) };
     });
   }
@@ -419,6 +444,186 @@ export class Engine {
     return this.remember(envelope, { kind: "applied", tickets: [ticket] }, "ticket", ticketId);
   }
 
+  /* --------------------- cash + business day (E14/E16) --------------------- */
+
+  /** Open a physical till with a counted float. One open session per drawer,
+   *  mirroring idx_drawer_one_open. */
+  async openDrawer(envelope: Envelope, input: { drawerName: string; openingFloatMinor: number }): Promise<CommandOutcome> {
+    const replay = await this.store.opResult(envelope.operationId);
+    if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
+    const name = (input.drawerName ?? "").trim();
+    if (!name) return this.remember(envelope, { kind: "rejected", reason: "drawerName is required" }, "drawer_session", "new");
+    if (!Number.isSafeInteger(input.openingFloatMinor) || input.openingFloatMinor < 0) {
+      return this.remember(envelope, { kind: "rejected", reason: "openingFloatMinor must be a non-negative integer" }, "drawer_session", "new");
+    }
+    const open = (await this.store.listDrawerSessions()).find((s) => s.drawerName === name && !s.closedAt);
+    if (open) {
+      return this.remember(envelope, { kind: "rejected", reason: `${name} already has an open session; close it first` }, "drawer_session", "new");
+    }
+    const session: DrawerSession = {
+      id: randomUUID(),
+      drawerName: name,
+      openedAt: new Date().toISOString(),
+      openingFloatMinor: input.openingFloatMinor,
+      events: [],
+    };
+    await this.store.putDrawerSession(session);
+    return this.remember(envelope, { kind: "applied", session }, "drawer_session", session.id);
+  }
+
+  /** Pay-in / pay-out / drop on an open session. Outflows need a manager. */
+  async drawerEvent(
+    envelope: Envelope,
+    input: { sessionId: string; kind: string; amountMinor: number; reason: string; managerPin?: string },
+  ): Promise<CommandOutcome> {
+    const replay = await this.store.opResult(envelope.operationId);
+    if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
+    const session = await this.store.getDrawerSession(input.sessionId);
+    if (!session) return { kind: "not_found" };
+    if (session.closedAt) {
+      return this.remember(envelope, { kind: "rejected", reason: "session is closed; cash events are frozen" }, "drawer_session", session.id);
+    }
+    if (input.kind !== "pay_in" && input.kind !== "pay_out" && input.kind !== "drop") {
+      return this.remember(envelope, { kind: "rejected", reason: "kind must be pay_in, pay_out, or drop" }, "drawer_session", session.id);
+    }
+    if (!Number.isSafeInteger(input.amountMinor) || input.amountMinor < 1) {
+      return this.remember(envelope, { kind: "rejected", reason: "amountMinor must be a positive integer (the sign comes from the kind)" }, "drawer_session", session.id);
+    }
+    if (typeof input.reason !== "string" || input.reason.trim().length < 3) {
+      return this.remember(envelope, { kind: "rejected", reason: "a cash event must carry a reason (min 3 characters)" }, "drawer_session", session.id);
+    }
+    if (input.kind !== "pay_in" && !managerApproved(input.managerPin)) {
+      return this.remember(envelope, { kind: "rejected", reason: "cash leaving the drawer requires manager approval (4-digit PIN)" }, "drawer_session", session.id);
+    }
+    const event: CashEvent = {
+      id: randomUUID(),
+      kind: input.kind,
+      amountMinor: input.kind === "pay_in" ? input.amountMinor : -input.amountMinor,
+      reason: input.reason.trim(),
+      at: new Date().toISOString(),
+    };
+    session.events.push(event);
+    await this.store.putDrawerSession(session);
+    return this.remember(envelope, { kind: "applied", session }, "drawer_session", session.id);
+  }
+
+  /** Close the till against a physical count. Expected and over/short are
+   *  computed here and FROZEN; the schema never lets them be edited. */
+  async closeDrawer(envelope: Envelope, input: { sessionId: string; countedMinor: number }): Promise<CommandOutcome> {
+    const replay = await this.store.opResult(envelope.operationId);
+    if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
+    const session = await this.store.getDrawerSession(input.sessionId);
+    if (!session) return { kind: "not_found" };
+    if (session.closedAt) {
+      return this.remember(envelope, { kind: "rejected", reason: "session is already closed" }, "drawer_session", session.id);
+    }
+    if (!Number.isSafeInteger(input.countedMinor) || input.countedMinor < 0) {
+      return this.remember(envelope, { kind: "rejected", reason: "countedMinor must be a non-negative integer" }, "drawer_session", session.id);
+    }
+    const expected = session.openingFloatMinor + session.events.reduce((a, e) => a + e.amountMinor, 0);
+    session.closedAt = new Date().toISOString();
+    session.countedMinor = input.countedMinor;
+    session.expectedMinor = expected;
+    session.overShortMinor = input.countedMinor - expected;
+    await this.store.putDrawerSession(session);
+    return this.remember(envelope, { kind: "applied", session }, "drawer_session", session.id);
+  }
+
+  /** Close the business day (E16). Refuses while anything is still open;
+   *  the response carries the frozen day summary. */
+  async closeDay(envelope: Envelope, input: { managerPin?: string }): Promise<CommandOutcome> {
+    const replay = await this.store.opResult(envelope.operationId);
+    if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
+    const date = serviceDate();
+    if (await this.store.dayStatus(date) === "closed") {
+      return this.remember(envelope, { kind: "rejected", reason: "the business day is already closed" }, "business_day", date);
+    }
+    if (!managerApproved(input.managerPin)) {
+      return this.remember(envelope, { kind: "rejected", reason: "closing the day requires manager approval (4-digit PIN)" }, "business_day", date);
+    }
+    const report = await this.dayReport();
+    const b = report.blockers;
+    if (b.openChecks.length || b.openDrawers.length || b.offlinePayments) {
+      const parts = [
+        b.openChecks.length ? `${b.openChecks.length} open check(s)` : "",
+        b.openDrawers.length ? `${b.openDrawers.length} open drawer(s)` : "",
+        b.offlinePayments ? `${b.offlinePayments} offline payment(s) pending upload` : "",
+      ].filter(Boolean).join(", ");
+      return this.remember(envelope, { kind: "rejected", reason: `cannot close the day with ${parts}` }, "business_day", date);
+    }
+    await this.store.setDayStatus(date, "closed");
+    return this.remember(envelope, { kind: "applied", day: { ...report, status: "closed" } }, "business_day", date);
+  }
+
+  /** Reopen a closed day (mistake remedy; audited like any command). */
+  async reopenDay(envelope: Envelope, input: { managerPin?: string }): Promise<CommandOutcome> {
+    const replay = await this.store.opResult(envelope.operationId);
+    if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
+    const date = serviceDate();
+    if (await this.store.dayStatus(date) === "open") {
+      return this.remember(envelope, { kind: "rejected", reason: "the business day is not closed" }, "business_day", date);
+    }
+    if (!managerApproved(input.managerPin)) {
+      return this.remember(envelope, { kind: "rejected", reason: "reopening the day requires manager approval (4-digit PIN)" }, "business_day", date);
+    }
+    await this.store.setDayStatus(date, "open");
+    return this.remember(envelope, { kind: "applied", day: await this.dayReport() }, "business_day", date);
+  }
+
+  /** The manager's end-of-day picture: totals, drawers, and what still
+   *  blocks the close. Everything is computed, nothing stored (schema rule). */
+  async dayReport() {
+    const date = serviceDate();
+    const [status, checks, sessions] = await Promise.all([
+      this.store.dayStatus(date),
+      this.store.list(),
+      this.store.listDrawerSessions(),
+    ]);
+    const todays = checks.filter((c) => serviceDateOf(c.openedAt) === date);
+    const closed = todays.filter((c) => c.status === "closed");
+    const openChecks = checks.filter((c) => c.status !== "closed" && c.status !== "voided");
+    const offlinePayments = checks.reduce((n, c) => n + c.payments.filter((p) => p.status === "accepted_offline").length, 0);
+
+    const summary = { checksClosed: closed.length, covers: 0, grossMinor: 0, discountMinor: 0, taxMinor: 0, totalMinor: 0, tipsMinor: 0, paidCardMinor: 0, paidCashMinor: 0, voidCount: 0, voidValueMinor: 0 };
+    for (const c of closed) {
+      const v = toView(c);
+      summary.covers += c.covers;
+      summary.grossMinor += v.totals.subtotalMinor;
+      summary.discountMinor += v.totals.discountMinor;
+      summary.taxMinor += v.totals.taxMinor;
+      summary.totalMinor += v.totals.totalMinor;
+      for (const p of c.payments) {
+        summary.tipsMinor += p.tipMinor;
+        if (p.method === "cash") summary.paidCashMinor += p.amountMinor;
+        else summary.paidCardMinor += p.amountMinor;
+      }
+    }
+    for (const c of todays) {
+      for (const l of c.lines) {
+        if (l.status !== "voided") continue;
+        summary.voidCount += 1;
+        summary.voidValueMinor += (l.unitPriceMinor + l.modifierPriceMinor) * l.quantity;
+      }
+    }
+    const drawers = sessions
+      .filter((s) => serviceDateOf(s.openedAt) === date)
+      .map((s) => ({
+        ...s,
+        expectedSoFarMinor: s.closedAt ? s.expectedMinor : s.openingFloatMinor + s.events.reduce((a, e) => a + e.amountMinor, 0),
+      }));
+    return {
+      serviceDate: date,
+      status,
+      summary,
+      drawers,
+      blockers: {
+        openChecks: openChecks.map((c) => ({ id: c.id, tableName: c.tableName, checkNo: c.checkNo, status: c.status, dueMinor: toView(c).totals.dueMinor })),
+        openDrawers: sessions.filter((s) => !s.closedAt).map((s) => s.drawerName),
+        offlinePayments,
+      },
+    };
+  }
+
   /** Relocate a table on the floor plan (E6 layout editor). Move only,
    *  size stays; coordinates clamp to the room so a drag past the edge
    *  cannot strand a table off-canvas. */
@@ -477,6 +682,10 @@ export class Engine {
       };
     });
   }
+}
+
+function serviceDate(): string {
+  return serviceDateOf(new Date().toISOString());
 }
 
 function describeSelections(sels: readonly SelectedModifier[]): string {
