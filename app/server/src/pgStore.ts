@@ -177,6 +177,10 @@ export class PgStore implements Store {
         }
         this.partyByCheck.set(check.id, partyId);
       }
+      // the party follows the check: transfers and merges move table_id,
+      // and covers grows when checks merge
+      const tableIdNow = await this.ensureTable(c, check.tableName);
+      await c.query("UPDATE party SET table_id = $1, covers = $2 WHERE id = $3", [tableIdNow, check.covers, partyId]);
       await c.query(
         `INSERT INTO checks (id, org_id, location_id, business_day_id, party_id, check_no, server_id, menu_snapshot_id, status, covers, version, opened_at, closed_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
@@ -187,7 +191,7 @@ export class PgStore implements Store {
         await c.query(
           `INSERT INTO order_item (id, check_id, menu_snapshot_id, item_id, captured_name, unit_price_minor, tax_class, course, station_key, quantity, seat_no, status, void_reason, voided_by, void_approved_by, created_by, selections)
            VALUES ($1,$2,$3,$4,$5,$6,'standard',$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
-           ON CONFLICT (id) DO UPDATE SET status = $11, void_reason = $12, voided_by = $13, void_approved_by = $14, seat_no = $10`,
+           ON CONFLICT (id) DO UPDATE SET check_id = $2, status = $11, void_reason = $12, voided_by = $13, void_approved_by = $14, seat_no = $10`,
           [
             l.id, check.id, snapUuidFor(l.menuSnapshotId ?? check.menuSnapshotId), uuidFrom(l.itemId), l.capturedName, l.unitPriceMinor, l.course, l.station,
             l.quantity, l.seatNo, l.status,
@@ -201,7 +205,7 @@ export class PgStore implements Store {
       for (const a of check.adjustments) {
         await c.query(
           `INSERT INTO check_adjustment (id, check_id, kind, captured_name, amount_minor, percent_bp, reason, applied_by, approved_by)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (id) DO NOTHING`,
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (id) DO UPDATE SET check_id = $2`,
           [a.id, check.id, a.kind, a.label, a.amountMinor ?? null, a.percentBp ?? null, a.reason, EMP, EMP],
         );
       }

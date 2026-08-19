@@ -172,6 +172,25 @@ export function buildServer(store: Store = new MemoryStore(), storeName = "memor
     }));
   });
 
+  app.post("/v1/checks/:id/transfer", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = (req.body ?? {}) as EnvelopeBody & { tableName?: unknown };
+    const envelope = readEnvelope(body);
+    if ("error" in envelope) return reply.code(400).send({ status: "BAD_REQUEST", reason: envelope.error });
+    return respond(reply, await engine.transferCheck(envelope, id, { tableName: String(body.tableName ?? "") }));
+  });
+
+  app.post("/v1/checks/:id/merge", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = (req.body ?? {}) as EnvelopeBody & { sourceCheckId?: unknown; managerPin?: unknown };
+    const envelope = readEnvelope(body);
+    if ("error" in envelope) return reply.code(400).send({ status: "BAD_REQUEST", reason: envelope.error });
+    return respond(reply, await engine.mergeChecks(envelope, id, {
+      sourceCheckId: String(body.sourceCheckId ?? ""),
+      ...(typeof body.managerPin === "string" ? { managerPin: body.managerPin } : {}),
+    }));
+  });
+
   app.post("/v1/checks/:id/close", async (req, reply) => {
     const { id } = req.params as { id: string };
     const envelope = readEnvelope((req.body ?? {}) as EnvelopeBody);

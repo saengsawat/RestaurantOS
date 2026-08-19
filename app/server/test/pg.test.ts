@@ -71,6 +71,11 @@ describe.skipIf(!PGBIN)("PostgreSQL persistence (E4)", () => {
     const send = await app.inject({ method: "POST", url: `/v1/checks/${id}/send`, payload: ENV() });
     expect(send.statusCode).toBe(200);
 
+    // E7: transfer the party to Table 12; the party row and kitchen cards follow
+    const transfer = await app.inject({ method: "POST", url: `/v1/checks/${id}/transfer`,
+      payload: ENV({ tableName: "Table 12" }) });
+    expect(transfer.statusCode).toBe(200);
+
     // idempotent replay via the sync_operation table
     const opId = crypto.randomUUID();
     const p1 = await app.inject({ method: "POST", url: `/v1/checks/${id}/items`,
@@ -100,7 +105,7 @@ describe.skipIf(!PGBIN)("PostgreSQL persistence (E4)", () => {
       if (i.voided) continue;
       await app.inject({ method: "POST", url: "/v1/kds/toggle", payload: ENV({ ticketId: t.id, orderItemId: i.orderItemId }) });
     }
-    const serve = await app.inject({ method: "POST", url: "/v1/kds/serve", payload: ENV({ tableName: "Table 7" }) });
+    const serve = await app.inject({ method: "POST", url: "/v1/kds/serve", payload: ENV({ tableName: "Table 12" }) });
     expect(serve.statusCode).toBe(200);
 
     // pay in full, close
@@ -145,7 +150,7 @@ describe.skipIf(!PGBIN)("PostgreSQL persistence (E4)", () => {
     expect(back.statusCode).toBe(200);
     const check = back.json().check;
     expect(check.status).toBe("closed");
-    expect(check.tableName).toBe("Table 7");
+    expect(check.tableName).toBe("Table 12"); // the transfer survived (party.table_id)
     expect(check.lines).toHaveLength(2);
     expect(check.totals.dueMinor).toBe(0);
     expect(check.totals.paidMinor).toBe(due);
@@ -167,9 +172,10 @@ describe.skipIf(!PGBIN)("PostgreSQL persistence (E4)", () => {
     const kds2 = (await app2.inject({ method: "GET", url: "/v1/kds" })).json().tickets;
     expect(kds2.every((t: { status: string }) => t.status === "served")).toBe(true);
 
-    // Table 7 is free again on the floor after close
+    // both the vacated table and the closed one read free on the floor
     const floor = (await app2.inject({ method: "GET", url: "/v1/floor" })).json().tables;
     expect(floor.find((t: { name: string }) => t.name === "Table 7").check).toBeNull();
+    expect(floor.find((t: { name: string }) => t.name === "Table 12").check).toBeNull();
 
     // and the layout edit survived the restart too
     const t2 = floor.find((t: { name: string }) => t.name === "Table 2");

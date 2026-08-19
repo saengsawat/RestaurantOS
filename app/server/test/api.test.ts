@@ -344,6 +344,108 @@ describe("the floor layout editor (E6)", () => {
   });
 });
 
+describe("transfer and merge (E7)", () => {
+  it("a transferred check takes its kitchen cards along and frees the old table", async () => {
+    const app = buildServer();
+    const check = await openCheck(app); // Table 14
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items`,
+      payload: { ...ENV(1), itemId: "ragu", quantity: 1, seatNo: 1, modifiers: [{ groupId: "pasta", modifierId: "spag" }] } });
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/send`, payload: ENV(2) });
+
+    // occupied target refused; unknown-to-floor names are allowed (walk-in style)
+    const other = await app.inject({ method: "POST", url: "/v1/checks",
+      payload: { ...ENV(3), tableName: "Table 5", covers: 2 } });
+    const onto = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/transfer`,
+      payload: { ...ENV(4), tableName: "Table 5" } });
+    expect(onto.statusCode).toBe(422);
+    expect(onto.json().reason).toMatch(/already has/);
+
+    const move = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/transfer`,
+      payload: { ...ENV(5), tableName: "Table 12" } });
+    expect(move.statusCode).toBe(200);
+    expect(move.json().check.tableName).toBe("Table 12");
+
+    // the floor swapped: 14 free, 12 occupied by this check
+    const floor = (await app.inject({ method: "GET", url: "/v1/floor" })).json().tables;
+    expect(floor.find((t: { name: string }) => t.name === "Table 14").check).toBeNull();
+    expect(floor.find((t: { name: string }) => t.name === "Table 12").check.id).toBe(check.id);
+
+    // the kitchen card re-labeled
+    const kds = (await app.inject({ method: "GET", url: "/v1/kds" })).json().tickets;
+    expect(kds.find((t: { checkId: string }) => t.checkId === check.id).tableName).toBe("Table 12");
+
+    // a closed check refuses transfer
+    const otherId = other.json().check.id as string;
+    await app.inject({ method: "POST", url: `/v1/checks/${otherId}/items`, payload: { ...ENV(6), itemId: "acqua", quantity: 1, seatNo: 1 } });
+    await app.inject({ method: "POST", url: `/v1/checks/${otherId}/send`, payload: ENV(7) });
+    const due = (await app.inject({ method: "GET", url: `/v1/checks/${otherId}` })).json().check.totals.dueMinor as number;
+    await app.inject({ method: "POST", url: `/v1/checks/${otherId}/payments`, payload: { ...ENV(8), method: "card", amountMinor: due } });
+    await app.inject({ method: "POST", url: `/v1/checks/${otherId}/close`, payload: ENV(9) });
+    const dead = await app.inject({ method: "POST", url: `/v1/checks/${otherId}/transfer`, payload: { ...ENV(10), tableName: "Table 9" } });
+    expect(dead.statusCode).toBe(422);
+  });
+
+  it("merging combines lines, renumbers seats after the target's covers, and voids the source", async () => {
+    const app = buildServer();
+    const a = await openCheck(app); // Table 14, 2 covers
+    const bRes = await app.inject({ method: "POST", url: "/v1/checks",
+      payload: { ...ENV(1), tableName: "Table 5", covers: 3 } });
+    const b = bRes.json().check as { id: string };
+
+    await app.inject({ method: "POST", url: `/v1/checks/${a.id}/items`,
+      payload: { ...ENV(2), itemId: "burrata", quantity: 1, seatNo: 1 } });
+    await app.inject({ method: "POST", url: `/v1/checks/${b.id}/items`,
+      payload: { ...ENV(3), itemId: "ragu", quantity: 1, seatNo: 2, modifiers: [{ groupId: "pasta", modifierId: "gf" }] } });
+    await app.inject({ method: "POST", url: `/v1/checks/${b.id}/send`, payload: ENV(4) });
+
+    // no PIN, no merge; and a paid source refuses
+    const noPin = await app.inject({ method: "POST", url: `/v1/checks/${a.id}/merge`,
+      payload: { ...ENV(5), sourceCheckId: b.id } });
+    expect(noPin.statusCode).toBe(422);
+
+    const merged = await app.inject({ method: "POST", url: `/v1/checks/${a.id}/merge`,
+      payload: { ...ENV(6), sourceCheckId: b.id, managerPin: "1234" } });
+    expect(merged.statusCode).toBe(200);
+    const c = merged.json().check;
+    expect(c.covers).toBe(5); // 2 + 3
+    const ragu = c.lines.find((l: { capturedName: string }) => l.capturedName === "Ragu alla Bolognese");
+    expect(ragu.seatNo).toBe(4); // seat 2 + target's 2 covers: still the same person
+    expect(ragu.status).toBe("sent"); // fired lines stay fired, never re-fire
+    expect(c.totals.subtotalMinor).toBe(1600 + 2400 + 200);
+
+    // the source voided and Table 5 freed; the fired course cooks for Table 14 now
+    const bAfter = (await app.inject({ method: "GET", url: `/v1/checks/${b.id}` })).json().check;
+    expect(bAfter.status).toBe("voided");
+    expect(bAfter.lines).toHaveLength(0);
+    const floor = (await app.inject({ method: "GET", url: "/v1/floor" })).json().tables;
+    expect(floor.find((t: { name: string }) => t.name === "Table 5").check).toBeNull();
+    const kds = (await app.inject({ method: "GET", url: "/v1/kds" })).json().tickets;
+    expect(kds.find((t: { checkId: string }) => t.checkId === b.id).tableName).toBe("Table 14");
+
+    // and the merged check settles normally
+    await app.inject({ method: "POST", url: `/v1/checks/${a.id}/send`, payload: ENV(7) });
+    const due = (await app.inject({ method: "GET", url: `/v1/checks/${a.id}` })).json().check.totals.dueMinor as number;
+    const pay = await app.inject({ method: "POST", url: `/v1/checks/${a.id}/payments`,
+      payload: { ...ENV(8), method: "card", amountMinor: due } });
+    expect(pay.json().check.status).toBe("paid");
+  });
+
+  it("a source with payments refuses to merge (refund first, FR-28 discipline)", async () => {
+    const app = buildServer();
+    const a = await openCheck(app);
+    const bRes = await app.inject({ method: "POST", url: "/v1/checks",
+      payload: { ...ENV(1), tableName: "Table 5", covers: 2 } });
+    const b = bRes.json().check as { id: string };
+    await app.inject({ method: "POST", url: `/v1/checks/${b.id}/items`, payload: { ...ENV(2), itemId: "acqua", quantity: 1, seatNo: 1 } });
+    await app.inject({ method: "POST", url: `/v1/checks/${b.id}/send`, payload: ENV(3) });
+    await app.inject({ method: "POST", url: `/v1/checks/${b.id}/payments`, payload: { ...ENV(4), method: "card", amountMinor: 100 } });
+    const res = await app.inject({ method: "POST", url: `/v1/checks/${a.id}/merge`,
+      payload: { ...ENV(5), sourceCheckId: b.id, managerPin: "1234" } });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().reason).toMatch(/payments/);
+  });
+});
+
 describe("menu drafts, publishing, and the 86 board (E5)", () => {
   it("drafts change nothing until a manager publishes; then new orders reprice and old lines never move", async () => {
     const app = buildServer();

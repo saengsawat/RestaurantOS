@@ -334,6 +334,81 @@ export class Engine {
     });
   }
 
+  /** Move a check to another table (E7). Servers do this routinely, so no
+   *  manager gate; the kitchen's cards follow the party. */
+  async transferCheck(envelope: Envelope, checkId: string, input: { tableName: string }): Promise<CommandOutcome> {
+    return this.run(envelope, checkId, async (check) => {
+      if (check.status === "closed" || check.status === "voided") {
+        return { kind: "rejected", reason: `cannot transfer a ${check.status} check` };
+      }
+      const target = (input.tableName ?? "").trim();
+      if (!target) return { kind: "rejected", reason: "tableName is required" };
+      if (target === check.tableName) return { kind: "rejected", reason: `the check is already on ${target}` };
+      const floor = await this.store.listFloor();
+      if (floor.some((t) => t.name === target)) {
+        const occupied = (await this.store.list()).some(
+          (c) => c.id !== check.id && c.tableName === target && c.status !== "closed" && c.status !== "voided",
+        );
+        if (occupied) return { kind: "rejected", reason: `${target} already has an open check` };
+      }
+      // the kitchen follows the party: every card of this check re-labels
+      for (const ticket of await this.store.listTickets()) {
+        if (ticket.checkId !== check.id) continue;
+        ticket.tableName = target;
+        await this.store.putTicket(ticket);
+      }
+      check.tableName = target;
+      return { kind: "applied", check: toView(check) };
+    });
+  }
+
+  /** Merge another check into this one (E7): two parties become one table.
+   *  Source seats renumber after the target's covers so "seat 2" stays a
+   *  real person. Source must be unpaid (refund first); it voids with the
+   *  merge as its paperwork. Manager approval required. */
+  async mergeChecks(envelope: Envelope, targetId: string, input: { sourceCheckId: string; managerPin?: string }): Promise<CommandOutcome> {
+    return this.run(envelope, targetId, async (target) => {
+      if (target.status !== "open" && target.status !== "reopened") {
+        return { kind: "rejected", reason: `can only merge into an open check, this one is ${target.status}` };
+      }
+      const source = await this.store.get(input.sourceCheckId);
+      if (!source) return { kind: "rejected", reason: "source check not found" };
+      if (source.id === target.id) return { kind: "rejected", reason: "a check cannot merge into itself" };
+      if (source.status === "closed" || source.status === "voided") {
+        return { kind: "rejected", reason: `cannot merge a ${source.status} check` };
+      }
+      if (source.payments.length) {
+        return { kind: "rejected", reason: "the source check has payments; settle or refund them before merging" };
+      }
+      if (!managerApproved(input.managerPin)) {
+        return { kind: "rejected", reason: "merging checks requires manager approval (4-digit PIN)" };
+      }
+      const r = checkTransition(source.status, { type: "void_check", approved: true, hasPayments: false });
+      if (!r.ok) return { kind: "rejected", reason: r.reason };
+
+      const seatOffset = target.covers;
+      target.covers += source.covers;
+      for (const line of source.lines) {
+        line.seatNo += seatOffset;
+        target.lines.push(line);
+      }
+      target.adjustments.push(...source.adjustments);
+
+      // the source's fired courses now belong to the target's table
+      for (const ticket of await this.store.listTickets()) {
+        if (ticket.checkId !== source.id) continue;
+        ticket.tableName = target.tableName;
+        await this.store.putTicket(ticket);
+      }
+      source.lines = [];
+      source.status = r.next;
+      source.tableName = target.tableName; // the party moved; the old table frees
+      source.version += 1;
+      await this.store.put(source);
+      return { kind: "applied", check: toView(target) };
+    });
+  }
+
   async recordPayment(
     envelope: Envelope,
     checkId: string,
@@ -816,7 +891,9 @@ export class Engine {
     const now = Date.now();
     return tables.map((t) => {
       const check = checks.find((c) => c.tableName === t.name && c.status !== "closed" && c.status !== "voided");
-      const open = tickets.filter((k) => check && k.checkId === check.id && k.status === "open");
+      // tickets match by TABLE, not check id: after a merge, courses fired
+      // for the absorbed check still cook for this table
+      const open = tickets.filter((k) => check && k.tableName === t.name && k.status === "open");
       const late = open.some((k) => !k.items.every((i) => i.done || i.voided) && now - Date.parse(k.firedAt) >= LATE_MS);
       const view = check ? toView(check) : undefined;
       return {

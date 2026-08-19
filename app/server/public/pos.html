@@ -200,7 +200,9 @@ label.ck{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--ink-
     <section class="menu" id="menu"></section>
     <aside class="check">
       <div class="check-h">
-        <div class="row"><b id="chWhere">No check</b><span class="no" id="chNo"></span></div>
+        <div class="row"><b id="chWhere">No check</b>
+          <span style="display:flex;align-items:center;gap:8px"><span class="no" id="chNo"></span>
+          <button id="btnMore" title="Transfer / merge" style="min-width:36px;min-height:36px;border-radius:999px;background:var(--surface-2);font-weight:800">⋯</button></span></div>
         <div class="tags" id="chTags"></div>
       </div>
       <div class="body" id="chBody"></div>
@@ -233,6 +235,12 @@ label.ck{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--ink-
   <div class="m-h"><div><h3>Payment</h3><div class="sub" id="paySub"></div></div><button class="m-x" data-close="ovPay">✕</button></div>
   <div class="m-b" id="payBody"></div>
   <div class="m-f" id="payFoot"></div>
+</div></div>
+
+<div class="ov" id="ovMore"><div class="modal">
+  <div class="m-h"><div><h3>Check actions</h3><div class="sub" id="moreSub"></div></div><button class="m-x" data-close="ovMore">✕</button></div>
+  <div class="m-b" id="moreBody"></div>
+  <div class="m-f" id="moreFoot" style="display:none"><button class="btn btn-p" id="moreGo">Merge</button></div>
 </div></div>
 
 <div class="ov" id="ovVoid"><div class="modal">
@@ -511,6 +519,46 @@ $("#itAdd").onclick=async()=>{
   closeOv("ovItem");
   await refresh();
   toast(d.qty+"× "+d.item.name+" added","good");
+};
+
+/* ---------- transfer / merge (E7) ---------- */
+let mergeSource=null;
+$("#btnMore").onclick=async()=>{
+  const c=cur();if(!c)return;
+  mergeSource=null;
+  $("#moreSub").textContent=c.tableName+" · check #"+c.checkNo;
+  const floor=(await fetch("/v1/floor").then(r=>r.json())).tables.filter(t=>!t.check);
+  const others=state.checks.filter(x=>x.id!==c.id);
+  $("#moreBody").innerHTML=
+    `<div class="og-h">Transfer to a free table</div>
+     <div class="opts">${floor.map(t=>`<button class="opt" data-tr="${esc(t.name)}">${esc(t.name)}</button>`).join("")||'<span class="md">No free tables right now</span>'}</div>
+     <div class="og-h" style="margin-top:10px">Merge another check into this one (manager)</div>
+     <div class="opts" id="mgOpts">${others.map(x=>`<button class="opt" data-mg="${x.id}">${esc(x.tableName)} · #${x.checkNo}</button>`).join("")||'<span class="md">No other open checks</span>'}</div>
+     <div id="mgPinWrap" style="display:none">
+       <div class="og-h" style="margin-top:10px">Manager PIN (demo: any 4 digits)</div>
+       <input class="fld" id="mgPin" inputmode="numeric" maxlength="4" placeholder="••••">
+     </div>`;
+  $("#moreFoot").style.display="none";
+  document.querySelectorAll("[data-tr]").forEach(b=>b.onclick=async()=>{
+    await api(`/v1/checks/${c.id}/transfer`,{tableName:b.dataset.tr,expectedVersion:c.version});
+    closeOv("ovMore");toast("Moved to "+b.dataset.tr,"good");await refresh();
+  });
+  document.querySelectorAll("[data-mg]").forEach(b=>b.onclick=()=>{
+    mergeSource=b.dataset.mg;
+    document.querySelectorAll("[data-mg]").forEach(x=>x.classList.toggle("on",x===b));
+    document.getElementById("mgPinWrap").style.display="block";
+    $("#moreFoot").style.display="flex";
+    const src=state.checks.find(x=>x.id===mergeSource);
+    $("#moreGo").textContent="Merge "+src.tableName+" into "+c.tableName;
+  });
+  openOv("ovMore");
+};
+$("#moreGo").onclick=async()=>{
+  const c=cur();if(!c||!mergeSource)return;
+  await api(`/v1/checks/${c.id}/merge`,{sourceCheckId:mergeSource,managerPin:$("#mgPin").value,expectedVersion:c.version});
+  closeOv("ovMore");
+  toast("Checks merged","good");
+  await refresh();
 };
 
 /* ---------- void a line (E12): reason + manager approval ---------- */
