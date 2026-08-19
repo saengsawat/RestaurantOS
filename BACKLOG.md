@@ -38,10 +38,11 @@ The authoritative ticket list (master plan §5.5). Currently tracking Phase 0 wo
 | E7 check engine | Command layer with idempotent operation ids + optimistic versions (shipped with the server; refinements like transfer/merge pending) | **Core done** |
 | E8 dispatch + KDS | Send creates one dispatch ticket per course; `/kds` page: one card per table, New flags, per-item bump, expo-only gated serve, 10-min recall, cook-together pane | **Done** 2026-08-12 |
 | E6 floor | `/v1/floor` + `/tables` page: spatial room per section, live status (open/seated/paying/late) derived from checks + tickets, tap-to-seat opens a real check, occupied tables refuse a second check | **Done** 2026-08-12 |
+| E6 layout editor | "Edit layout" mode on `/tables`: drag a table, drop saves to the server (`/v1/floor/move`, clamped to the room, positions in `dining_table.pos`), every device sees the new room. Follow-ups: resize, add/remove tables, overlap warning | **Done** 2026-08-18 |
 | E5 menu domain | Snapshot persisted to menu_snapshot at seed; draft editing + publishing UI still open | Partial |
 | Next | Void/discount commands on the server (E12), payment provider adapter (E13, needs ADR-3), business day close (E14/E16) | Queued |
 
-Suite total: 67 tests green (54 domain + 13 server incl. PostgreSQL integration).
+Suite total: 69 tests green (54 domain + 15 server incl. PostgreSQL integration).
 
 ## Flagship mockup: done since first cut
 

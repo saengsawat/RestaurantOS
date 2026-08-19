@@ -69,6 +69,12 @@ button:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
 .tbl.seated{border-color:var(--info);background:var(--info-wash)}
 .tbl.paying{border-color:var(--green);background:var(--green-wash)}
 .tbl.late{border-color:var(--red);background:var(--red-wash);animation:latePulse 2s infinite}
+.tab.edit{margin-left:auto;background:transparent;border:1.5px solid var(--line);color:var(--ink-3)}
+.tab.edit.on{background:var(--brand);color:var(--brand-ink);border-color:transparent}
+.room.editing{outline:2px dashed var(--brand);outline-offset:-2px}
+.editing .tbl{cursor:grab;touch-action:none}
+.editing .tbl:active{transform:none;cursor:grabbing}
+.tbl.dragging{opacity:.85;z-index:10;transition:none}
 .legend{display:flex;gap:16px;flex-wrap:wrap;margin:12px 2px;font-size:12px;color:var(--ink-3)}
 .lg{display:flex;align-items:center;gap:6px;font-weight:600}
 .lg .sw{width:13px;height:13px;border-radius:4px;border:2px solid}
@@ -112,7 +118,7 @@ button:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
     <span class="lg"><span class="sw" style="border-color:var(--green)"></span>Paying</span>
     <span class="lg"><span class="sw" style="border-color:var(--red)"></span>Kitchen late</span>
   </div>
-  <p class="note">Tap an open table to seat a party (opens a real check on the server), or an occupied one to jump to its check in Service.</p>
+  <p class="note" id="note">Tap an open table to seat a party (opens a real check on the server), or an occupied one to jump to its check in Service.</p>
 </div>
 
 <div class="ov" id="ovSeat"><div class="modal">
@@ -131,7 +137,7 @@ const $=s=>document.querySelector(s);
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const money=n=>"$"+(n/100).toFixed(2);
 const DEVICE="floor-"+(localStorage.getItem("ros.floor")||(()=>{const d=crypto.randomUUID().slice(0,8);localStorage.setItem("ros.floor",d);return d;})());
-let tables=[],area=null,seatTarget=null;
+let tables=[],area=null,seatTarget=null,edit=false,drag=null;
 
 function toast(m){const el=document.createElement("div");el.className="toast";el.textContent=m;
   $("#toasts").appendChild(el);setTimeout(()=>el.remove(),3000);}
@@ -153,10 +159,15 @@ function statusOf(t){
 
 function render(){
   const areas=[...new Set(tables.map(t=>t.area))];
-  $("#tabs").innerHTML=areas.map(a=>`<button class="tab ${a===area?"on":""}" data-a="${esc(a)}">${esc(a)}</button>`).join("");
+  $("#tabs").innerHTML=areas.map(a=>`<button class="tab ${a===area?"on":""}" data-a="${esc(a)}">${esc(a)}</button>`).join("")
+    +`<button class="tab edit ${edit?"on":""}" id="editBtn">${edit?"Done editing":"Edit layout"}</button>`;
   document.querySelectorAll("[data-a]").forEach(b=>b.onclick=()=>{area=b.dataset.a;render();});
+  $("#editBtn").onclick=()=>{edit=!edit;if(!edit)refresh().catch(()=>{});else render();};
+  $("#note").textContent=edit
+    ?"Layout mode: drag tables to match your room. Each drop saves to the server for every device."
+    :"Tap an open table to seat a party (opens a real check on the server), or an occupied one to jump to its check in Service.";
   const list=tables.filter(t=>t.area===area);
-  $("#roomWrap").innerHTML=`<div class="room">`+list.map(t=>{
+  $("#roomWrap").innerHTML=`<div class="room ${edit?"editing":""}">`+list.map(t=>{
     const st=statusOf(t);
     const short=t.name.replace("Table ","T").replace("Terrazza ","T").replace("Bar ","B");
     return `<button class="tbl ${st} ${t.shape}" data-t="${esc(t.name)}"
@@ -165,6 +176,7 @@ function render(){
       <span class="m">${t.check?t.check.covers+" cov":t.seats+" seats"}</span>
       ${t.check?`<span class="d">${ago(t.check.openedAt)} · ${money(t.check.dueMinor)}</span>`:""}</button>`;
   }).join("")+`</div>`;
+  if(edit){document.querySelectorAll("[data-t]").forEach(b=>wireDrag(b,tables.find(x=>x.name===b.dataset.t)));return;}
   document.querySelectorAll("[data-t]").forEach(b=>b.onclick=()=>{
     const t=tables.find(x=>x.name===b.dataset.t);
     if(t.check){location.href="/pos?check="+t.check.id;return;}
@@ -179,6 +191,35 @@ function render(){
   });
 }
 
+function wireDrag(btn,t){
+  btn.onpointerdown=e=>{
+    e.preventDefault();
+    const room=btn.parentElement.getBoundingClientRect(),r=btn.getBoundingClientRect();
+    drag={t,btn,room,dx:e.clientX-r.left,dy:e.clientY-r.top,moved:false};
+    btn.classList.add("dragging");
+    btn.setPointerCapture(e.pointerId);
+  };
+  btn.onpointermove=e=>{
+    if(!drag||drag.btn!==btn)return;
+    const x=(e.clientX-drag.dx-drag.room.left)/drag.room.width*100;
+    const y=(e.clientY-drag.dy-drag.room.top)/drag.room.height*100;
+    drag.x=Math.round(Math.min(Math.max(x,0),100-t.w)*10)/10;
+    drag.y=Math.round(Math.min(Math.max(y,0),100-t.h)*10)/10;
+    drag.moved=true;
+    btn.style.left=drag.x+"%";btn.style.top=drag.y+"%";
+  };
+  btn.onpointerup=async()=>{
+    const d=drag;drag=null;btn.classList.remove("dragging");
+    if(!d||!d.moved)return;
+    d.t.x=d.x;d.t.y=d.y;
+    const res=await fetch("/v1/floor/move",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({operationId:crypto.randomUUID(),deviceId:DEVICE,tableName:d.t.name,x:d.x,y:d.y})});
+    if(!res.ok){toast("Move refused, reloading");refresh().catch(()=>{});return;}
+    toast(d.t.name+" saved");
+  };
+  btn.onpointercancel=()=>{drag=null;btn.classList.remove("dragging");render();};
+}
+
 $("#seatGo").onclick=async()=>{
   const covers=+document.querySelector("#seatCovers .opt.on").dataset.n;
   const res=await fetch("/v1/checks",{method:"POST",headers:{"Content-Type":"application/json"},
@@ -191,7 +232,7 @@ $("#seatGo").onclick=async()=>{
 function setViewportH(){document.documentElement.style.setProperty("--vph",window.innerHeight+"px");}
 addEventListener("resize",setViewportH);setViewportH();
 refresh().catch(()=>toast("Cannot reach the server"));
-setInterval(()=>refresh().catch(()=>{}),5000);
+setInterval(()=>{if(!edit)refresh().catch(()=>{});},5000);
 </script>
 </body>
 </html>

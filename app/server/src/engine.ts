@@ -331,6 +331,26 @@ export class Engine {
     return this.remember(envelope, { kind: "applied", tickets: [ticket] }, "ticket", ticketId);
   }
 
+  /** Relocate a table on the floor plan (E6 layout editor). Move only,
+   *  size stays; coordinates clamp to the room so a drag past the edge
+   *  cannot strand a table off-canvas. */
+  async moveTable(envelope: Envelope, input: { tableName: string; x: number; y: number }): Promise<CommandOutcome> {
+    const replay = await this.store.opResult(envelope.operationId);
+    if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
+    if (!Number.isFinite(input.x) || !Number.isFinite(input.y)) {
+      return this.remember(envelope, { kind: "rejected", reason: "x and y must be numbers (percent of the room)" }, "table", input.tableName);
+    }
+    const table = (await this.store.listFloor()).find((t) => t.name === input.tableName);
+    if (!table) {
+      return this.remember(envelope, { kind: "rejected", reason: `unknown table ${input.tableName}` }, "table", input.tableName);
+    }
+    const round1 = (v: number) => Math.round(v * 10) / 10;
+    const x = round1(Math.min(Math.max(input.x, 0), 100 - table.w));
+    const y = round1(Math.min(Math.max(input.y, 0), 100 - table.h));
+    await this.store.moveTable(input.tableName, { x, y, w: table.w, h: table.h });
+    return this.remember(envelope, { kind: "applied" }, "table", input.tableName);
+  }
+
   /* ------------------------------ reads ------------------------------ */
 
   async getCheck(id: string): Promise<CheckView | undefined> {

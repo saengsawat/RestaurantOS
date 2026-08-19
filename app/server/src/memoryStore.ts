@@ -6,6 +6,8 @@ export class MemoryStore implements Store {
   private tickets = new Map<string, KitchenTicket>();
   private ops = new Map<string, unknown>();
   private checkNo = 2041;
+  // per-instance copy so a layout edit never leaks into another store
+  private floor: FloorTable[] = FLOOR.map((t) => ({ ...t }));
 
   async init(): Promise<void> {}
   async get(id: string) { return this.checks.get(id); }
@@ -20,5 +22,10 @@ export class MemoryStore implements Store {
   async getTicket(id: string) { return this.tickets.get(id); }
   async putTicket(ticket: KitchenTicket) { this.tickets.set(ticket.id, ticket); }
 
-  async listFloor(): Promise<FloorTable[]> { return [...FLOOR]; }
+  async listFloor(): Promise<FloorTable[]> { return this.floor.map((t) => ({ ...t })); }
+
+  async moveTable(name: string, pos: { x: number; y: number; w: number; h: number }): Promise<void> {
+    const t = this.floor.find((x) => x.name === name);
+    if (t) Object.assign(t, pos);
+  }
 }

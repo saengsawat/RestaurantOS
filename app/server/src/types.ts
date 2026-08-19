@@ -108,6 +108,7 @@ export interface Store {
   putTicket(ticket: KitchenTicket): Promise<void>;
 
   listFloor(): Promise<FloorTable[]>;
+  moveTable(name: string, pos: { x: number; y: number; w: number; h: number }): Promise<void>;
 }
 
 /** Osteria Nove's room, seeded into whichever store is active. */

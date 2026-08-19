@@ -424,6 +424,14 @@ export class PgStore implements Store {
       x: row.pos.x as number, y: row.pos.y as number, w: row.pos.w as number, h: row.pos.h as number,
     }));
   }
+
+  async moveTable(name: string, pos: { x: number; y: number; w: number; h: number }): Promise<void> {
+    await this.pool.query(
+      `UPDATE dining_table dt SET pos = $1 FROM dining_area da
+       WHERE da.id = dt.area_id AND da.location_id = $2 AND dt.name = $3`,
+      [JSON.stringify(pos), LOC, name],
+    );
+  }
 }
 
 /* ------------------------------- helpers ------------------------------- */

@@ -145,6 +145,15 @@ export function buildServer(store: Store = new MemoryStore(), storeName = "memor
     return respond(reply, await engine.close(envelope, id));
   });
 
+  app.post("/v1/floor/move", async (req, reply) => {
+    const body = (req.body ?? {}) as EnvelopeBody & { tableName?: unknown; x?: unknown; y?: unknown };
+    const envelope = readEnvelope(body);
+    if ("error" in envelope) return reply.code(400).send({ status: "BAD_REQUEST", reason: envelope.error });
+    return respond(reply, await engine.moveTable(envelope, {
+      tableName: String(body.tableName ?? ""), x: Number(body.x), y: Number(body.y),
+    }));
+  });
+
   /* ------------------------------- KDS ------------------------------- */
 
   app.post("/v1/kds/toggle", async (req, reply) => {

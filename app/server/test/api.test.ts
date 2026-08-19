@@ -217,6 +217,42 @@ describe("the kitchen (E8)", () => {
   });
 });
 
+describe("the floor layout editor (E6)", () => {
+  const floorOf = async (app: ReturnType<typeof buildServer>) =>
+    (await app.inject({ method: "GET", url: "/v1/floor" })).json().tables as
+      { name: string; x: number; y: number; w: number; h: number }[];
+
+  it("moves a table, clamps to the room, refuses unknown tables", async () => {
+    const app = buildServer();
+    const move = await app.inject({ method: "POST", url: "/v1/floor/move",
+      payload: { ...ENV(1), tableName: "Table 9", x: 50, y: 33.34 } });
+    expect(move.statusCode).toBe(200);
+    let t9 = (await floorOf(app)).find((t) => t.name === "Table 9")!;
+    expect(t9.x).toBe(50);
+    expect(t9.y).toBe(33.3); // rounded to one decimal
+
+    // a drag past the edge cannot strand the table off-canvas
+    await app.inject({ method: "POST", url: "/v1/floor/move",
+      payload: { ...ENV(2), tableName: "Table 9", x: 999, y: -40 } });
+    t9 = (await floorOf(app)).find((t) => t.name === "Table 9")!;
+    expect(t9.x).toBe(100 - t9.w);
+    expect(t9.y).toBe(0);
+
+    const bad = await app.inject({ method: "POST", url: "/v1/floor/move",
+      payload: { ...ENV(3), tableName: "Table 99", x: 10, y: 10 } });
+    expect(bad.statusCode).toBe(422);
+  });
+
+  it("a layout edit never leaks into a different store", async () => {
+    const a = buildServer();
+    await a.inject({ method: "POST", url: "/v1/floor/move",
+      payload: { ...ENV(1), tableName: "Table 2", x: 60, y: 60 } });
+    const b = buildServer();
+    const t2 = (await floorOf(b)).find((t) => t.name === "Table 2")!;
+    expect(t2.x).toBe(5); // seed position, untouched
+  });
+});
+
 describe("reads", () => {
   it("serves the menu snapshot and the landing page", async () => {
     const app = buildServer();

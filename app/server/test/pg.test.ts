@@ -94,6 +94,11 @@ describe.skipIf(!PGBIN)("PostgreSQL persistence (E4)", () => {
     const close = await app.inject({ method: "POST", url: `/v1/checks/${id}/close`, payload: ENV() });
     expect(close.statusCode).toBe(200);
 
+    // relocate a table on the floor plan (E6 editor)
+    const move = await app.inject({ method: "POST", url: "/v1/floor/move",
+      payload: ENV({ tableName: "Table 2", x: 40, y: 56 }) });
+    expect(move.statusCode).toBe(200);
+
     /* THE RESTART: a brand-new store + server on the same database.
        Everything must still be there. */
     await store.end();
@@ -119,5 +124,10 @@ describe.skipIf(!PGBIN)("PostgreSQL persistence (E4)", () => {
     // Table 7 is free again on the floor after close
     const floor = (await app2.inject({ method: "GET", url: "/v1/floor" })).json().tables;
     expect(floor.find((t: { name: string }) => t.name === "Table 7").check).toBeNull();
+
+    // and the layout edit survived the restart too
+    const t2 = floor.find((t: { name: string }) => t.name === "Table 2");
+    expect(t2.x).toBe(40);
+    expect(t2.y).toBe(56);
   }, 60_000);
 });

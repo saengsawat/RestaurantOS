@@ -17,22 +17,22 @@ What makes it worth switching for arrives in two layers: correctness under failu
 
 ## 2. Users
 
-| User | Uses | Cares about |
-|---|---|---|
-| Server | Terminal + handheld | Speed (2 taps to any item), coursing control, splits that match how guests actually pay |
-| Bartender | Terminal | Tabs, fast repeat orders, drinks firing instantly |
-| Line cook / expo | KDS | What to cook now, what just landed, what is late, batch duplicates `OBSERVED` (founder) |
-| Manager | Terminal + back office | Approvals, voids/comps story, drawer, the close |
-| Owner-operator | Everything | Trustworthy numbers, staff not fighting the tool, support at 8 PM Friday |
+| User             | Uses                   | Cares about                                                                              |
+| ---------------- | ---------------------- | ---------------------------------------------------------------------------------------- |
+| Server           | Terminal + handheld    | Speed (2 taps to any item), coursing control, splits that match how guests actually pay  |
+| Bartender        | Terminal               | Tabs, fast repeat orders, drinks firing instantly                                        |
+| Line cook / expo | KDS                    | What to cook now, what just landed, what is late, batch duplicates`OBSERVED` (founder) |
+| Manager          | Terminal + back office | Approvals, voids/comps story, drawer, the close                                          |
+| Owner-operator   | Everything             | Trustworthy numbers, staff not fighting the tool, support at 8 PM Friday                 |
 
 ## 3. Scope model
 
-| Tier | Meaning | Contents |
-|---|---|---|
-| **V1** | Pilot cannot run without it | Everything in §4 |
-| **P1** | Fast follow, weeks after pilot start | Printer fallback for KDS, menu publishing UI, reporting projections, device management, bar tabs/preauth if pilot needs it `UNKNOWN` |
-| **P2** | Integrate, do not build | Gift cards, reservations/waitlist, loyalty, online ordering/delivery, scheduling |
-| **Never (V1 horizon)** | Explicitly out | Proprietary payment processing, custom hardware, multi-location UX (schema stays multi-location ready), franchise/enterprise features |
+| Tier                         | Meaning                              | Contents                                                                                                                              |
+| ---------------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+| **V1**                 | Pilot cannot run without it          | Everything in §4                                                                                                                     |
+| **P1**                 | Fast follow, weeks after pilot start | Printer fallback for KDS, menu publishing UI, reporting projections, device management, bar tabs/preauth if pilot needs it`UNKNOWN` |
+| **P2**                 | Integrate, do not build              | Gift cards, reservations/waitlist, loyalty, online ordering/delivery, scheduling                                                      |
+| **Never (V1 horizon)** | Explicitly out                       | Proprietary payment processing, custom hardware, multi-location UX (schema stays multi-location ready), franchise/enterprise features |
 
 ## 4. Functional requirements
 
@@ -47,7 +47,7 @@ Numbered FR-n, each with evidence and epic traceability (master plan §7.2).
 
 ### 4.2 Floor and seating (E6)
 
-- **FR-5** Spatial floor plan: sections, positioned tables with shape and capacity, drawn once by the operator during setup. Status (open/seated/mains fired/paying/kitchen late) is derived, never stored. `OBSERVED` (prototype validated the pattern)
+- **FR-5** Spatial floor plan: sections, positioned tables with shape and capacity, drawn and rearranged by the operator (drag-to-move layout editor on the Tables screen, positions persisted per table). Status (open/seated/mains fired/paying/kitchen late) is derived, never stored. `OBSERVED` (prototype validated the pattern; layout editor live 2026-08-18)
 - **FR-6** Seat a party with covers; covers editable later but never below a seat holding items. Whether covers is mandatory at seating: `UNKNOWN` (deck A2).
 - **FR-7** Transfer a check to another table and switch between open checks in one tap. Merge checks: `UNKNOWN` (Matt: needed night one?).
 
@@ -129,15 +129,15 @@ All consolidated from master plan §9 + decks A/A2/B: D6 (WAN-down kitchen, the 
 
 ## 9. Traceability
 
-| FR group | Epics | Property/fault tests |
-|---|---|---|
-| 4.1 | E15 | privilege escalation, audit completeness |
-| 4.2 | E6 | two-terminal table state |
-| 4.3 | E4, E5 | snapshot immutability |
-| 4.4 | E3, E7 | modifier validity generation, idempotent commands |
-| 4.5 | E8 | duplicate-fire under retry |
-| 4.6 | E1, E11, E13 | split conservation, decline/timeout/duplicate-webhook |
-| 4.7 | E12, E15 | void-after-fire scenario |
-| 4.8 | E14, E16 | over/short reconciliation, close blockers |
-| 4.9 | E9, E10, E17 | the 10-case network-fault suite, crash-kill |
-| 5 | E18 | measured SLOs |
+| FR group | Epics        | Property/fault tests                                  |
+| -------- | ------------ | ----------------------------------------------------- |
+| 4.1      | E15          | privilege escalation, audit completeness              |
+| 4.2      | E6           | two-terminal table state                              |
+| 4.3      | E4, E5       | snapshot immutability                                 |
+| 4.4      | E3, E7       | modifier validity generation, idempotent commands     |
+| 4.5      | E8           | duplicate-fire under retry                            |
+| 4.6      | E1, E11, E13 | split conservation, decline/timeout/duplicate-webhook |
+| 4.7      | E12, E15     | void-after-fire scenario                              |
+| 4.8      | E14, E16     | over/short reconciliation, close blockers             |
+| 4.9      | E9, E10, E17 | the 10-case network-fault suite, crash-kill           |
+| 5        | E18          | measured SLOs                                         |
