@@ -34,9 +34,14 @@ The authoritative ticket list (master plan §5.5). Currently tracking Phase 0 wo
 | E1 follow-ups | Tip allocation across splits, cash rounding for non-US currencies, tax-inclusive pricing mode | Backlog, pilot-dependent |
 | E2 state machines | `checkLifecycle.ts` + `kitchenLifecycle.ts`: pure transition functions, guards as booleans from the command layer. Exhaustive tables (all 66 check pairs asserted) + random-walk properties (voided inescapable, closed exits only via approved reopen) | **Done** 2026-08-12 |
 | E3 modifier validation | `modifiers.ts`: min/max/duplicates/nesting/depth validator, error-collecting, total over corrupt snapshots; selectionPriceMinor + defaultSelections. Fixture suite + generated-menu properties | **Done** 2026-08-12 |
-| E4+ | Schema migration tooling, server skeleton | Waits on ADR-1 ratification (D6) |
+| E4 persistence | `pgStore.ts` + `migrations/`: PostgreSQL Store against the 44-table schema. Checks, lines (selection tree in jsonb per migration 0002), payments (intent/attempt/payment rows), tickets (dispatch + kitchen_ticket + per-item flags), sync journal, floor seed. Integration test spins a throwaway PG 17, runs a full service, then rebuilds the store to prove restart survival | **Done** 2026-08-12 |
+| E7 check engine | Command layer with idempotent operation ids + optimistic versions (shipped with the server; refinements like transfer/merge pending) | **Core done** |
+| E8 dispatch + KDS | Send creates one dispatch ticket per course; `/kds` page: one card per table, New flags, per-item bump, expo-only gated serve, 10-min recall, cook-together pane | **Done** 2026-08-12 |
+| E6 floor | `/v1/floor` + `/tables` page: spatial room per section, live status (open/seated/paying/late) derived from checks + tickets, tap-to-seat opens a real check, occupied tables refuse a second check | **Done** 2026-08-12 |
+| E5 menu domain | Snapshot persisted to menu_snapshot at seed; draft editing + publishing UI still open | Partial |
+| Next | Void/discount commands on the server (E12), payment provider adapter (E13, needs ADR-3), business day close (E14/E16) | Queued |
 
-Suite total: 54 tests green (`app/domain`, vitest + fast-check).
+Suite total: 67 tests green (54 domain + 13 server incl. PostgreSQL integration).
 
 ## Flagship mockup: done since first cut
 

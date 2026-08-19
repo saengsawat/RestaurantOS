@@ -11,7 +11,7 @@ Phase 0  Discovery        ████████░░  waiting on Matt sessio
 Phase 1  POS PRD          ██████░░░░  draft v0.1 done, Matt review pending
 Phase 2  Domain + arch    ██████░░░░  schema + domain model done; ADRs frozen on D6
 Phase 3  V1 backlog       ██░░░░░░░░  epic table exists; ticket contracts not yet written
-Phase 4  Build            ████░░░░░░  E1-E3 done + a runnable API server (63 tests green)
+Phase 4  Build            ██████░░░░  E1-E4, E6-E8 done: three live screens + PostgreSQL (67 tests)
 Phase 5  Pilot            ░░░░░░░░░░  venue not selected
 Phase 6  Intelligence     ░░░░░░░░░░  by design, after pilot
 ```
@@ -42,13 +42,26 @@ npm install    # first time only
 npm run dev    # then open http://localhost:3000/pos
 ```
 
-**http://localhost:3000/pos is the real POS web page**: open checks, seat and cover picking, modifier modal with required groups and nesting, send to kitchen, tip + pay (card/cash, offline simulation), close. Every tap is a command to the server; totals, validation, and state rules all come from the tested domain engine. `/` has the API docs. State is in-memory until E4; restarting clears it.
+Three live screens, all real commands to the server:
 
-Domain tests alone: `cd app\domain && npm test` (54). Server + page tests: `cd app\server && npm test` (10).
+- **/pos** Service: checks rail, table picker from the live floor, modifier modal (required groups, nesting), seats, send, tip/pay (offline simulation), close
+- **/tables** Floor: the spatial room per section, live status (open/seated/paying/kitchen-late), tap an open table to seat a party, tap an occupied one to jump to its check
+- **/kds** Kitchen: one card per table, New flags, per-item bump, expo-gated Serve, 10-minute recall, cook-together pane
+
+Try the two-device demo: `/pos` on a phone, `/kds` on the laptop, fire an order and watch it land.
+
+**Persistence:** by default state is in-memory. Set `DATABASE_URL` and the same server runs on PostgreSQL (migrations apply automatically, checks survive restarts):
+
+```powershell
+$env:DATABASE_URL = "postgres://postgres:YOURPASSWORD@localhost:5432/restaurantos"
+npm run dev
+```
+
+Domain tests: `cd app\domain && npm test` (54). Server tests incl. a throwaway-PostgreSQL integration: `cd app\server && npm test` (13).
 
 ## In flight
 
-- **E4 next: the PostgreSQL repository** implementing the server's Store interface against `docs/domain/schema.sql`, which makes state survive restarts. Then kitchen tickets + a KDS page. Both Matt-independent.
+- Next queued: server-side voids/discounts (E12), payment provider adapter (E13, wants ADR-3), drawer + business-day close (E14/E16), menu publishing (E5 remainder).
 
 ## Waiting on Andy
 

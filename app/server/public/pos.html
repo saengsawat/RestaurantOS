@@ -51,7 +51,7 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--brand);outline-
 .venue small{display:block;font-size:10px;color:var(--ink-4);letter-spacing:.05em;text-transform:uppercase}
 .badge{font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--amber);
   background:var(--amber-wash);border:1px solid var(--amber-line);border-radius:999px;padding:3px 10px}
-.conn{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;color:var(--ink-3)}
+.conn{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;color:var(--ink-3);margin-left:8px}
 .conn .dot{width:9px;height:9px;border-radius:50%;background:var(--green)}
 .conn.down .dot{background:var(--red)}
 
@@ -171,6 +171,11 @@ label.ck{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--ink-
     <div class="logo">R</div>
     <div class="venue"><b>Osteria Nove</b><small>RestaurantOS POS · connected to the real engine</small></div>
     <span class="badge">Concept · live API</span>
+    <nav style="margin-left:auto;display:flex;gap:6px">
+      <a href="/pos" style="color:var(--ink);background:var(--brand-wash);text-decoration:none;font-size:13px;font-weight:600;padding:8px 14px;border-radius:999px">Service</a>
+      <a href="/tables" style="color:var(--ink-3);text-decoration:none;font-size:13px;font-weight:600;padding:8px 14px;border-radius:999px">Tables</a>
+      <a href="/kds" style="color:var(--ink-3);text-decoration:none;font-size:13px;font-weight:600;padding:8px 14px;border-radius:999px">Kitchen</a>
+    </nav>
     <div class="conn" id="conn"><span class="dot"></span><span id="connTxt">server</span></div>
   </header>
   <div class="main" id="main">
@@ -196,9 +201,9 @@ label.ck{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--ink-
 </div>
 
 <div class="ov" id="ovNew"><div class="modal">
-  <div class="m-h"><div><h3>New check</h3><div class="sub">Opens on the server</div></div><button class="m-x" data-close="ovNew">✕</button></div>
+  <div class="m-h"><div><h3>New check</h3><div class="sub">Pick a free table (live from the floor)</div></div><button class="m-x" data-close="ovNew">✕</button></div>
   <div class="m-b">
-    <input class="fld" id="newTable" placeholder="Table name, e.g. Table 7">
+    <div class="og"><div class="og-h">Table</div><div class="opts" id="newTables"></div></div>
     <div class="og"><div class="og-h">Covers</div><div class="opts" id="newCovers"></div></div>
   </div>
   <div class="m-f"><button class="btn btn-p" id="newGo">Open check</button></div>
@@ -269,6 +274,8 @@ async function refresh(){
   ]);
   state.menu=menu;
   state.checks=checks.filter(c=>c.status!=="closed"&&c.status!=="voided");
+  const wanted=new URLSearchParams(location.search).get("check");
+  if(wanted&&state.checks.some(c=>c.id===wanted)){state.currentId=wanted;history.replaceState(null,"","/pos");}
   if(state.currentId&&!cur())state.currentId=null;
   if(!state.currentId&&state.checks.length)state.currentId=state.checks[0].id;
   renderAll();
@@ -341,9 +348,15 @@ function describeMods(sels){
   return names.join(" · ");
 }
 
-/* ---------- new check ---------- */
-$("#btnNew").onclick=()=>{
-  $("#newTable").value="";
+/* ---------- new check: pick a free table from the live floor ---------- */
+$("#btnNew").onclick=async()=>{
+  const floor=(await fetch("/v1/floor").then(r=>r.json())).tables;
+  const free=floor.filter(t=>!t.check);
+  $("#newTables").innerHTML=(free.length?free.map((t,i)=>
+    `<button class="opt ${i===0?"on":""}" data-tn="${esc(t.name)}">${esc(t.name)}</button>`).join(""):"")+
+    `<button class="opt ${free.length?"":"on"}" data-tn="Walk-in">Walk-in</button>`;
+  document.querySelectorAll("#newTables .opt").forEach(b=>b.onclick=()=>{
+    document.querySelectorAll("#newTables .opt").forEach(x=>x.classList.toggle("on",x===b));});
   $("#newCovers").innerHTML=[1,2,3,4,5,6,7,8].map(n=>
     `<button class="opt ${n===2?"on":""}" data-n="${n}">${n}</button>`).join("");
   document.querySelectorAll("#newCovers .opt").forEach(b=>b.onclick=()=>{
@@ -351,7 +364,7 @@ $("#btnNew").onclick=()=>{
   openOv("ovNew");
 };
 $("#newGo").onclick=async()=>{
-  const tableName=$("#newTable").value.trim()||"Walk-in";
+  const tableName=(document.querySelector("#newTables .opt.on")||{dataset:{tn:"Walk-in"}}).dataset.tn;
   const covers=+((document.querySelector("#newCovers .opt.on")||{}).dataset||{n:2}).n||2;
   const r=await api("/v1/checks",{tableName,covers});
   closeOv("ovNew");

@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>RestaurantOS KDS · connected</title>
+<style>
+:root{
+  color-scheme:dark;
+  --brand:#9fe870;--brand-ink:#163300;--brand-wash:rgba(159,232,112,.14);
+  --bg:#0e0f0c;--panel:#161814;--surface:#1d201b;--surface-2:#282c26;
+  --ink:#f2f1ec;--ink-2:#c9cdc4;--ink-3:#9a9e94;--ink-4:#83877d;
+  --info:#4cc3e8;--info-wash:rgba(76,195,232,.12);--info-line:rgba(76,195,232,.34);
+  --amber:#e3b341;--amber-wash:rgba(227,179,65,.12);--amber-line:rgba(227,179,65,.34);
+  --green:#34d399;--green-wash:rgba(52,211,153,.11);--green-line:rgba(52,211,153,.34);
+  --red:#f0555a;--red-wash:rgba(240,85,90,.12);--red-line:rgba(240,85,90,.36);
+  --line:rgba(242,241,236,.10);--line-subtle:rgba(242,241,236,.05);
+  --ring:0 0 0 1px rgba(242,241,236,.10);
+  --font:"Inter",ui-sans-serif,system-ui,sans-serif;--mono:ui-monospace,Consolas,monospace;
+  --vph:100vh;
+}
+@supports (height:100dvh){:root{--vph:100dvh}}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:var(--vph)}
+body{background:var(--bg);color:var(--ink);font:14.5px/1.45 var(--font);overflow:hidden;user-select:none;
+  -webkit-font-smoothing:antialiased;display:flex;flex-direction:column}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+button:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+.num{font-variant-numeric:tabular-nums}
+@keyframes latePulse{0%,100%{box-shadow:var(--ring),0 0 0 0 var(--red-line)}50%{box-shadow:var(--ring),0 0 0 6px transparent}}
+
+.topbar{display:flex;align-items:center;gap:12px;background:var(--panel);border-bottom:1px solid var(--line);
+  padding:0 16px;min-height:54px}
+.logo{width:32px;height:32px;border-radius:999px;background:var(--brand);color:var(--brand-ink);
+  display:flex;align-items:center;justify-content:center;font-weight:800}
+.t b{font-size:15px}
+.t small{display:block;font-size:10px;color:var(--ink-4);letter-spacing:.05em;text-transform:uppercase}
+.nav{margin-left:auto;display:flex;gap:6px}
+.nav a{color:var(--ink-3);text-decoration:none;font-size:13px;font-weight:600;padding:8px 14px;border-radius:999px}
+.nav a.on{background:var(--brand-wash);color:var(--ink)}
+
+.wrap{flex:1;display:flex;gap:14px;min-height:0;padding:14px 16px}
+.side{width:230px;flex-shrink:0;overflow-y:auto}
+.side-t{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);margin-bottom:8px}
+.agg{background:var(--surface);border-radius:12px;box-shadow:var(--ring);padding:11px 13px;margin-bottom:8px}
+.agg b{color:var(--amber)}
+.agg .t2{font-size:12px;color:var(--ink-3);margin-top:2px}
+.agg-none{font-size:12.5px;color:var(--ink-4);line-height:1.5}
+.flow{flex:1;display:flex;gap:12px;overflow-x:auto;align-items:flex-start}
+.ticket{background:var(--surface);border-radius:16px;box-shadow:var(--ring);min-width:250px;max-width:290px;
+  overflow:hidden;border-top:4px solid var(--info);flex-shrink:0;transition:background-color .25s}
+.ticket.working{border-top-color:var(--amber)}
+.ticket.ready{border-top-color:var(--green)}
+.ticket.late{border-top-color:var(--red);animation:latePulse 2s infinite}
+.ticket.served{opacity:.55;border-top-color:var(--line)}
+.tk-h{display:flex;justify-content:space-between;padding:9px 13px;background:var(--info-wash);
+  font-family:var(--mono);font-size:12.5px;font-weight:700}
+.ticket.working .tk-h{background:var(--amber-wash)}
+.ticket.ready .tk-h{background:var(--green-wash)}
+.ticket.late .tk-h{background:var(--red-wash)}
+.ticket.served .tk-h{background:var(--surface-2)}
+.tk-time{color:var(--ink-3)}
+.ticket.late .tk-time{color:var(--red)}
+.batch{padding:0 13px}
+.batch-h{display:flex;align-items:center;gap:7px;font-size:10.5px;font-weight:700;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--ink-4);padding:9px 0 2px}
+.batch-h .bt{margin-left:auto;font-family:var(--mono);letter-spacing:0;text-transform:none;font-weight:600}
+.chip{border-radius:999px;padding:1px 8px;font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;border:1px solid}
+.chip.info{color:var(--info);background:var(--info-wash);border-color:var(--info-line)}
+.chip.red{color:var(--red);background:var(--red-wash);border-color:var(--red-line)}
+.tki{display:flex;gap:9px;align-items:flex-start;padding:7px 0;border-bottom:1px solid var(--line-subtle);width:100%;text-align:left}
+.tki:active{background:var(--surface-2)}
+.tki .box{width:24px;height:24px;flex-shrink:0;border-radius:8px;border:2px solid var(--line);color:transparent;
+  display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;margin-top:1px}
+.tki.done .box{background:var(--green-wash);border-color:var(--green-line);color:var(--green)}
+.tki-n{font-size:15px;font-weight:600;line-height:1.3}
+.tki.done .tki-n{text-decoration:line-through;color:var(--ink-4)}
+.tki-s{display:block;font-size:12px;color:var(--ink-3)}
+.st{font-size:10px;font-weight:700;color:var(--info);background:var(--info-wash);border:1px solid var(--info-line);
+  border-radius:999px;padding:1px 6px;margin-left:5px;vertical-align:2px}
+.tk-a{display:flex;gap:8px;padding:8px 12px 12px}
+.btn{min-height:42px;border-radius:999px;font-size:14px;font-weight:600;padding:0 14px;flex:1;
+  display:inline-flex;align-items:center;justify-content:center;transition:transform .1s}
+.btn:active{transform:scale(.97)}
+.btn-p{background:var(--brand);color:var(--brand-ink)}
+.btn-s{background:var(--surface-2)}
+.btn:disabled{opacity:.45;cursor:default}
+.empty{margin:auto;text-align:center;color:var(--ink-4)}
+.toasts{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:200;display:flex;flex-direction:column;gap:8px;align-items:center}
+.toast{background:var(--ink);color:var(--bg);border-radius:999px;padding:9px 18px;font-size:13px;font-weight:600;max-width:92vw}
+.toast.err{background:var(--red);color:#fff}
+@media (max-width:820px){
+  .wrap{flex-direction:column;overflow-y:auto}
+  .side{width:100%;display:flex;gap:10px;overflow-x:auto}
+  .side-t{display:none}
+  .agg{min-width:190px;flex-shrink:0}
+  .flow{flex-wrap:wrap;overflow:visible}
+  .ticket{max-width:none;width:100%}
+}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="logo">R</div>
+  <div class="t"><b>Kitchen · Osteria Nove</b><small>RestaurantOS KDS · live from the server</small></div>
+  <nav class="nav"><a href="/pos">Service</a><a href="/tables">Tables</a><a href="/kds" class="on">Kitchen</a></nav>
+</header>
+<div class="wrap">
+  <aside class="side"><div class="side-t">Cook together</div><div id="agg"></div></aside>
+  <div class="flow" id="flow"></div>
+</div>
+<div class="toasts" id="toasts"></div>
+
+<script>
+/* KDS web client: one card per table, per-item bump, expo-only serve,
+   recallable service, cook-together aggregation. All state from the
+   server; New flags and late escalation derive from fired timestamps. */
+const $=s=>document.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const DEVICE="kds-"+(localStorage.getItem("ros.kds")||(()=>{const d=crypto.randomUUID().slice(0,8);localStorage.setItem("ros.kds",d);return d;})());
+const NEW_MS=3*60000, LATE_MS=12*60000;
+let tickets=[];
+
+function toast(m,k){const el=document.createElement("div");el.className="toast"+(k?" "+k:"");el.textContent=m;
+  $("#toasts").appendChild(el);setTimeout(()=>el.remove(),3000);}
+
+async function cmd(path,body){
+  const res=await fetch(path,{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({operationId:crypto.randomUUID(),deviceId:DEVICE,...body})});
+  const data=await res.json().catch(()=>({}));
+  if(!res.ok){toast(data.reason||"refused","err");throw new Error("refused");}
+  return data;
+}
+
+async function refresh(){
+  tickets=(await fetch("/v1/kds").then(r=>r.json())).tickets;
+  render();
+}
+
+function mins(iso){return Math.max(0,Math.round((Date.now()-Date.parse(iso))/60000));}
+
+function render(){
+  const active=tickets.filter(t=>t.status==="open");
+  const served=tickets.filter(t=>t.status==="served");
+
+  /* cook together: identical unplated dishes on 2+ tables */
+  const agg={};
+  active.forEach(t=>t.items.forEach(i=>{if(i.done)return;
+    (agg[i.name]=agg[i.name]||{qty:0,station:i.station,tables:new Set()});
+    agg[i.name].qty+=i.quantity;agg[i.name].tables.add(t.tableName);}));
+  const batch=Object.entries(agg).filter(([,v])=>v.qty>=2&&v.tables.size>=2).sort((a,b)=>b[1].qty-a[1].qty);
+  $("#agg").innerHTML=batch.length?batch.map(([n,v])=>
+    `<div class="agg"><div><b>${v.qty}×</b> ${esc(n)}<span class="st">${esc(v.station)}</span></div>
+     <div class="t2">${[...v.tables].map(esc).join(" · ")}</div></div>`).join("")
+    :`<div class="agg-none">No duplicate dishes right now. When two tables order the same thing it shows here, so the line fires them together.</div>`;
+
+  /* one card per table */
+  const byTable={};
+  active.forEach(t=>{(byTable[t.tableName]=byTable[t.tableName]||[]).push(t);});
+  const cards=Object.entries(byTable).map(([table,list])=>{
+    list.sort((a,b)=>Date.parse(a.firedAt)-Date.parse(b.firedAt));
+    const items=list.flatMap(t=>t.items);
+    const allDone=items.length>0&&items.every(i=>i.done);
+    const anyDone=items.some(i=>i.done);
+    const late=list.some(t=>!t.items.every(i=>i.done)&&Date.now()-Date.parse(t.firedAt)>=LATE_MS);
+    const cls=late?"late":allDone?"ready":anyDone?"working":"";
+    const oldest=Math.max(...list.map(t=>mins(t.firedAt)));
+    const body=list.map(t=>{
+      const isNew=Date.now()-Date.parse(t.firedAt)<NEW_MS;
+      const tlate=!t.items.every(i=>i.done)&&Date.now()-Date.parse(t.firedAt)>=LATE_MS;
+      return `<div class="batch"><div class="batch-h">${esc(t.course)}
+        ${isNew?'<span class="chip info">New</span>':""}${tlate?'<span class="chip red">Late</span>':""}
+        <span class="bt">${mins(t.firedAt)}m</span></div>`+
+        t.items.map(i=>`<button class="tki ${i.done?"done":""}" data-tg="${t.id}|${i.orderItemId}">
+          <span class="box">✓</span>
+          <span style="flex:1;min-width:0"><span class="tki-n">${i.quantity}× ${esc(i.name)}<span class="st">${esc(i.station)}</span></span>
+          ${i.mods?`<span class="tki-s">${esc(i.mods)}</span>`:""}</span></button>`).join("")+`</div>`;
+    }).join("");
+    return `<div class="ticket ${cls}">
+      <div class="tk-h"><span>${esc(table.toUpperCase())}</span><span class="tk-time num">${oldest}m</span></div>
+      ${body}
+      <div class="tk-a"><button class="btn ${allDone?"btn-p":"btn-s"}" data-serve="${esc(table)}" ${allDone?"":"disabled"}>
+        ${allDone?"Serve table ✓":"Serve (finish items first)"}</button></div></div>`;
+  }).join("");
+
+  const servedCards=served.sort((a,b)=>Date.parse(b.servedAt)-Date.parse(a.servedAt)).map(t=>
+    `<div class="ticket served"><div class="tk-h"><span>${esc(t.tableName.toUpperCase())}</span><span class="tk-time">served</span></div>
+     <div class="batch"><div class="batch-h">${esc(t.course)}<span class="bt">recallable 10 min</span></div></div>
+     <div class="tk-a"><button class="btn btn-s" data-recall="${t.id}">Recall ↩</button></div></div>`).join("");
+
+  $("#flow").innerHTML=(cards+servedCards)||`<div class="empty"><div style="font-size:34px;opacity:.5">▤</div>No open tickets.<br>Fire something from <a href="/pos" style="color:var(--brand)">Service</a>.</div>`;
+
+  document.querySelectorAll("[data-tg]").forEach(b=>b.onclick=async()=>{
+    const [ticketId,orderItemId]=b.dataset.tg.split("|");
+    await cmd("/v1/kds/toggle",{ticketId,orderItemId});await refresh();});
+  document.querySelectorAll("[data-serve]").forEach(b=>b.onclick=async()=>{
+    await cmd("/v1/kds/serve",{tableName:b.dataset.serve});toast(b.dataset.serve+" served, recallable 10 min");await refresh();});
+  document.querySelectorAll("[data-recall]").forEach(b=>b.onclick=async()=>{
+    await cmd("/v1/kds/recall",{ticketId:b.dataset.recall});toast("Recalled","err");await refresh();});
+}
+
+function setViewportH(){document.documentElement.style.setProperty("--vph",window.innerHeight+"px");}
+addEventListener("resize",setViewportH);setViewportH();
+refresh().catch(()=>toast("Cannot reach the server","err"));
+setInterval(()=>refresh().catch(()=>{}),3000);
+</script>
+</body>
+</html>

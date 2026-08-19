@@ -15,10 +15,12 @@
   },
   "dependencies": {
     "@restaurantos/domain": "file:../domain",
-    "fastify": "^5.0.0"
+    "fastify": "^5.0.0",
+    "pg": "^8.23.0"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
+    "@types/pg": "^8.23.1",
     "tsx": "^4.19.0",
     "typescript": "^5.5.0",
     "vitest": "^2.0.0"

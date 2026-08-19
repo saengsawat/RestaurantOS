@@ -1,86 +1,39 @@
 /**
- * Check engine: the command layer that ties the domain packages together.
+ * Command layer over @restaurantos/domain, storage-agnostic (Store).
  *
- * Everything financial or transitional is delegated to @restaurantos/domain
- * (E1 money, E2 state machines, E3 modifier validation); this module only
- * orchestrates and stores. The protocol is the one from domain-model.md:
- * every mutation carries a client operation id (idempotency) and an
- * expected version (optimistic concurrency).
- *
- * Storage today is an in-process Store implementation; the PostgreSQL
- * repository (E4) implements the same interface against schema.sql.
+ * Money, transitions, and modifier rules are delegated to the tested
+ * domain packages; this module orchestrates and persists. Protocol per
+ * domain-model.md: client operation ids (idempotent replay), optimistic
+ * versions (conflict values, not lost updates).
  */
 import {
   checkTransition,
   computeCheckTotals,
+  kitchenTicketTransition,
   lineTotalMinor,
   orderItemTransition,
   selectionPriceMinor,
+  ticketItemTransition,
   validateModifiers,
   type CheckLine,
-  type CheckStatus,
   type ModifierError,
-  type OrderItemStatus,
   type SelectedModifier,
 } from "@restaurantos/domain";
 import { findMenuEntry, GROUPS, SNAPSHOT_ID } from "./menu.js";
 import { randomUUID } from "node:crypto";
+import type { CheckAggregate, Envelope, KitchenTicket, Store } from "./types.js";
 
-/** demo NYC-style rate; location config in the real build */
 export const TAX_RATE = { num: 8_875, den: 100_000 };
-
-export interface Envelope {
-  operationId: string;
-  deviceId: string;
-  expectedVersion?: number;
-}
-
-export interface OrderLine {
-  id: string;
-  itemId: string;
-  capturedName: string;
-  unitPriceMinor: number;
-  quantity: number;
-  seatNo: number;
-  course: string;
-  station: string;
-  modifiers: readonly SelectedModifier[];
-  modifierPriceMinor: number;
-  status: OrderItemStatus;
-}
-
-export interface PaymentRecord {
-  id: string;
-  label: string;
-  method: "card" | "cash";
-  amountMinor: number;
-  tipMinor: number;
-  status: "authorized" | "accepted_offline";
-}
-
-export interface CheckAggregate {
-  id: string;
-  checkNo: number;
-  tableName: string;
-  covers: number;
-  status: CheckStatus;
-  version: number;
-  menuSnapshotId: string;
-  lines: OrderLine[];
-  payments: PaymentRecord[];
-  openedAt: string;
-  closedAt?: string;
-}
+export const RECALL_WINDOW_MS = 10 * 60_000;
 
 export type CommandOutcome =
-  | { kind: "applied"; check: CheckView }
+  | { kind: "applied"; check?: CheckView; tickets?: KitchenTicket[] }
   | { kind: "replay"; result: CommandOutcome }
   | { kind: "conflict"; expectedVersion: number | undefined; currentVersion: number }
   | { kind: "rejected"; reason: string; modifierErrors?: readonly ModifierError[] }
   | { kind: "not_found" };
 
-export interface CheckView extends Omit<CheckAggregate, "lines"> {
-  lines: OrderLine[];
+export interface CheckView extends CheckAggregate {
   totals: {
     subtotalMinor: number;
     discountMinor: number;
@@ -89,33 +42,6 @@ export interface CheckView extends Omit<CheckAggregate, "lines"> {
     paidMinor: number;
     dueMinor: number;
   };
-}
-
-interface StoredOp {
-  outcome: CommandOutcome;
-}
-
-/** Storage boundary: MemoryStore now, PgStore (E4) next, same interface. */
-export interface Store {
-  get(id: string): CheckAggregate | undefined;
-  list(): CheckAggregate[];
-  put(check: CheckAggregate): void;
-  opResult(operationId: string): StoredOp | undefined;
-  rememberOp(operationId: string, op: StoredOp): void;
-  nextCheckNo(): number;
-}
-
-export class MemoryStore implements Store {
-  private checks = new Map<string, CheckAggregate>();
-  private ops = new Map<string, StoredOp>();
-  private checkNo = 2041;
-
-  get(id: string) { return this.checks.get(id); }
-  list() { return [...this.checks.values()]; }
-  put(check: CheckAggregate) { this.checks.set(check.id, check); }
-  opResult(operationId: string) { return this.ops.get(operationId); }
-  rememberOp(operationId: string, op: StoredOp) { this.ops.set(operationId, op); }
-  nextCheckNo() { return this.checkNo++; }
 }
 
 export function toView(check: CheckAggregate): CheckView {
@@ -143,51 +69,64 @@ export function toView(check: CheckAggregate): CheckView {
 export class Engine {
   constructor(private readonly store: Store) {}
 
-  /** Idempotency + optimistic concurrency wrapper shared by every command. */
-  private run(
-    envelope: Envelope,
-    checkId: string | undefined,
-    body: (check: CheckAggregate | undefined) => CommandOutcome,
-  ): CommandOutcome {
-    const replay = this.store.opResult(envelope.operationId);
-    if (replay) return { kind: "replay", result: replay.outcome };
-
-    const check = checkId === undefined ? undefined : this.store.get(checkId);
-    if (checkId !== undefined && !check) {
-      return { kind: "not_found" }; // not remembered: a later retry may find it after sync
-    }
-    if (check && envelope.expectedVersion !== undefined && envelope.expectedVersion !== check.version) {
-      const outcome: CommandOutcome = {
-        kind: "conflict",
-        expectedVersion: envelope.expectedVersion,
-        currentVersion: check.version,
-      };
-      this.store.rememberOp(envelope.operationId, { outcome });
-      return outcome;
-    }
-
-    const outcome = body(check);
-    if (outcome.kind === "applied" && check) {
-      check.version += 1;
-      outcome.check.version = check.version;
-      this.store.put(check);
-    }
-    this.store.rememberOp(envelope.operationId, { outcome });
+  private async remember(envelope: Envelope, outcome: CommandOutcome, aggregateType: string, aggregateId: string): Promise<CommandOutcome> {
+    await this.store.rememberOp(envelope.operationId, outcome, {
+      status: outcome.kind === "applied" ? "applied" : outcome.kind === "conflict" ? "conflict" : "rejected",
+      aggregateType,
+      aggregateId,
+      deviceId: envelope.deviceId,
+    });
     return outcome;
   }
 
-  openCheck(envelope: Envelope, input: { tableName: string; covers: number }): CommandOutcome {
-    const replay = this.store.opResult(envelope.operationId);
-    if (replay) return { kind: "replay", result: replay.outcome };
+  private async run(
+    envelope: Envelope,
+    checkId: string,
+    body: (check: CheckAggregate) => Promise<CommandOutcome> | CommandOutcome,
+  ): Promise<CommandOutcome> {
+    const replay = await this.store.opResult(envelope.operationId);
+    if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
+
+    const check = await this.store.get(checkId);
+    if (!check) return { kind: "not_found" }; // not remembered: a retry may find it after sync
+
+    if (envelope.expectedVersion !== undefined && envelope.expectedVersion !== check.version) {
+      return this.remember(envelope, {
+        kind: "conflict",
+        expectedVersion: envelope.expectedVersion,
+        currentVersion: check.version,
+      }, "check", checkId);
+    }
+
+    const outcome = await body(check);
+    if (outcome.kind === "applied") {
+      check.version += 1;
+      if (outcome.check) outcome.check.version = check.version;
+      await this.store.put(check);
+    }
+    return this.remember(envelope, outcome, "check", checkId);
+  }
+
+  async openCheck(envelope: Envelope, input: { tableName: string; covers: number }): Promise<CommandOutcome> {
+    const replay = await this.store.opResult(envelope.operationId);
+    if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
 
     if (!Number.isSafeInteger(input.covers) || input.covers < 1) {
-      const outcome: CommandOutcome = { kind: "rejected", reason: "covers must be a positive integer" };
-      this.store.rememberOp(envelope.operationId, { outcome });
-      return outcome;
+      return this.remember(envelope, { kind: "rejected", reason: "covers must be a positive integer" }, "check", "new");
+    }
+    const floor = await this.store.listFloor();
+    const floorTable = floor.find((t) => t.name === input.tableName);
+    if (floorTable) {
+      const open = (await this.store.list()).some(
+        (c) => c.tableName === input.tableName && c.status !== "closed" && c.status !== "voided",
+      );
+      if (open) {
+        return this.remember(envelope, { kind: "rejected", reason: `${input.tableName} already has an open check` }, "check", "new");
+      }
     }
     const check: CheckAggregate = {
       id: randomUUID(),
-      checkNo: this.store.nextCheckNo(),
+      checkNo: await this.store.nextCheckNo(),
       tableName: input.tableName,
       covers: input.covers,
       status: "open",
@@ -197,19 +136,17 @@ export class Engine {
       payments: [],
       openedAt: new Date().toISOString(),
     };
-    this.store.put(check);
+    await this.store.put(check);
     const outcome: CommandOutcome = { kind: "applied", check: toView(check) };
-    this.store.rememberOp(envelope.operationId, { outcome });
-    return outcome;
+    return this.remember(envelope, outcome, "check", check.id);
   }
 
-  addItem(
+  async addItem(
     envelope: Envelope,
     checkId: string,
     input: { itemId: string; quantity: number; seatNo: number; modifiers?: readonly SelectedModifier[] },
-  ): CommandOutcome {
+  ): Promise<CommandOutcome> {
     return this.run(envelope, checkId, (check) => {
-      if (!check) return { kind: "not_found" };
       if (check.status === "closed" || check.status === "voided") {
         return { kind: "rejected", reason: `cannot add items to a ${check.status} check` };
       }
@@ -221,15 +158,13 @@ export class Engine {
       if (!Number.isSafeInteger(input.seatNo) || input.seatNo < 1 || input.seatNo > check.covers) {
         return { kind: "rejected", reason: `seatNo must be between 1 and covers (${check.covers})` };
       }
-
       const selections = input.modifiers ?? [];
       const validation = validateModifiers(entry, GROUPS, selections);
       if (!validation.valid) {
         return { kind: "rejected", reason: "modifier validation failed", modifierErrors: validation.errors };
       }
-
       const modifierPriceMinor = selectionPriceMinor(GROUPS, selections);
-      lineTotalMinor(entry.priceMinor, input.quantity, [modifierPriceMinor]); // overflow guard
+      lineTotalMinor(entry.priceMinor, input.quantity, [modifierPriceMinor]);
 
       check.lines.push({
         id: randomUUID(),
@@ -248,30 +183,57 @@ export class Engine {
     });
   }
 
-  /** Fire unsent lines to the kitchen; optionally a single course. */
-  send(envelope: Envelope, checkId: string, input: { course?: string }): CommandOutcome {
-    return this.run(envelope, checkId, (check) => {
-      if (!check) return { kind: "not_found" };
+  /** Fire unsent lines: one dispatch ticket per course (E8). */
+  async send(envelope: Envelope, checkId: string, input: { course?: string }): Promise<CommandOutcome> {
+    return this.run(envelope, checkId, async (check) => {
       const targets = check.lines.filter(
         (l) => l.status === "unsent" && (input.course === undefined || l.course === input.course),
       );
       if (targets.length === 0) return { kind: "rejected", reason: "nothing unsent to fire" };
+
       for (const line of targets) {
         const r = orderItemTransition(line.status, { type: "dispatch" });
         if (!r.ok) return { kind: "rejected", reason: r.reason };
         line.status = r.next;
       }
-      return { kind: "applied", check: toView(check) };
+      const byCourse = new Map<string, typeof targets>();
+      for (const line of targets) {
+        const list = byCourse.get(line.course) ?? [];
+        list.push(line);
+        byCourse.set(line.course, list);
+      }
+      const tickets: KitchenTicket[] = [];
+      for (const [course, lines] of byCourse) {
+        const ticket: KitchenTicket = {
+          id: randomUUID(),
+          checkId: check.id,
+          tableName: check.tableName,
+          course,
+          firedAt: new Date().toISOString(),
+          status: "open",
+          items: lines.map((l) => ({
+            orderItemId: l.id,
+            name: l.capturedName,
+            quantity: l.quantity,
+            station: l.station,
+            mods: describeSelections(l.modifiers),
+            allergy: hasAllergy(l.modifiers),
+            done: false,
+          })),
+        };
+        await this.store.putTicket(ticket);
+        tickets.push(ticket);
+      }
+      return { kind: "applied", check: toView(check), tickets };
     });
   }
 
-  recordPayment(
+  async recordPayment(
     envelope: Envelope,
     checkId: string,
     input: { method: "card" | "cash"; amountMinor: number; tipMinor?: number; label?: string; offline?: boolean },
-  ): CommandOutcome {
+  ): Promise<CommandOutcome> {
     return this.run(envelope, checkId, (check) => {
-      if (!check) return { kind: "not_found" };
       if (!Number.isSafeInteger(input.amountMinor) || input.amountMinor < 1) {
         return { kind: "rejected", reason: "amountMinor must be a positive integer" };
       }
@@ -294,9 +256,8 @@ export class Engine {
     });
   }
 
-  close(envelope: Envelope, checkId: string): CommandOutcome {
+  async close(envelope: Envelope, checkId: string): Promise<CommandOutcome> {
     return this.run(envelope, checkId, (check) => {
-      if (!check) return { kind: "not_found" };
       if (check.payments.some((p) => p.status === "accepted_offline")) {
         return { kind: "rejected", reason: "offline card payments pending upload; check cannot close until they authorize" };
       }
@@ -308,12 +269,122 @@ export class Engine {
     });
   }
 
-  getCheck(id: string): CheckView | undefined {
-    const check = this.store.get(id);
+  /* ------------------------------ KDS (E8) ------------------------------ */
+
+  private async activeTickets(): Promise<KitchenTicket[]> {
+    const all = await this.store.listTickets();
+    const now = Date.now();
+    return all.filter(
+      (t) => t.status !== "served" || (t.servedAt !== undefined && now - Date.parse(t.servedAt) < RECALL_WINDOW_MS),
+    );
+  }
+
+  async kds(): Promise<KitchenTicket[]> {
+    return this.activeTickets();
+  }
+
+  async toggleItem(envelope: Envelope, ticketId: string, orderItemId: string): Promise<CommandOutcome> {
+    const replay = await this.store.opResult(envelope.operationId);
+    if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
+    const ticket = await this.store.getTicket(ticketId);
+    if (!ticket) return { kind: "not_found" };
+    const item = ticket.items.find((i) => i.orderItemId === orderItemId);
+    if (!item) return { kind: "not_found" };
+    const r = ticketItemTransition(item.done ? "done" : "pending", { type: "toggle_done", ticketStatus: ticket.status });
+    if (!r.ok) return this.remember(envelope, { kind: "rejected", reason: r.reason }, "ticket", ticketId);
+    item.done = r.next === "done";
+    await this.store.putTicket(ticket);
+    return this.remember(envelope, { kind: "applied", tickets: [ticket] }, "ticket", ticketId);
+  }
+
+  /** Serve releases the whole table (expo action): every open ticket of it. */
+  async serveTable(envelope: Envelope, tableName: string): Promise<CommandOutcome> {
+    const replay = await this.store.opResult(envelope.operationId);
+    if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
+    const tickets = (await this.activeTickets()).filter((t) => t.tableName === tableName && t.status === "open");
+    if (!tickets.length) return this.remember(envelope, { kind: "rejected", reason: "no open tickets for " + tableName }, "table", tableName);
+    const allItemsDone = tickets.every((t) => t.items.every((i) => i.done));
+    for (const ticket of tickets) {
+      const r = kitchenTicketTransition(ticket.status, { type: "serve", allItemsDone, fromExpoView: true });
+      if (!r.ok) return this.remember(envelope, { kind: "rejected", reason: r.reason }, "table", tableName);
+    }
+    const servedAt = new Date().toISOString();
+    for (const ticket of tickets) {
+      ticket.status = "served";
+      ticket.servedAt = servedAt;
+      await this.store.putTicket(ticket);
+    }
+    return this.remember(envelope, { kind: "applied", tickets }, "table", tableName);
+  }
+
+  async recallTicket(envelope: Envelope, ticketId: string): Promise<CommandOutcome> {
+    const replay = await this.store.opResult(envelope.operationId);
+    if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
+    const ticket = await this.store.getTicket(ticketId);
+    if (!ticket) return { kind: "not_found" };
+    const within = ticket.servedAt !== undefined && Date.now() - Date.parse(ticket.servedAt) < RECALL_WINDOW_MS;
+    const r = kitchenTicketTransition(ticket.status, { type: "recall", withinRecallWindow: within });
+    if (!r.ok) return this.remember(envelope, { kind: "rejected", reason: r.reason }, "ticket", ticketId);
+    ticket.status = "open";
+    delete ticket.servedAt;
+    await this.store.putTicket(ticket);
+    return this.remember(envelope, { kind: "applied", tickets: [ticket] }, "ticket", ticketId);
+  }
+
+  /* ------------------------------ reads ------------------------------ */
+
+  async getCheck(id: string): Promise<CheckView | undefined> {
+    const check = await this.store.get(id);
     return check ? toView(check) : undefined;
   }
 
-  listChecks(): CheckView[] {
-    return this.store.list().map(toView);
+  async listChecks(): Promise<CheckView[]> {
+    return (await this.store.list()).map(toView);
   }
+
+  /** Floor with live status derived from checks and tickets (E6). */
+  async floor() {
+    const [tables, checks, tickets] = await Promise.all([
+      this.store.listFloor(),
+      this.store.list(),
+      this.activeTickets(),
+    ]);
+    const LATE_MS = 12 * 60_000;
+    const now = Date.now();
+    return tables.map((t) => {
+      const check = checks.find((c) => c.tableName === t.name && c.status !== "closed" && c.status !== "voided");
+      const open = tickets.filter((k) => check && k.checkId === check.id && k.status === "open");
+      const late = open.some((k) => !k.items.every((i) => i.done) && now - Date.parse(k.firedAt) >= LATE_MS);
+      const view = check ? toView(check) : undefined;
+      return {
+        ...t,
+        check: view
+          ? {
+              id: view.id, checkNo: view.checkNo, covers: view.covers, status: view.status,
+              dueMinor: view.totals.dueMinor, openedAt: view.openedAt,
+              unsent: view.lines.filter((l) => l.status === "unsent").length,
+            }
+          : null,
+        kitchenLate: late,
+      };
+    });
+  }
+}
+
+function describeSelections(sels: readonly SelectedModifier[]): string {
+  const names: string[] = [];
+  const walk = (list: readonly SelectedModifier[]) => {
+    for (const s of list) {
+      const group = GROUPS[s.groupId];
+      const option = group?.options.find((o) => o.id === s.modifierId);
+      if (option) names.push(option.name);
+      if (s.children) walk(s.children);
+    }
+  };
+  walk(sels);
+  return names.join(", ");
+}
+
+function hasAllergy(sels: readonly SelectedModifier[]): boolean {
+  return describeSelections(sels).includes("allergy") || describeSelections(sels).includes("⚠");
 }

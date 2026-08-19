@@ -163,6 +163,60 @@ describe("the sync protocol", () => {
   });
 });
 
+describe("the kitchen (E8)", () => {
+  it("send creates tickets; items bump; serve is gated then recallable; floor sees it all", async () => {
+    const app = buildServer();
+    const check = await openCheck(app);
+
+    // floor now shows Table 14 occupied, and refuses a second check on it
+    const floor1 = await app.inject({ method: "GET", url: "/v1/floor" });
+    expect(floor1.json().tables.find((t: { name: string }) => t.name === "Table 14").check.checkNo).toBeDefined();
+    const dup = await app.inject({ method: "POST", url: "/v1/checks", payload: { ...ENV(90), tableName: "Table 14", covers: 2 } });
+    expect(dup.statusCode).toBe(422);
+
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items`,
+      payload: { ...ENV(1), itemId: "ragu", quantity: 1, seatNo: 1, modifiers: [{ groupId: "pasta", modifierId: "spag" }] } });
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items`,
+      payload: { ...ENV(2), itemId: "chianti", quantity: 2, seatNo: 2, modifiers: [{ groupId: "size", modifierId: "glass" }] } });
+    const send = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/send`, payload: ENV(3) });
+    expect(send.statusCode).toBe(200);
+    expect(send.json().tickets).toHaveLength(2); // one per course: PRIMI + BEVERAGE
+
+    const kds = (await app.inject({ method: "GET", url: "/v1/kds" })).json().tickets;
+    expect(kds).toHaveLength(2);
+    const primi = kds.find((t: { course: string }) => t.course === "PRIMI");
+    expect(primi.items[0].mods).toBe("Spaghetti");
+
+    // serve refuses until every item on the table is done
+    const early = await app.inject({ method: "POST", url: "/v1/kds/serve", payload: { ...ENV(4), tableName: "Table 14" } });
+    expect(early.statusCode).toBe(422);
+    expect(early.json().reason).toMatch(/plated/);
+
+    for (const t of kds) {
+      for (const i of t.items) {
+        const r = await app.inject({ method: "POST", url: "/v1/kds/toggle",
+          payload: { ...ENV(100 + Math.random()), ticketId: t.id, orderItemId: i.orderItemId } });
+        expect(r.statusCode).toBe(200);
+      }
+    }
+    const serve = await app.inject({ method: "POST", url: "/v1/kds/serve", payload: { ...ENV(5), tableName: "Table 14" } });
+    expect(serve.statusCode).toBe(200);
+
+    // served but recallable
+    const after = (await app.inject({ method: "GET", url: "/v1/kds" })).json().tickets;
+    expect(after.every((t: { status: string }) => t.status === "served")).toBe(true);
+    const recall = await app.inject({ method: "POST", url: "/v1/kds/recall", payload: { ...ENV(6), ticketId: primi.id } });
+    expect(recall.statusCode).toBe(200);
+    expect(recall.json().tickets[0].status).toBe("open");
+
+    // a bump on a served ticket is refused (recall first)
+    const bev = after.find((t: { course: string }) => t.course === "BEVERAGE");
+    const badBump = await app.inject({ method: "POST", url: "/v1/kds/toggle",
+      payload: { ...ENV(7), ticketId: bev.id, orderItemId: bev.items[0].orderItemId } });
+    expect(badBump.statusCode).toBe(422);
+  });
+});
+
 describe("reads", () => {
   it("serves the menu snapshot and the landing page", async () => {
     const app = buildServer();
@@ -180,5 +234,14 @@ describe("reads", () => {
     expect(pos.headers["content-type"]).toContain("text/html");
     expect(pos.body).toContain("RestaurantOS POS");
     expect(pos.body).toContain("operationId");
+  });
+
+  it("serves the KDS and Tables pages and the floor", async () => {
+    const app = buildServer();
+    expect((await app.inject({ method: "GET", url: "/kds" })).statusCode).toBe(200);
+    expect((await app.inject({ method: "GET", url: "/tables" })).statusCode).toBe(200);
+    const floor = await app.inject({ method: "GET", url: "/v1/floor" });
+    expect(floor.json().tables.length).toBe(13);
+    expect(floor.json().tables.find((t: { name: string }) => t.name === "Table 7").check).toBeNull();
   });
 });

@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>RestaurantOS Tables · connected</title>
+<style>
+:root{
+  color-scheme:light;
+  --brand:#9fe870;--brand-ink:#163300;--brand-wash:rgba(159,232,112,.18);
+  --bg:#f2f1ec;--panel:#fff;--surface:#fff;--surface-2:#e9ebe4;
+  --ink:#0e0f0c;--ink-2:#3f423d;--ink-3:#5f635c;--ink-4:#787c74;
+  --info:#0a7ea4;--info-wash:rgba(10,126,164,.10);--info-line:rgba(10,126,164,.30);
+  --amber:#a16207;--amber-wash:rgba(161,98,7,.10);--amber-line:rgba(161,98,7,.30);
+  --green:#116e3b;--green-wash:rgba(17,110,59,.10);--green-line:rgba(17,110,59,.32);
+  --red:#c22f35;--red-wash:rgba(194,47,53,.09);--red-line:rgba(194,47,53,.32);
+  --line:rgba(14,15,12,.12);--line-subtle:rgba(14,15,12,.06);
+  --ring:0 0 0 1px rgba(14,15,12,.12);--shadow-lg:0 16px 40px rgba(14,15,12,.16);
+  --overlay:rgba(14,15,12,.45);
+  --font:"Inter",ui-sans-serif,system-ui,sans-serif;--mono:ui-monospace,Consolas,monospace;
+  --vph:100vh;
+}
+@supports (height:100dvh){:root{--vph:100dvh}}
+@media (prefers-color-scheme:dark){:root{
+  color-scheme:dark;
+  --bg:#0e0f0c;--panel:#161814;--surface:#1d201b;--surface-2:#282c26;
+  --ink:#f2f1ec;--ink-2:#c9cdc4;--ink-3:#9a9e94;--ink-4:#83877d;
+  --info:#4cc3e8;--info-wash:rgba(76,195,232,.12);--info-line:rgba(76,195,232,.34);
+  --amber:#e3b341;--amber-wash:rgba(227,179,65,.12);--amber-line:rgba(227,179,65,.34);
+  --green:#34d399;--green-wash:rgba(52,211,153,.11);--green-line:rgba(52,211,153,.34);
+  --red:#f0555a;--red-wash:rgba(240,85,90,.12);--red-line:rgba(240,85,90,.36);
+  --line:rgba(242,241,236,.10);--line-subtle:rgba(242,241,236,.05);
+  --ring:0 0 0 1px rgba(242,241,236,.10);--overlay:rgba(0,0,0,.6);
+}}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:var(--vph)}
+body{background:var(--bg);color:var(--ink);font:14.5px/1.45 var(--font);overflow:hidden;user-select:none;
+  -webkit-font-smoothing:antialiased;display:flex;flex-direction:column}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+button:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+.num{font-variant-numeric:tabular-nums}
+@keyframes latePulse{0%,100%{box-shadow:0 0 0 0 var(--red-line)}50%{box-shadow:0 0 0 6px transparent}}
+
+.topbar{display:flex;align-items:center;gap:12px;background:var(--panel);border-bottom:1px solid var(--line);
+  padding:0 16px;min-height:54px}
+.logo{width:32px;height:32px;border-radius:999px;background:var(--brand);color:var(--brand-ink);
+  display:flex;align-items:center;justify-content:center;font-weight:800}
+.t b{font-size:15px}
+.t small{display:block;font-size:10px;color:var(--ink-4);letter-spacing:.05em;text-transform:uppercase}
+.nav{margin-left:auto;display:flex;gap:6px}
+.nav a{color:var(--ink-3);text-decoration:none;font-size:13px;font-weight:600;padding:8px 14px;border-radius:999px}
+.nav a.on{background:var(--brand-wash);color:var(--ink)}
+
+.wrap{flex:1;overflow-y:auto;padding:16px 18px}
+.tabs{display:flex;gap:8px;margin-bottom:14px}
+.tab{min-height:38px;border-radius:999px;padding:0 16px;font-size:13.5px;font-weight:600;background:var(--surface-2);color:var(--ink-2)}
+.tab.on{background:var(--ink);color:var(--bg)}
+.room{position:relative;width:100%;aspect-ratio:16/8;max-height:560px;background:var(--surface);
+  border-radius:16px;box-shadow:var(--ring);overflow:hidden}
+.tbl{position:absolute;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;
+  border:2.5px solid;border-radius:14px;padding:3px;transition:transform .1s;min-width:0}
+.tbl:active{transform:scale(.94)}
+.tbl.round,.tbl.stool{border-radius:50%}
+.tbl .n{font-size:clamp(11px,1.5vw,15px);font-weight:700;line-height:1.1}
+.tbl .m{font-size:clamp(9px,1.1vw,11.5px);font-weight:600;color:var(--ink-3)}
+.tbl .d{font-family:var(--mono);font-size:clamp(9px,1vw,11px);color:var(--ink-4)}
+.tbl.open{border-style:dashed;border-color:var(--line);background:transparent}
+.tbl.open .n{color:var(--ink-4)}
+.tbl.seated{border-color:var(--info);background:var(--info-wash)}
+.tbl.paying{border-color:var(--green);background:var(--green-wash)}
+.tbl.late{border-color:var(--red);background:var(--red-wash);animation:latePulse 2s infinite}
+.legend{display:flex;gap:16px;flex-wrap:wrap;margin:12px 2px;font-size:12px;color:var(--ink-3)}
+.lg{display:flex;align-items:center;gap:6px;font-weight:600}
+.lg .sw{width:13px;height:13px;border-radius:4px;border:2px solid}
+.note{font-size:11.5px;color:var(--ink-4)}
+
+.ov{position:fixed;inset:0;background:var(--overlay);display:none;align-items:center;justify-content:center;z-index:100;padding:16px}
+.ov.open{display:flex}
+.modal{background:var(--surface);border-radius:16px;box-shadow:var(--shadow-lg);width:min(420px,100%);animation:pop .15s ease-out}
+@keyframes pop{from{transform:scale(.97);opacity:.6}to{transform:none;opacity:1}}
+.m-h{display:flex;justify-content:space-between;align-items:center;padding:15px 18px 8px}
+.m-h h3{font-size:18px;font-weight:700}
+.m-h .sub{font-size:12px;color:var(--ink-3)}
+.m-x{min-width:36px;min-height:36px;border-radius:999px;background:var(--surface-2)}
+.m-b{padding:2px 18px 16px}
+.opts{display:flex;gap:7px;flex-wrap:wrap;margin:8px 0 14px}
+.opt{min-height:42px;min-width:44px;border-radius:999px;padding:6px 14px;font-size:14px;font-weight:600;
+  background:var(--surface-2);color:var(--ink-2);border:1.5px solid transparent}
+.opt.on{background:var(--brand-wash);color:var(--ink);border-color:var(--brand)}
+.btn{min-height:46px;border-radius:999px;font-size:15px;font-weight:600;padding:0 20px;width:100%;
+  display:inline-flex;align-items:center;justify-content:center;transition:transform .1s;margin-bottom:8px}
+.btn:active{transform:scale(.97)}
+.btn-p{background:var(--brand);color:var(--brand-ink)}
+.btn-s{background:var(--surface-2)}
+.toasts{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:200}
+.toast{background:var(--red);color:#fff;border-radius:999px;padding:9px 18px;font-size:13px;font-weight:600}
+@media (max-width:820px){.room{aspect-ratio:4/3;max-height:none}}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="logo">R</div>
+  <div class="t"><b>Tables · Osteria Nove</b><small>RestaurantOS floor · live from the server</small></div>
+  <nav class="nav"><a href="/pos">Service</a><a href="/tables" class="on">Tables</a><a href="/kds">Kitchen</a></nav>
+</header>
+<div class="wrap">
+  <div class="tabs" id="tabs"></div>
+  <div id="roomWrap"></div>
+  <div class="legend">
+    <span class="lg"><span class="sw" style="border-color:var(--line)"></span>Open</span>
+    <span class="lg"><span class="sw" style="border-color:var(--info)"></span>Seated</span>
+    <span class="lg"><span class="sw" style="border-color:var(--green)"></span>Paying</span>
+    <span class="lg"><span class="sw" style="border-color:var(--red)"></span>Kitchen late</span>
+  </div>
+  <p class="note">Tap an open table to seat a party (opens a real check on the server), or an occupied one to jump to its check in Service.</p>
+</div>
+
+<div class="ov" id="ovSeat"><div class="modal">
+  <div class="m-h"><div><h3 id="seatTitle">Seat party</h3><div class="sub" id="seatSub"></div></div><button class="m-x" onclick="document.getElementById('ovSeat').classList.remove('open')">✕</button></div>
+  <div class="m-b">
+    <div style="font-size:12.5px;font-weight:700;margin-top:6px">Covers</div>
+    <div class="opts" id="seatCovers"></div>
+    <button class="btn btn-p" id="seatGo">Seat and open check</button>
+  </div>
+</div></div>
+
+<div class="toasts" id="toasts"></div>
+
+<script>
+const $=s=>document.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const money=n=>"$"+(n/100).toFixed(2);
+const DEVICE="floor-"+(localStorage.getItem("ros.floor")||(()=>{const d=crypto.randomUUID().slice(0,8);localStorage.setItem("ros.floor",d);return d;})());
+let tables=[],area=null,seatTarget=null;
+
+function toast(m){const el=document.createElement("div");el.className="toast";el.textContent=m;
+  $("#toasts").appendChild(el);setTimeout(()=>el.remove(),3000);}
+
+function ago(iso){const m=Math.max(0,Math.round((Date.now()-Date.parse(iso))/60000));return m<1?"now":m+"m";}
+
+async function refresh(){
+  tables=(await fetch("/v1/floor").then(r=>r.json())).tables;
+  if(!area)area=tables[0]&&tables[0].area;
+  render();
+}
+
+function statusOf(t){
+  if(!t.check)return"open";
+  if(t.kitchenLate)return"late";
+  if(t.check.status==="paid"||t.check.status==="partially_paid")return"paying";
+  return"seated";
+}
+
+function render(){
+  const areas=[...new Set(tables.map(t=>t.area))];
+  $("#tabs").innerHTML=areas.map(a=>`<button class="tab ${a===area?"on":""}" data-a="${esc(a)}">${esc(a)}</button>`).join("");
+  document.querySelectorAll("[data-a]").forEach(b=>b.onclick=()=>{area=b.dataset.a;render();});
+  const list=tables.filter(t=>t.area===area);
+  $("#roomWrap").innerHTML=`<div class="room">`+list.map(t=>{
+    const st=statusOf(t);
+    const short=t.name.replace("Table ","T").replace("Terrazza ","T").replace("Bar ","B");
+    return `<button class="tbl ${st} ${t.shape}" data-t="${esc(t.name)}"
+      style="left:${t.x}%;top:${t.y}%;width:${t.w}%;height:${t.h}%" title="${esc(t.name)}">
+      <span class="n">${esc(short)}</span>
+      <span class="m">${t.check?t.check.covers+" cov":t.seats+" seats"}</span>
+      ${t.check?`<span class="d">${ago(t.check.openedAt)} · ${money(t.check.dueMinor)}</span>`:""}</button>`;
+  }).join("")+`</div>`;
+  document.querySelectorAll("[data-t]").forEach(b=>b.onclick=()=>{
+    const t=tables.find(x=>x.name===b.dataset.t);
+    if(t.check){location.href="/pos?check="+t.check.id;return;}
+    seatTarget=t;
+    $("#seatTitle").textContent=t.name;
+    $("#seatSub").textContent=t.seats+" seats · "+t.area;
+    $("#seatCovers").innerHTML=Array.from({length:Math.max(t.seats,4)},(_,i)=>i+1).map(n=>
+      `<button class="opt ${n===Math.min(2,t.seats)?"on":""}" data-n="${n}">${n}</button>`).join("");
+    document.querySelectorAll("#seatCovers .opt").forEach(o=>o.onclick=()=>{
+      document.querySelectorAll("#seatCovers .opt").forEach(x=>x.classList.toggle("on",x===o));});
+    $("#ovSeat").classList.add("open");
+  });
+}
+
+$("#seatGo").onclick=async()=>{
+  const covers=+document.querySelector("#seatCovers .opt.on").dataset.n;
+  const res=await fetch("/v1/checks",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({operationId:crypto.randomUUID(),deviceId:DEVICE,tableName:seatTarget.name,covers})});
+  const data=await res.json();
+  if(!res.ok){toast(data.reason||"refused");return;}
+  location.href="/pos?check="+data.check.id;
+};
+
+function setViewportH(){document.documentElement.style.setProperty("--vph",window.innerHeight+"px");}
+addEventListener("resize",setViewportH);setViewportH();
+refresh().catch(()=>toast("Cannot reach the server"));
+setInterval(()=>refresh().catch(()=>{}),5000);
+</script>
+</body>
+</html>
