@@ -70,6 +70,7 @@ button:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
 .chip.red{color:var(--red);background:var(--red-wash);border-color:var(--red-line)}
 .tki{display:flex;gap:9px;align-items:flex-start;padding:7px 0;border-bottom:1px solid var(--line-subtle);width:100%;text-align:left}
 .tki:active{background:var(--surface-2)}
+@media (hover:hover){.tki:not(.voided):hover{background:var(--surface-2)}}
 .tki .box{width:24px;height:24px;flex-shrink:0;border-radius:8px;border:2px solid var(--line);color:transparent;
   display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;margin-top:1px}
 .tki.done .box{background:var(--green-wash);border-color:var(--green-line);color:var(--green)}

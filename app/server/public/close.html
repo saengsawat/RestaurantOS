@@ -91,6 +91,7 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--brand);outline-
 .btn{min-height:44px;border-radius:999px;font-size:14px;font-weight:600;padding:0 18px;
   display:inline-flex;align-items:center;justify-content:center;transition:transform .1s}
 .btn:active{transform:scale(.97)}
+@media (hover:hover){.btn:hover{filter:brightness(.96)}}
 .btn-p{background:var(--brand);color:var(--brand-ink)}
 .btn-s{background:var(--surface-2)}
 .btn-sm{min-height:38px;font-size:13px;padding:0 13px}
@@ -132,8 +133,14 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--brand);outline-
   <div class="drawers" id="drawers"></div>
   <div style="margin-top:10px"><button class="btn btn-s" id="btnOpenDrawer">+ Open a drawer</button></div>
 
+  <div class="sec-h">Team · clock-outs and declared tips</div>
+  <div class="blk" id="team"></div>
+
   <div class="sec-h">Before you can close</div>
   <div class="blk" id="blockers"></div>
+
+  <div class="sec-h">Closed checks today</div>
+  <div class="blk" id="closedList"></div>
 </div>
 
 <div class="ov" id="ovForm"><div class="modal">
@@ -174,7 +181,8 @@ function hhmm(iso){return new Date(iso).toLocaleTimeString([], {hour:"numeric",m
 
 function render(){
   const d=day,s=d.summary,closed=d.status==="closed";
-  const clear=!d.blockers.openChecks.length&&!d.blockers.openDrawers.length&&!d.blockers.offlinePayments;
+  const clear=!d.blockers.openChecks.length&&!d.blockers.openDrawers.length&&!d.blockers.offlinePayments
+    &&!(d.blockers.openShifts||[]).length;
 
   $("#banner").className="banner"+(closed?" closed":"");
   $("#banner").innerHTML=`<b>Business day ${esc(d.serviceDate)}</b>
@@ -197,7 +205,8 @@ function render(){
     ["Total",money(s.totalMinor),`${s.checksClosed} checks · ${s.covers} covers`],
     ["Card",money(s.paidCardMinor),""],
     ["Cash",money(s.paidCashMinor),""],
-    ["Tips",money(s.tipsMinor),"reconciled at clock-out"],
+    ["Card tips",money(s.tipsMinor),"from payments"],
+    ["Declared cash tips",money(s.declaredTipsMinor||0),"from clock-outs"],
     ["Voids",s.voidCount+(s.voidCount?` (${money(s.voidValueMinor)})`:""),s.voidCount?"all with reason + approver":""],
   ].map(([k,v,sub])=>`<div class="card"><div class="k">${k}</div><div class="v num">${v}</div>${sub?`<div class="s">${sub}</div>`:""}</div>`).join("");
 
@@ -239,13 +248,40 @@ function render(){
       const os=r.session.overShortMinor;
       toast(os===0?"Drawer balanced to the cent":(os>0?"Over ":"Short ")+money(Math.abs(os)),os===0?"":"err");}));
 
+  /* team: open shifts clock out here (with declared tips); closed ones show tips */
+  const openShifts=(d.shifts||[]).filter(s=>!s.clockOut);
+  const doneShifts=(d.shifts||[]).filter(s=>s.clockOut);
+  $("#team").innerHTML=(openShifts.map(s=>
+    `<div class="row"><span><b>${esc(s.employeeName)}</b> · clocked in ${hhmm(s.clockIn)}</span>
+     <button class="btn btn-s btn-sm" data-ck="${esc(s.employeeName)}">Clock out + tips</button></div>`).join("")
+    +doneShifts.map(s=>
+    `<div class="row"><span>${esc(s.employeeName)} · ${hhmm(s.clockIn)}–${hhmm(s.clockOut)}</span>
+     <span>declared tips <b class="num">${money(s.declaredTipsMinor||0)}</b></span></div>`).join(""))
+    ||`<div class="row"><span>Nobody has clocked in today. Signing in on the POS clocks you in.</span></div>`;
+  document.querySelectorAll("[data-ck]").forEach(b=>b.onclick=()=>form("Clock out "+b.dataset.ck,"Declared tips are recorded on the shift; their PIN confirms it",[
+    {id:"tips",label:"Declared cash tips ($)",ph:"0.00",num:true},
+    {id:"pin",label:esc(b.dataset.ck)+"'s PIN",ph:"••••",num:true}],"Clock out",async v=>{
+    await cmd("/v1/shifts/clockout",{pin:v.pin,declaredTipsMinor:Math.max(0,cents(v.tips))});
+    toast(b.dataset.ck+" clocked out");}));
+
   $("#blockers").innerHTML=(()=>{
     const b=d.blockers,rows=[];
     b.openChecks.forEach(c=>rows.push(`<div class="row"><span>${esc(c.tableName)} · check #${c.checkNo} · ${esc(c.status.replace("_"," "))} · due ${money(c.dueMinor)}</span><a href="/pos?check=${c.id}">Open in Service ▸</a></div>`));
     b.openDrawers.forEach(n=>rows.push(`<div class="row"><span>${esc(n)} is still open</span><span>count + close it above</span></div>`));
     if(b.offlinePayments)rows.push(`<div class="row"><span>${b.offlinePayments} offline card payment(s) pending upload</span><span>they must authorize first</span></div>`);
-    return rows.length?rows.join(""):`<div class="allclear">All clear. Every check settled, every drawer counted.</div>`;
+    (b.openShifts||[]).forEach(n=>rows.push(`<div class="row"><span>${esc(n)} is still clocked in</span><span>clock out + declare tips above</span></div>`));
+    return rows.length?rows.join(""):`<div class="allclear">All clear. Every check settled, every drawer counted, everyone clocked out.</div>`;
   })();
+
+  /* closed checks today: the manager's reopen door */
+  $("#closedList").innerHTML=(d.closedChecks||[]).length?(d.closedChecks||[]).map(c=>
+    `<div class="row"><span>${esc(c.tableName)} · check #${c.checkNo} · <b class="num">${money(c.totalMinor)}</b></span>
+     <button class="btn btn-s btn-sm" data-ro="${c.id}">Reopen (manager)</button></div>`).join("")
+    :`<div class="row"><span>No closed checks yet today.</span></div>`;
+  document.querySelectorAll("[data-ro]").forEach(b=>b.onclick=()=>form("Reopen check","The check returns to Service for corrections; everything is audited",[
+    {id:"pin",label:"Manager PIN (demo manager: Marco B. · 1122)",ph:"••••",num:true}],"Reopen check",async v=>{
+    await cmd(`/v1/checks/${b.dataset.ro}/reopen`,{managerPin:v.pin});
+    toast("Reopened; it is back in Service");}));
 }
 
 function cents(v){const n=Math.round(parseFloat(v||"0")*100);return Number.isFinite(n)?n:0;}

@@ -45,9 +45,13 @@ The authoritative ticket list (master plan §5.5). Currently tracking Phase 0 wo
 | E14 cash management | Drawer sessions on `/close`: open with counted float (one open session per drawer, like `idx_drawer_one_open`), cash payments refuse without an open till and land as `sale` events, pay-in free / pay-out + drop need a manager, count-and-close freezes expected + over/short forever. Cash events append-only into `cash_event` | **Done** 2026-08-18 |
 | E16 business-day close | `/close` page: live day summary (net, tax, tips, card/cash, voids), blockers list (open checks with jump links, open drawers, offline payments), manager-gated close that seals the day, reopen for corrections. Business day = server-local date of opening (`serviceDateOf`); rollover hour is pilot config. New checks refuse while the day is closed | **Done** 2026-08-18 |
 | E15 staff identity | Real PIN sessions and roles: hashed PINs on `employee`, roles seeded (`role`, `employee_role`), manager approvals now verify the PIN belongs to an actual manager (a server's PIN refuses with "not recognized as a manager"). Sign in per device (`/v1/session`); payments, voids, discounts, drawers, and the sync journal record WHO (taken_by, void_approved_by, applied_by/approved_by, opened_by/closed_by, sync_operation.employee_id). Demo roster: Gia R. server 2468, Marco B. manager 1122, Sofia T. server 3579. Sign-in UI on POS header | **Done** 2026-08-19 |
-| Next | Payment provider adapter (E13, needs ADR-3 with Matt), reopen-check UI, receipts/printing (E9?) | Queued |
+| Lock screen | `/` is now the app entry: a PIN-pad lock screen (POS pattern: the device is trusted, the person identifies by PIN). Sign-in creates the device session and lands on Service; sign-out and clock-out return to it. API reference moved to `/api` | **Done** 2026-08-20 |
+| E9 slice: receipts | Guest receipt from the ⋯ menu on any check: itemized with modifiers, voids struck (visible by design), discounts, tax, payments with tips and pending-upload honesty, print via `@media print`. Follow-ups: per-seat split receipts, real printer integration | **Done** 2026-08-20 |
+| Reopen check | `POST /v1/checks/:id/reopen` (manager PIN) through the state machine's reopen transition; Close page lists today's closed checks with a Reopen button; the check returns to Service | **Done** 2026-08-20 |
+| E14 slice: shifts + tips | Sign-in auto-clocks-in (shift rows persisted); clock-out declares cash tips confirmed by the employee's own PIN (POS who-menu or Close page Team section); open shifts BLOCK the day close; declared tips reported on /close | **Done** 2026-08-20 |
+| Next | Payment provider adapter (E13, needs ADR-3 with Matt), per-seat receipts, relational menu editor (E5-full) | Queued |
 
-Suite total: 81 tests green (54 domain + 27 server incl. PostgreSQL integration).
+Suite total: 83 tests green (54 domain + 29 server incl. PostgreSQL integration).
 
 ## Flagship mockup: done since first cut
 

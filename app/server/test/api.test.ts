@@ -407,6 +407,72 @@ describe("employees, PINs, and sessions (E15)", () => {
   });
 });
 
+describe("reopen, clock-out, and tips (E14/E15 deepening)", () => {
+  it("a closed check reopens with a manager, takes new items, and closes again", async () => {
+    const app = buildServer();
+    const check = await openCheck(app);
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items`,
+      payload: { ...ENV(1), itemId: "acqua", quantity: 1, seatNo: 1 } });
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/send`, payload: ENV(2) });
+    const due1 = (await app.inject({ method: "GET", url: `/v1/checks/${check.id}` })).json().check.totals.dueMinor as number;
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/payments`, payload: { ...ENV(3), method: "card", amountMinor: due1 } });
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/close`, payload: ENV(4) });
+
+    // a server's PIN cannot reopen; a manager's can
+    const noAuth = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/reopen`,
+      payload: { ...ENV(5), managerPin: "2468" } });
+    expect(noAuth.statusCode).toBe(422);
+    const reopened = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/reopen`,
+      payload: { ...ENV(6), managerPin: "1122" } });
+    expect(reopened.statusCode).toBe(200);
+    expect(reopened.json().check.status).toBe("reopened");
+
+    // forgot the tiramisu: add it, fire it, settle the difference, close again
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items`,
+      payload: { ...ENV(7), itemId: "tiramisu", quantity: 1, seatNo: 1 } });
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/send`, payload: ENV(8) });
+    const due2 = (await app.inject({ method: "GET", url: `/v1/checks/${check.id}` })).json().check.totals.dueMinor as number;
+    expect(due2).toBeGreaterThan(0);
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/payments`, payload: { ...ENV(9), method: "card", amountMinor: due2 } });
+    const closed = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/close`, payload: ENV(10) });
+    expect(closed.statusCode).toBe(200);
+  });
+
+  it("sign-in clocks you in; the day cannot close until everyone clocks out with tips declared", async () => {
+    const app = buildServer();
+    await app.inject({ method: "POST", url: "/v1/session", payload: { deviceId: "t9", pin: "2468" } }); // Gia clocks in
+
+    const day1 = (await app.inject({ method: "GET", url: "/v1/day" })).json();
+    expect(day1.blockers.openShifts).toContain("Gia R.");
+    expect(day1.shifts.find((s: { employeeName: string }) => s.employeeName === "Gia R.").clockOut).toBeUndefined();
+
+    const blocked = await app.inject({ method: "POST", url: "/v1/day/close", payload: { ...ENV(1), managerPin: "1122" } });
+    expect(blocked.statusCode).toBe(422);
+    expect(blocked.json().reason).toMatch(/clocked in/);
+
+    // wrong pin cannot clock out; her own pin declares her tips
+    const wrong = await app.inject({ method: "POST", url: "/v1/shifts/clockout",
+      payload: { ...ENV(2), pin: "9999", declaredTipsMinor: 4200 } });
+    expect(wrong.statusCode).toBe(422);
+    const out = await app.inject({ method: "POST", url: "/v1/shifts/clockout",
+      payload: { ...ENV(3), pin: "2468", declaredTipsMinor: 4200 } });
+    expect(out.statusCode).toBe(200);
+
+    const day2 = (await app.inject({ method: "GET", url: "/v1/day" })).json();
+    expect(day2.blockers.openShifts).toHaveLength(0);
+    expect(day2.summary.declaredTipsMinor).toBe(4200);
+
+    // a second clock-out is refused: the shift is settled
+    const again = await app.inject({ method: "POST", url: "/v1/shifts/clockout",
+      payload: { ...ENV(4), pin: "2468" } });
+    expect(again.statusCode).toBe(422);
+
+    // now the day closes
+    const done = await app.inject({ method: "POST", url: "/v1/day/close", payload: { ...ENV(5), managerPin: "1122" } });
+    expect(done.statusCode).toBe(200);
+  });
+});
+
 describe("transfer and merge (E7)", () => {
   it("a transferred check takes its kitchen cards along and frees the old table", async () => {
     const app = buildServer();
@@ -717,9 +783,13 @@ describe("reads", () => {
     const app = buildServer();
     const menu = await app.inject({ method: "GET", url: "/v1/menu" });
     expect(menu.json().items.length).toBeGreaterThan(5);
-    const landing = await app.inject({ method: "GET", url: "/" });
-    expect(landing.statusCode).toBe(200);
-    expect(landing.body).toContain("RestaurantOS");
+    // "/" is the lock screen (PIN pad); the API reference moved to /api
+    const lock = await app.inject({ method: "GET", url: "/" });
+    expect(lock.statusCode).toBe(200);
+    expect(lock.body).toContain("enter your PIN");
+    const api = await app.inject({ method: "GET", url: "/api" });
+    expect(api.statusCode).toBe(200);
+    expect(api.body).toContain("RestaurantOS");
   });
 
   it("serves the POS web client at /pos", async () => {

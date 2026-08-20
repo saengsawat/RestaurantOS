@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>RestaurantOS · Osteria Nove</title>
+<style>
+:root{
+  color-scheme:light;
+  --brand:#9fe870;--brand-ink:#163300;--brand-wash:rgba(159,232,112,.18);
+  --bg:#f2f1ec;--panel:#fff;--surface:#fff;--surface-2:#e9ebe4;
+  --ink:#0e0f0c;--ink-2:#3f423d;--ink-3:#5f635c;--ink-4:#787c74;
+  --red:#c22f35;--red-wash:rgba(194,47,53,.09);--red-line:rgba(194,47,53,.32);
+  --green:#116e3b;--green-wash:rgba(17,110,59,.10);--green-line:rgba(17,110,59,.32);
+  --amber:#a16207;--amber-wash:rgba(161,98,7,.10);--amber-line:rgba(161,98,7,.30);
+  --line:rgba(14,15,12,.12);--line-subtle:rgba(14,15,12,.06);
+  --ring:0 0 0 1px rgba(14,15,12,.12);--shadow-lg:0 24px 60px rgba(14,15,12,.18);
+  --font:"Inter",ui-sans-serif,system-ui,sans-serif;--mono:ui-monospace,Consolas,monospace;
+  --vph:100vh;
+}
+@supports (height:100dvh){:root{--vph:100dvh}}
+@media (prefers-color-scheme:dark){:root{
+  color-scheme:dark;
+  --bg:#0e0f0c;--panel:#161814;--surface:#1d201b;--surface-2:#282c26;
+  --ink:#f2f1ec;--ink-2:#c9cdc4;--ink-3:#9a9e94;--ink-4:#83877d;
+  --red:#f0555a;--red-wash:rgba(240,85,90,.12);--red-line:rgba(240,85,90,.36);
+  --green:#34d399;--green-wash:rgba(52,211,153,.11);--green-line:rgba(52,211,153,.34);
+  --amber:#e3b341;--amber-wash:rgba(227,179,65,.12);--amber-line:rgba(227,179,65,.34);
+  --line:rgba(242,241,236,.10);--line-subtle:rgba(242,241,236,.05);
+  --ring:0 0 0 1px rgba(242,241,236,.10);--shadow-lg:0 24px 60px rgba(0,0,0,.5);
+}}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:var(--vph)}
+body{background:
+    radial-gradient(1100px 500px at 85% -10%, var(--brand-wash), transparent 60%),
+    radial-gradient(900px 500px at -10% 110%, var(--brand-wash), transparent 55%),
+    var(--bg);
+  color:var(--ink);font:15px/1.45 var(--font);-webkit-font-smoothing:antialiased;
+  display:flex;align-items:center;justify-content:center;user-select:none;overflow:hidden;padding:18px}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+button:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+
+.card{width:min(430px,100%);background:var(--surface);border-radius:24px;box-shadow:var(--ring),var(--shadow-lg);
+  padding:34px 30px 26px;text-align:center;animation:rise .3s ease-out}
+@keyframes rise{from{transform:translateY(12px)}to{transform:none}}
+.logo{width:64px;height:64px;border-radius:999px;background:var(--brand);color:var(--brand-ink);
+  display:inline-flex;align-items:center;justify-content:center;font-weight:800;font-size:30px;margin-bottom:14px}
+h1{font-size:24px;letter-spacing:-.02em}
+.sub{font-size:13px;color:var(--ink-3);margin-top:3px}
+.badge{display:inline-block;margin-top:10px;font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--amber);background:var(--amber-wash);border:1px solid var(--amber-line);border-radius:999px;padding:3px 12px}
+
+.who{min-height:20px;font-size:13.5px;font-weight:600;color:var(--ink-2);margin-top:18px}
+.pin-dots{display:flex;gap:14px;justify-content:center;padding:14px 0 6px}
+.pin-dot{width:13px;height:13px;border-radius:50%;background:var(--surface-2);box-shadow:var(--ring);transition:background .12s}
+.pin-dot.on{background:var(--ink)}
+.dots-wrap.err{animation:shake .3s}
+@keyframes shake{0%,100%{transform:none}25%{transform:translateX(-7px)}75%{transform:translateX(7px)}}
+.pad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;max-width:270px;margin:10px auto 4px}
+.key{min-height:60px;border-radius:16px;background:var(--surface-2);font-size:21px;font-weight:700;transition:transform .08s}
+.key:active{transform:scale(.93);background:var(--brand-wash)}
+.key.ghost{background:transparent;box-shadow:none;font-size:17px;color:var(--ink-3)}
+
+.staff{margin-top:16px;border-top:1px solid var(--line-subtle);padding-top:13px}
+.staff-t{font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-4);margin-bottom:8px}
+.staff-row{display:flex;gap:7px;flex-wrap:wrap;justify-content:center}
+.chip{min-height:38px;border-radius:999px;padding:6px 13px;font-size:12.5px;font-weight:600;
+  background:var(--surface-2);color:var(--ink-2);display:inline-flex;align-items:center;gap:6px}
+.chip:active{background:var(--brand-wash)}
+.chip small{color:var(--ink-4);font-family:var(--mono)}
+.note{margin-top:14px;font-size:11px;color:var(--ink-4)}
+.note a{color:var(--ink-3)}
+@media (max-height:700px){.card{padding:22px 24px 18px}.logo{width:48px;height:48px;font-size:24px;margin-bottom:8px}.key{min-height:50px}}
+</style>
+</head>
+<body>
+<main class="card">
+  <div class="logo">R</div>
+  <h1>Osteria Nove</h1>
+  <div class="sub">RestaurantOS · enter your PIN to start service</div>
+  <div class="badge">Concept prototype · demo data only</div>
+
+  <div class="who" id="who">&nbsp;</div>
+  <div class="dots-wrap" id="dotsWrap"><div class="pin-dots" id="dots"></div></div>
+  <div class="pad" id="pad"></div>
+
+  <div class="staff">
+    <div class="staff-t">Demo staff · tap to fill the PIN</div>
+    <div class="staff-row" id="staff"></div>
+  </div>
+  <p class="note">Managers approve voids, discounts, and the day close with their PIN. <a href="/api">API reference</a></p>
+</main>
+
+<script>
+/* The lock screen (E15): a POS boots to a PIN pad, not a password form.
+   The device is trusted; the person identifies with a PIN. Sign-in creates
+   the device session the POS pages read, then lands on Service. */
+const $=s=>document.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const DEVICE=(()=>{try{let d=localStorage.getItem("ros.device");if(!d){d="web-"+crypto.randomUUID().slice(0,8);localStorage.setItem("ros.device",d);}return d;}catch(_){return "web-anon";}})();
+let buf="";
+
+function renderDots(){
+  $("#dots").innerHTML=[0,1,2,3].map(i=>`<span class="pin-dot ${i<buf.length?"on":""}"></span>`).join("");
+}
+
+async function submit(){
+  const res=await fetch("/v1/session",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({deviceId:DEVICE,pin:buf})});
+  if(res.ok){
+    const emp=(await res.json()).employee;
+    $("#who").textContent="Welcome, "+emp.name;
+    setTimeout(()=>{location.href="/pos";},350);
+    return;
+  }
+  $("#who").textContent="PIN not recognized";
+  const w=$("#dotsWrap");w.classList.remove("err");void w.offsetWidth;w.classList.add("err");
+  buf="";renderDots();
+}
+
+function press(k){
+  if(k==="⌫"){buf=buf.slice(0,-1);renderDots();return;}
+  if(buf.length>=4)return;
+  buf+=k;renderDots();
+  if(buf.length===4)submit();
+}
+
+$("#pad").innerHTML=["1","2","3","4","5","6","7","8","9","","0","⌫"].map(k=>
+  k===""?`<span></span>`:`<button class="key ${k==="⌫"?"ghost":""}" data-k="${k}">${k}</button>`).join("");
+document.querySelectorAll("[data-k]").forEach(b=>b.onclick=()=>press(b.dataset.k));
+addEventListener("keydown",e=>{
+  if(/^[0-9]$/.test(e.key))press(e.key);
+  if(e.key==="Backspace")press("⌫");
+});
+
+fetch("/v1/staff").then(r=>r.json()).then(d=>{
+  $("#staff").innerHTML=d.staff.map(s=>
+    `<button class="chip" data-p="${esc(s.demoPin)}">${esc(s.name)} <small>${esc(s.demoPin)}</small></button>`).join("");
+  document.querySelectorAll("[data-p]").forEach(b=>b.onclick=()=>{buf=b.dataset.p;renderDots();submit();});
+}).catch(()=>{});
+
+/* already signed in on this device? straight to service */
+fetch("/v1/session?deviceId="+encodeURIComponent(DEVICE)).then(r=>r.json()).then(d=>{
+  if(d.employee){$("#who").textContent=d.employee.name+" is signed in here";}
+}).catch(()=>{});
+
+renderDots();
+function setViewportH(){document.documentElement.style.setProperty("--vph",window.innerHeight+"px");}
+addEventListener("resize",setViewportH);setViewportH();
+</script>
+</body>
+</html>

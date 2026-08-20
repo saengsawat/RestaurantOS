@@ -216,6 +216,20 @@ export interface Store {
 
   /** PIN verification (E15): stores compare HASHES, never plaintext */
   findEmployeeByPin(pin: string): Promise<Employee | undefined>;
+
+  listShifts(): Promise<Shift[]>;
+  putShift(shift: Shift): Promise<void>;
+}
+
+/** One employee working one stretch (E14/E15). Sign-in auto-clocks-in;
+ *  clock-out is explicit because that is where tips get declared. */
+export interface Shift {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  clockIn: string;
+  clockOut?: string;
+  declaredTipsMinor?: number;
 }
 
 /** Osteria Nove's room, seeded into whichever store is active. */

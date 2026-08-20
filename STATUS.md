@@ -11,7 +11,7 @@ Phase 0  Discovery        ████████░░  waiting on Matt sessio
 Phase 1  POS PRD          ██████░░░░  draft v0.1 done, Matt review pending
 Phase 2  Domain + arch    ██████░░░░  schema + domain model done; ADRs frozen on D6
 Phase 3  V1 backlog       ██░░░░░░░░  epic table exists; ticket contracts not yet written
-Phase 4  Build            █████████░  E1-E8, E12, E14-E16 done: five live screens + PostgreSQL (81 tests)
+Phase 4  Build            █████████░  E1-E8, E12, E14-E16 done: lock screen + five screens + PostgreSQL (83 tests)
 Phase 5  Pilot            ░░░░░░░░░░  venue not selected
 Phase 6  Intelligence     ░░░░░░░░░░  by design, after pilot
 ```
@@ -39,18 +39,20 @@ Phases overlap deliberately (decision D13): everything Matt-independent moves; e
 ```powershell
 cd app\server
 npm install    # first time only
-npm run dev    # then open http://localhost:3000/pos
+npm run dev    # then open http://localhost:3000
 ```
+
+The app opens on the **lock screen**: a PIN pad, like a real POS terminal boots to. Enter a staff PIN (below) and it signs the device in, clocks you in, and lands on Service. Sign-out or clock-out locks the terminal again.
 
 **Demo staff (E15):** Gia R. (server, PIN 2468), Marco B. (manager, PIN 1122), Sofia T. (server, 3579). Sign in from the POS header; anything privileged (voids, discounts, pay-outs, day close, menu publish, merges) needs a MANAGER's PIN now, so use Marco's 1122. A server's PIN refuses.
 
 Five live screens, all real commands to the server:
 
-- **/pos** Service: checks rail, table picker from the live floor, modifier modal (required groups, nesting), seats, send, tip/pay (offline simulation), close. Tap a line to void it (reason + manager PIN, audited); the % button applies discounts/comps; the ⋯ button transfers the check to a free table or merges another check into it (manager)
+- **/pos** Service: checks rail, table picker from the live floor, modifier modal (required groups, nesting), seats, send, tip/pay (offline simulation), close. Tap a line to void it (reason + manager PIN, audited); the % button applies discounts/comps; the ⋯ button transfers, merges (manager), or shows the **printable guest receipt**
 - **/tables** Floor: the spatial room per section, live status (open/seated/paying/kitchen-late), tap an open table to seat a party, tap an occupied one to jump to its check. **Edit layout** mode: drag tables to match your real room; each drop saves to the server and shows on every device
 - **/kds** Kitchen: one card per table, New flags, per-item bump, expo-gated Serve, 10-minute recall, cook-together pane. A voided item shows struck-through in red and never blocks Serve
 - **/menu** Menu manager: edit a draft (add/change/remove items), then a manager publish freezes it into the next immutable snapshot version; new orders reprice, ordered lines never move. The live 86 board (instant 86, running counts that auto-86 at zero) needs no publish and shows on POS tiles as "3 left" badges
-- **/close** End of day: this is the lunch+dinner close-out. Open drawers with a counted float, cash payments land in the till (and refuse without one), pay-in/pay-out/drop with reasons, count-and-close freezes over/short, then the manager-gated day close seals the numbers once every check is settled and every drawer counted. Blockers link straight to the offending check
+- **/close** End of day: this is the lunch+dinner close-out. Drawers from counted float to frozen over/short, the Team section (clock out + declared cash tips, confirmed by the employee's own PIN), today's closed checks with a manager Reopen button, and the day close that refuses until every check is settled, every drawer counted, and everyone is clocked out. Blockers link straight to the offending item
 
 Try the two-device demo: `/pos` on a phone, `/kds` on the laptop, fire an order and watch it land.
 
@@ -61,11 +63,11 @@ $env:DATABASE_URL = "postgres://postgres:YOURPASSWORD@localhost:5432/restauranto
 npm run dev
 ```
 
-Domain tests: `cd app\domain && npm test` (54). Server tests incl. a throwaway-PostgreSQL integration: `cd app\server && npm test` (27).
+Domain tests: `cd app\domain && npm test` (54). Server tests incl. a throwaway-PostgreSQL integration: `cd app\server && npm test` (29).
 
 ## In flight
 
-- Next queued: payment provider adapter (E13, wants ADR-3 with Matt), reopen-check UI, receipts. The Matt-independent epic list is now essentially built through; remaining work deepens what exists or waits on decisions.
+- Next queued: payment provider adapter (E13, wants ADR-3 with Matt), per-seat receipts, relational menu editor (E5-full). The Matt-independent epic list is built through; remaining work deepens what exists or waits on decisions.
 
 ## Waiting on Andy
 

@@ -91,8 +91,38 @@ export class Engine {
 
   async signIn(deviceId: string, pin: string): Promise<Employee | undefined> {
     const employee = await this.store.findEmployeeByPin(pin);
-    if (employee) this.sessions.set(deviceId, employee);
+    if (!employee) return undefined;
+    this.sessions.set(deviceId, employee);
+    // first sign-in of the stretch clocks the employee in (E14): sign-out
+    // does NOT clock out, because clock-out is where tips get declared
+    const open = (await this.store.listShifts()).some((s) => s.employeeId === employee.id && !s.clockOut);
+    if (!open) {
+      await this.store.putShift({
+        id: randomUUID(),
+        employeeId: employee.id,
+        employeeName: employee.name,
+        clockIn: new Date().toISOString(),
+      });
+    }
     return employee;
+  }
+
+  /** Clock out with declared cash tips (E14). Identified by the employee's
+   *  own PIN, so nobody declares someone else's tips. */
+  async clockOut(envelope: Envelope, input: { pin: string; declaredTipsMinor?: number }): Promise<CommandOutcome> {
+    const replay = await this.store.opResult(envelope.operationId);
+    if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
+    const employee = await this.store.findEmployeeByPin(input.pin ?? "");
+    if (!employee) return this.remember(envelope, { kind: "rejected", reason: "PIN not recognized" }, "shift", "clockout");
+    const shift = (await this.store.listShifts()).find((s) => s.employeeId === employee.id && !s.clockOut);
+    if (!shift) return this.remember(envelope, { kind: "rejected", reason: `${employee.name} is not clocked in` }, "shift", "clockout");
+    if (input.declaredTipsMinor !== undefined && (!Number.isSafeInteger(input.declaredTipsMinor) || input.declaredTipsMinor < 0)) {
+      return this.remember(envelope, { kind: "rejected", reason: "declaredTipsMinor must be a non-negative integer" }, "shift", shift.id);
+    }
+    shift.clockOut = new Date().toISOString();
+    shift.declaredTipsMinor = input.declaredTipsMinor ?? 0;
+    await this.store.putShift(shift);
+    return this.remember(envelope, { kind: "applied", day: { shift } }, "shift", shift.id);
   }
 
   signOut(deviceId: string): void {
@@ -507,6 +537,20 @@ export class Engine {
     });
   }
 
+  /** Reopen a closed check (manager): the mistake-remedy the state machine
+   *  always allowed, now with a door. The check returns to the floor. */
+  async reopenCheck(envelope: Envelope, checkId: string, input: { managerPin?: string }): Promise<CommandOutcome> {
+    return this.run(envelope, checkId, async (check) => {
+      const approver = await this.manager(input.managerPin);
+      if (!approver) return { kind: "rejected", reason: this.managerRefusal(input.managerPin, "reopening a check") };
+      const r = checkTransition(check.status, { type: "reopen", approved: true });
+      if (!r.ok) return { kind: "rejected", reason: r.reason };
+      check.status = r.next;
+      delete check.closedAt;
+      return { kind: "applied", check: toView(check) };
+    });
+  }
+
   async close(envelope: Envelope, checkId: string): Promise<CommandOutcome> {
     return this.run(envelope, checkId, (check) => {
       if (check.payments.some((p) => p.status === "accepted_offline")) {
@@ -798,11 +842,12 @@ export class Engine {
     }
     const report = await this.dayReport();
     const b = report.blockers;
-    if (b.openChecks.length || b.openDrawers.length || b.offlinePayments) {
+    if (b.openChecks.length || b.openDrawers.length || b.offlinePayments || b.openShifts.length) {
       const parts = [
         b.openChecks.length ? `${b.openChecks.length} open check(s)` : "",
         b.openDrawers.length ? `${b.openDrawers.length} open drawer(s)` : "",
         b.offlinePayments ? `${b.offlinePayments} offline payment(s) pending upload` : "",
+        b.openShifts.length ? `${b.openShifts.length} staff still clocked in` : "",
       ].filter(Boolean).join(", ");
       return this.remember(envelope, { kind: "rejected", reason: `cannot close the day with ${parts}` }, "business_day", date);
     }
@@ -829,10 +874,11 @@ export class Engine {
    *  blocks the close. Everything is computed, nothing stored (schema rule). */
   async dayReport() {
     const date = serviceDate();
-    const [status, checks, sessions] = await Promise.all([
+    const [status, checks, sessions, allShifts] = await Promise.all([
       this.store.dayStatus(date),
       this.store.list(),
       this.store.listDrawerSessions(),
+      this.store.listShifts(),
     ]);
     const todays = checks.filter((c) => serviceDateOf(c.openedAt) === date);
     const closed = todays.filter((c) => c.status === "closed");
@@ -866,15 +912,22 @@ export class Engine {
         ...s,
         expectedSoFarMinor: s.closedAt ? s.expectedMinor : s.openingFloatMinor + s.events.reduce((a, e) => a + e.amountMinor, 0),
       }));
+    const shifts = allShifts.filter((s) => serviceDateOf(s.clockIn) === date || !s.clockOut);
+    const closedToday = checks
+      .filter((c) => c.status === "closed" && serviceDateOf(c.openedAt) === date)
+      .map((c) => ({ id: c.id, tableName: c.tableName, checkNo: c.checkNo, totalMinor: toView(c).totals.totalMinor, closedAt: c.closedAt }));
     return {
       serviceDate: date,
       status,
-      summary,
+      summary: { ...summary, declaredTipsMinor: shifts.reduce((a, s) => a + (s.declaredTipsMinor ?? 0), 0) },
       drawers,
+      shifts,
+      closedChecks: closedToday,
       blockers: {
         openChecks: openChecks.map((c) => ({ id: c.id, tableName: c.tableName, checkNo: c.checkNo, status: c.status, dueMinor: toView(c).totals.dueMinor })),
         openDrawers: sessions.filter((s) => !s.closedAt).map((s) => s.drawerName),
         offlinePayments,
+        openShifts: allShifts.filter((s) => !s.clockOut).map((s) => s.employeeName),
       },
     };
   }

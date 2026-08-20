@@ -15,6 +15,7 @@ const KDS_PAGE = page("kds.html");
 const TABLES_PAGE = page("tables.html");
 const CLOSE_PAGE = page("close.html");
 const MENU_PAGE = page("menu.html");
+const LOCK_PAGE = page("lock.html");
 
 interface EnvelopeBody {
   operationId?: unknown;
@@ -72,7 +73,8 @@ export function buildServer(store: Store = new MemoryStore(), storeName = "memor
   const app = Fastify({ logger: false });
   const engine = new Engine(store);
 
-  app.get("/", async (_req, reply) => reply.type("text/html").send(landingPage()));
+  app.get("/", async (_req, reply) => reply.type("text/html").send(LOCK_PAGE));
+  app.get("/api", async (_req, reply) => reply.type("text/html").send(landingPage()));
   app.get("/pos", async (_req, reply) => reply.type("text/html").send(POS_PAGE));
   app.get("/kds", async (_req, reply) => reply.type("text/html").send(KDS_PAGE));
   app.get("/tables", async (_req, reply) => reply.type("text/html").send(TABLES_PAGE));
@@ -227,6 +229,24 @@ export function buildServer(store: Store = new MemoryStore(), storeName = "memor
     const envelope = readEnvelope((req.body ?? {}) as EnvelopeBody);
     if ("error" in envelope) return reply.code(400).send({ status: "BAD_REQUEST", reason: envelope.error });
     return respond(reply, await engine.close(envelope, id));
+  });
+
+  app.post("/v1/checks/:id/reopen", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = (req.body ?? {}) as EnvelopeBody & { managerPin?: unknown };
+    const envelope = readEnvelope(body);
+    if ("error" in envelope) return reply.code(400).send({ status: "BAD_REQUEST", reason: envelope.error });
+    return respond(reply, await engine.reopenCheck(envelope, id, typeof body.managerPin === "string" ? { managerPin: body.managerPin } : {}));
+  });
+
+  app.post("/v1/shifts/clockout", async (req, reply) => {
+    const body = (req.body ?? {}) as EnvelopeBody & { pin?: unknown; declaredTipsMinor?: unknown };
+    const envelope = readEnvelope(body);
+    if ("error" in envelope) return reply.code(400).send({ status: "BAD_REQUEST", reason: envelope.error });
+    return respond(reply, await engine.clockOut(envelope, {
+      pin: String(body.pin ?? ""),
+      ...(body.declaredTipsMinor !== undefined ? { declaredTipsMinor: Number(body.declaredTipsMinor) } : {}),
+    }));
   });
 
   /* ------------------------------- menu ------------------------------- */

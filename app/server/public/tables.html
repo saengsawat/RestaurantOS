@@ -60,6 +60,7 @@ button:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
 .tbl{position:absolute;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;
   border:2.5px solid;border-radius:14px;padding:3px;transition:transform .1s;min-width:0}
 .tbl:active{transform:scale(.94)}
+@media (hover:hover){.tbl:hover{box-shadow:0 6px 16px rgba(14,15,12,.14)}}
 .tbl.round,.tbl.stool{border-radius:50%}
 .tbl .n{font-size:clamp(11px,1.5vw,15px);font-weight:700;line-height:1.1}
 .tbl .m{font-size:clamp(9px,1.1vw,11.5px);font-weight:600;color:var(--ink-3)}

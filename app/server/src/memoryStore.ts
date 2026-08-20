@@ -11,6 +11,7 @@ import {
   type MenuDraft,
   type MenuSnapshot,
   type OpMeta,
+  type Shift,
   type Store,
 } from "./types.js";
 
@@ -70,4 +71,8 @@ export class MemoryStore implements Store {
     const hit = staffByPinHash(pinHash(pin));
     return hit ? { id: hit.id, name: hit.name, role: hit.role } : undefined;
   }
+
+  private shifts = new Map<string, Shift>();
+  async listShifts() { return [...this.shifts.values()]; }
+  async putShift(shift: Shift) { this.shifts.set(shift.id, shift); }
 }

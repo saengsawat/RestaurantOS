@@ -125,6 +125,8 @@ White (Day) or `--surface` (Night) card, `border-radius: 16px`, ring shadow. Lin
 
 ### KDS ticket
 
+**The KDS is pinned to Night, always.** Every other screen follows the device theme (Day by default, Night via `prefers-color-scheme`), but the kitchen display hard-codes the Night palette: kitchens are bright, hot, glare-heavy rooms read at distance, and a white panel glowing over the pass during evening service is hostile. Founder decision 2026-08-20; do not add a theme toggle to the KDS.
+
 **One card per table, not per fire.** Kitchens think in tables. Each dispatch (a fired course) stacks inside the table's card in fire order with its course name, age, and ticket id; anything fired within the last few minutes carries a `New` chip so the line sees what just landed without a new card appearing on the rail. The underlying dispatch records stay separate and immutable, this is a display projection over them.
 
 Card anatomy: **top border is the status** (4px solid in the state color), wash-tinted header showing the table (mono) and the age of its oldest open dispatch. Items at 16px/600, kitchen reading distance is farther than server reading distance.

@@ -27,6 +27,7 @@ import {
   type MenuDraft,
   type MenuSnapshot,
   type OpMeta,
+  type Shift,
   type Store,
 } from "./types.js";
 
@@ -667,6 +668,43 @@ export class PgStore implements Store {
       name: r.rows[0].display_name as string,
       role: (r.rows[0].role as string).toLowerCase() === "manager" ? "manager" : "server",
     };
+  }
+
+  async putShift(shift: Shift): Promise<void> {
+    const c = await this.pool.connect();
+    try {
+      await c.query("BEGIN");
+      const dayId = await this.ensureBusinessDay(c, serviceDateOf(shift.clockIn));
+      await c.query(
+        `INSERT INTO shift (id, org_id, location_id, business_day_id, employee_id, clock_in, clock_out, declared_tips_minor)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+         ON CONFLICT (id) DO UPDATE SET clock_out = $7, declared_tips_minor = $8`,
+        [shift.id, ORG, LOC, dayId, shift.employeeId, shift.clockIn, shift.clockOut ?? null, shift.declaredTipsMinor ?? null],
+      );
+      await c.query("COMMIT");
+    } catch (err) {
+      await c.query("ROLLBACK");
+      throw err;
+    } finally {
+      c.release();
+    }
+  }
+
+  async listShifts(): Promise<Shift[]> {
+    const r = await this.pool.query(
+      `SELECT s.id, s.employee_id, s.clock_in, s.clock_out, s.declared_tips_minor, e.display_name
+       FROM shift s JOIN employee e ON e.id = s.employee_id
+       WHERE s.location_id = $1 ORDER BY s.clock_in`,
+      [LOC],
+    );
+    return r.rows.map((row) => ({
+      id: row.id as string,
+      employeeId: row.employee_id as string,
+      employeeName: row.display_name as string,
+      clockIn: new Date(row.clock_in as string).toISOString(),
+      ...(row.clock_out ? { clockOut: new Date(row.clock_out as string).toISOString() } : {}),
+      ...(row.declared_tips_minor !== null ? { declaredTipsMinor: Number(row.declared_tips_minor) } : {}),
+    }));
   }
 
   async dayStatus(serviceDate: string): Promise<"open" | "closed"> {

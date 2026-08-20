@@ -78,6 +78,11 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--brand);outline-
 .tile{background:var(--surface);border-radius:12px;box-shadow:var(--ring);min-height:78px;padding:11px 13px;
   display:flex;flex-direction:column;justify-content:space-between;text-align:left;transition:transform .1s}
 .tile:active{transform:scale(.96)}
+@media (hover:hover){
+  .tile{transition:transform .12s,box-shadow .12s}
+  .tile:not(.dead):hover{transform:translateY(-1px);box-shadow:var(--ring),0 8px 20px rgba(14,15,12,.10)}
+  .chk:hover{background:var(--surface-2)}
+}
 .tile .n{display:block;font-size:14px;font-weight:600;line-height:1.25}
 .tile .p{font-size:13px;color:var(--ink-3);font-weight:600;margin-top:6px;display:flex;align-items:center;gap:6px}
 /* stock badge sits IN FLOW on the price row, never absolute (it collides
@@ -156,6 +161,22 @@ button.li:active{background:var(--surface-2)}
 .tip-note{font-size:12px;color:var(--ink-3);margin:6px 0 10px}
 label.ck{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--ink-2);margin:6px 0 10px}
 
+/* guest receipt (E9 slice): a paper-shaped panel; @media print isolates it */
+.paper{background:var(--panel);max-width:320px;margin:0 auto;padding:18px 16px;font-family:var(--mono);font-size:12.5px;line-height:1.5;color:var(--ink);box-shadow:var(--ring);border-radius:8px}
+.paper h4{text-align:center;font-size:15px;letter-spacing:.02em;font-family:var(--font)}
+.paper .ctr{text-align:center;color:var(--ink-3);font-size:11px}
+.paper hr{border:none;border-top:1px dashed var(--line);margin:9px 0}
+.paper .r{display:flex;justify-content:space-between;gap:8px}
+.paper .r .grow{flex:1;min-width:0}
+.paper .sub{color:var(--ink-3);font-size:11px;padding-left:18px}
+.paper .void{text-decoration:line-through;color:var(--ink-4)}
+.paper .big{font-size:14.5px;font-weight:700}
+@media print{
+  body *{visibility:hidden}
+  #printArea,#printArea *{visibility:visible}
+  #printArea{position:absolute;left:0;top:0;width:100%}
+  .paper{box-shadow:none;border-radius:0;max-width:none}
+}
 .toasts{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:200;display:flex;flex-direction:column;gap:8px;align-items:center}
 .toast{background:var(--ink);color:var(--bg);border-radius:999px;padding:9px 18px;font-size:13px;font-weight:600;
   box-shadow:var(--shadow-lg);max-width:min(520px,92vw);text-align:center;animation:rise .18s ease-out}
@@ -236,6 +257,12 @@ label.ck{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--ink-
   <div class="m-h"><div><h3>Payment</h3><div class="sub" id="paySub"></div></div><button class="m-x" data-close="ovPay">✕</button></div>
   <div class="m-b" id="payBody"></div>
   <div class="m-f" id="payFoot"></div>
+</div></div>
+
+<div class="ov" id="ovReceipt"><div class="modal">
+  <div class="m-h"><div><h3>Guest receipt</h3><div class="sub" id="rcSub"></div></div><button class="m-x" data-close="ovReceipt">✕</button></div>
+  <div class="m-b" id="printArea"></div>
+  <div class="m-f"><button class="btn btn-p" onclick="window.print()">Print</button></div>
 </div></div>
 
 <div class="ov" id="ovWho"><div class="modal">
@@ -544,7 +571,8 @@ $("#btnWho").onclick=async()=>{
      <div class="og-h" style="margin-top:10px">PIN</div>
      <input class="fld" id="whoPin" inputmode="numeric" maxlength="4" placeholder="••••">`;
   $("#whoFoot").innerHTML=`<button class="btn btn-p" id="whoGo">Sign in</button>`
-    +(me?`<button class="btn btn-s" id="whoOut" style="margin-left:8px">Sign out</button>`:"");
+    +(me?`<button class="btn btn-s" id="whoClock" style="margin-left:8px">Clock out…</button>
+          <button class="btn btn-s" id="whoOut" style="margin-left:8px">Sign out</button>`:"");
   document.querySelectorAll("[data-pin]").forEach(b=>b.onclick=()=>{$("#whoPin").value=b.dataset.pin;});
   $("#whoGo").onclick=async()=>{
     const res=await fetch("/v1/session",{method:"POST",headers:{"Content-Type":"application/json"},
@@ -556,7 +584,22 @@ $("#btnWho").onclick=async()=>{
   if($("#whoOut"))$("#whoOut").onclick=async()=>{
     await fetch("/v1/session/signout",{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({deviceId:DEVICE})});
-    closeOv("ovWho");toast("Signed out");await loadWho();
+    location.href="/"; // back to the lock screen
+  };
+  if($("#whoClock"))$("#whoClock").onclick=()=>{
+    $("#whoBody").innerHTML=
+      `<div class="og-h">Declared cash tips ($) for ${esc(me.name)}</div>
+       <input class="fld" id="ckTips" inputmode="decimal" placeholder="0.00">
+       <div class="og-h" style="margin-top:10px">Your PIN confirms the declaration</div>
+       <input class="fld" id="ckPin" inputmode="numeric" maxlength="4" placeholder="••••">`;
+    $("#whoFoot").innerHTML=`<button class="btn btn-p" id="ckGo">Clock out</button>`;
+    $("#ckGo").onclick=async()=>{
+      const tips=Math.round(parseFloat($("#ckTips").value||"0")*100);
+      await api("/v1/shifts/clockout",{pin:$("#ckPin").value,declaredTipsMinor:Math.max(0,tips)});
+      await fetch("/v1/session/signout",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({deviceId:DEVICE})});
+      location.href="/"; // clocked out: the terminal locks
+    };
   };
   openOv("ovWho");
 };
@@ -571,7 +614,8 @@ $("#btnMore").onclick=async()=>{
   const floor=(await fetch("/v1/floor").then(r=>r.json())).tables.filter(t=>!t.check);
   const others=state.checks.filter(x=>x.id!==c.id);
   $("#moreBody").innerHTML=
-    `<div class="og-h">Transfer to a free table</div>
+    `<button class="btn btn-s" id="btnReceipt" style="width:100%;margin:4px 0 12px">Guest receipt · print</button>
+     <div class="og-h">Transfer to a free table</div>
      <div class="opts">${floor.map(t=>`<button class="opt" data-tr="${esc(t.name)}">${esc(t.name)}</button>`).join("")||'<span class="md">No free tables right now</span>'}</div>
      <div class="og-h" style="margin-top:10px">Merge another check into this one (manager)</div>
      <div class="opts" id="mgOpts">${others.map(x=>`<button class="opt" data-mg="${x.id}">${esc(x.tableName)} · #${x.checkNo}</button>`).join("")||'<span class="md">No other open checks</span>'}</div>
@@ -580,6 +624,7 @@ $("#btnMore").onclick=async()=>{
        <input class="fld" id="mgPin" inputmode="numeric" maxlength="4" placeholder="••••">
      </div>`;
   $("#moreFoot").style.display="none";
+  $("#btnReceipt").onclick=()=>{closeOv("ovMore");openReceipt();};
   document.querySelectorAll("[data-tr]").forEach(b=>b.onclick=async()=>{
     await api(`/v1/checks/${c.id}/transfer`,{tableName:b.dataset.tr,expectedVersion:c.version});
     closeOv("ovMore");toast("Moved to "+b.dataset.tr,"good");await refresh();
@@ -601,6 +646,44 @@ $("#moreGo").onclick=async()=>{
   toast("Checks merged","good");
   await refresh();
 };
+
+/* ---------- guest receipt (E9 slice) ---------- */
+function openReceipt(){
+  const c=cur();if(!c)return;
+  const now=new Date();
+  const t=c.totals;
+  const lines=c.lines.map(l=>{
+    const mods=describeMods(l.modifiers);
+    const voided=l.status==="voided";
+    return `<div class="r ${voided?"void":""}"><span class="grow">${l.quantity}× ${esc(l.capturedName)}${voided?" (void)":""}</span>
+      <span class="num">${voided?"0.00":((l.unitPriceMinor+l.modifierPriceMinor)*l.quantity/100).toFixed(2)}</span></div>`
+      +(mods?`<div class="sub">${esc(mods)}</div>`:"");
+  }).join("");
+  const pays=c.payments.map(p=>
+    `<div class="r"><span class="grow">${esc(p.method.toUpperCase())}${p.status==="accepted_offline"?" (pending upload)":""}${p.tipMinor?` · tip ${(p.tipMinor/100).toFixed(2)}`:""}</span>
+     <span class="num">-${(p.amountMinor/100).toFixed(2)}</span></div>`).join("");
+  $("#rcSub").textContent=c.tableName+" · check #"+c.checkNo;
+  $("#printArea").innerHTML=`<div class="paper">
+    <h4>Osteria Nove</h4>
+    <div class="ctr">9 Vicolo della Luna · New York</div>
+    <div class="ctr">Concept prototype · demo data · not a fiscal receipt</div>
+    <hr>
+    <div class="r"><span>Check #${c.checkNo} · ${esc(c.tableName)}</span><span>${c.covers} covers</span></div>
+    <div class="r"><span>${now.toLocaleDateString()}</span><span>${now.toLocaleTimeString([],{hour:"numeric",minute:"2-digit"})}</span></div>
+    ${me?`<div class="r"><span>Server</span><span>${esc(me.name)}</span></div>`:""}
+    <hr>
+    ${lines||'<div class="ctr">No items</div>'}
+    <hr>
+    <div class="r"><span>Subtotal</span><span class="num">${(t.subtotalMinor/100).toFixed(2)}</span></div>
+    ${t.discountMinor?`<div class="r"><span>${esc(c.adjustments.map(a=>a.label).join(", ")||"Discount")}</span><span class="num">-${(t.discountMinor/100).toFixed(2)}</span></div>`:""}
+    <div class="r"><span>Tax 8.875%</span><span class="num">${(t.taxMinor/100).toFixed(2)}</span></div>
+    <div class="r big"><span>Total</span><span class="num">${(t.totalMinor/100).toFixed(2)}</span></div>
+    ${pays?`<hr>${pays}<div class="r big"><span>Due</span><span class="num">${(t.dueMinor/100).toFixed(2)}</span></div>`:""}
+    <hr>
+    <div class="ctr">Grazie! · osterianove.example</div>
+  </div>`;
+  openOv("ovReceipt");
+}
 
 /* ---------- void a line (E12): reason + manager approval ---------- */
 let voidLineId=null;
