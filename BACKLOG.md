@@ -49,6 +49,7 @@ The authoritative ticket list (master plan §5.5). Currently tracking Phase 0 wo
 | E9 slice: receipts | Guest receipt from the ⋯ menu on any check: itemized with modifiers, voids struck (visible by design), discounts, tax, payments with tips and pending-upload honesty, print via `@media print`. Follow-ups: per-seat split receipts, real printer integration | **Done** 2026-08-20 |
 | Reopen check | `POST /v1/checks/:id/reopen` (manager PIN) through the state machine's reopen transition; Close page lists today's closed checks with a Reopen button; the check returns to Service | **Done** 2026-08-20 |
 | E14 slice: shifts + tips | Sign-in auto-clocks-in (shift rows persisted); clock-out declares cash tips confirmed by the employee's own PIN (POS who-menu or Close page Team section); open shifts BLOCK the day close; declared tips reported on /close | **Done** 2026-08-20 |
+| E5 fix (founder report) | Live menu items could not be edited or removed (a Beer added without a price was stuck). Every live row now has Edit and Remove, routed through the draft + manager publish (never mutating the live snapshot); rows already removed on the pending draft say so | **Done** 2026-08-20 |
 | Next | Payment provider adapter (E13, needs ADR-3 with Matt), per-seat receipts, relational menu editor (E5-full) | Queued |
 
 Suite total: 83 tests green (54 domain + 29 server incl. PostgreSQL integration).

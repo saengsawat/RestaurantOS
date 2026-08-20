@@ -179,18 +179,33 @@ function render(){
       const a=availOf(i.id);
       const dead=a&&a.is86;
       const counted=a&&a.remaining!==undefined&&a.remaining!==null;
+      const removedOnDraft=d&&!d.items.some(x=>x.id===i.id);
       return `<div class="row ${dead?"dead":""}">
         <span class="nm">${esc(i.name)}<small>${esc(i.station)}${i.modifierGroupIds.length?" · "+i.modifierGroupIds.join(", "):""}</small></span>
         ${dead?'<span class="chip red">86</span>':counted?`<span class="chip ${a.remaining<=3?"amber":"info"}">${a.remaining} left</span>`:""}
+        ${removedOnDraft?'<span class="chip amber">removed on draft</span>':""}
         <span class="pr num">${money(i.priceMinor)}</span>
         <button class="btn btn-s" data-count="${i.id}">Set count</button>
         <button class="btn ${dead?"btn-p":"btn-s"}" data-86="${i.id}" data-on="${dead?0:1}">${dead?"Bring back":"86 it"}</button>
+        ${removedOnDraft?"":`<button class="btn btn-s" data-editlive="${i.id}" title="Edits go to the draft, then publish">Edit</button>
+        <button class="btn btn-s" data-removelive="${i.id}" title="Removal goes to the draft, then publish">Remove</button>`}
       </div>`;
     }).join("")+`</div>`;
   }).join("");
   document.querySelectorAll("[data-86]").forEach(b=>b.onclick=async()=>{
     await cmd("/v1/menu/86",{itemId:b.getAttribute("data-86"),is86:b.dataset.on==="1"});
     toast(b.dataset.on==="1"?"86'd":"Back on the menu");await refresh();});
+  /* live-item fixes route through the draft (immutability rule): the edit
+     or removal lands on the next publish, never on the live snapshot */
+  document.querySelectorAll("[data-editlive]").forEach(b=>b.onclick=()=>{
+    const src=(d&&d.items.find(i=>i.id===b.dataset.editlive))||menu.items.find(i=>i.id===b.dataset.editlive);
+    itemForm(src);
+  });
+  document.querySelectorAll("[data-removelive]").forEach(b=>b.onclick=async()=>{
+    await cmd("/v1/menu/draft/remove",{itemId:b.dataset.removelive});
+    toast("Removed on the draft. Publish to make it live.");
+    await refresh();
+  });
   document.querySelectorAll("[data-count]").forEach(b=>b.onclick=()=>form("Set remaining count","Zero auto-86s; the count runs down as orders land",[
     {id:"n",label:"Portions left",ph:"5"}],"Set count",async v=>{
     await cmd("/v1/menu/86",{itemId:b.dataset.count,remaining:Math.max(0,parseInt(v.n||"0",10)||0),is86:false});
