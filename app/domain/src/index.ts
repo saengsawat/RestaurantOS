@@ -11,6 +11,8 @@ export {
   type CheckTotals,
 } from "./money.js";
 
+export { splitCheck, type SplitPartition, type SplitPortion } from "./split.js";
+
 export { allow, refuse, type TransitionResult } from "./transition.js";
 
 export {

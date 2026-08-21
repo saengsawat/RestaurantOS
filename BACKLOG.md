@@ -50,12 +50,12 @@ The authoritative ticket list (master plan §5.5). Currently tracking Phase 0 wo
 | Reopen check | `POST /v1/checks/:id/reopen` (manager PIN) through the state machine's reopen transition; Close page lists today's closed checks with a Reopen button; the check returns to Service | **Done** 2026-08-20 |
 | E14 slice: shifts + tips | Sign-in auto-clocks-in (shift rows persisted); clock-out declares cash tips confirmed by the employee's own PIN (POS who-menu or Close page Team section); open shifts BLOCK the day close; declared tips reported on /close | **Done** 2026-08-20 |
 | E5 fix (founder report) | Live menu items could not be edited or removed (a Beer added without a price was stuck). Every live row now has Edit and Remove, routed through the draft + manager publish (never mutating the live snapshot); rows already removed on the pending draft say so | **Done** 2026-08-20 |
-| **E11-T1** split domain | Pure `splitCheck` in `app/domain` (even + byLines partitions, allocate-not-recompute, conservation property tests). Contract: `docs/tickets/E11-T1-split-domain.md` | **Ready** · Opus, cross-model review |
+| **E11-T1** split domain | Pure `splitCheck` in `app/domain`: `even` (N ways) and `byLines` (seat or item) partitions. Totals computed once, then every component allocated with the E1 largest-remainder allocators, never recomputed per portion. Conservation, row consistency (total = subtotal - discount + tax), non-negativity and determinism are property-tested; refuses ways < 2, wrong-length or non-dense assignments, byLines on an empty check. Contract: `docs/tickets/E11-T1-split-domain.md` | **Implemented** 2026-08-20 · awaiting cross-model review (Fable) |
 | **E11-T2** split engine/API | Split preview reads + labeled portion payments on the server. Contract: `docs/tickets/E11-T2-split-engine-api.md` | Ready after T1 · Opus, cross-model review |
 | **E11-T3** split POS UI | Pay-modal split flow + per-portion receipts, tokens per DESIGN.md. Contract: `docs/tickets/E11-T3-split-pos-ui.md` | Ready after T2 · Sonnet or Codex (D17) |
 | Next after E11 | Relational menu editor (E5-full). E13 needs ADR-3 with Matt; E9/E10 need D6 | Queued |
 
-Suite total: 83 tests green (54 domain + 29 server incl. PostgreSQL integration).
+Suite total: 99 tests green (70 domain + 29 server incl. PostgreSQL integration).
 
 ## Flagship mockup: done since first cut
 
