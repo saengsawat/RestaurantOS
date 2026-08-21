@@ -161,6 +161,23 @@ button.li:active{background:var(--surface-2)}
 .tip-note{font-size:12px;color:var(--ink-3);margin:6px 0 10px}
 label.ck{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--ink-2);margin:6px 0 10px}
 
+/* split flow (E11): the pay modal's portion cards and the receipt picker.
+   Every amount on a card comes from the server preview; the page formats,
+   it never computes a check amount. */
+.opt.tall{min-height:44px;padding:8px 16px}
+.pcard{display:flex;align-items:center;gap:8px;background:var(--surface);border-radius:12px;
+  box-shadow:var(--ring);padding:12px;margin-bottom:8px}
+.pcard.done{background:var(--surface-2)}
+.pcard .pl{flex:1;min-width:0}
+.pcard .plabel{display:block;font-size:14px;font-weight:600}
+.pcard .pmeta{display:block;font-size:12px;color:var(--ink-3)}
+.pcard .pdue{font-size:15.5px;font-weight:700}
+.pbtn{min-height:44px;border-radius:999px;padding:0 18px;font-size:14px;font-weight:600;
+  background:var(--brand);color:var(--brand-ink);transition:transform .1s}
+.pbtn:active{transform:scale(.97)}
+.pbtn:hover{background:var(--brand-hover)}
+.pbtn:disabled{opacity:.45;cursor:default}
+
 /* guest receipt (E9 slice): a paper-shaped panel; @media print isolates it */
 .paper{background:var(--panel);max-width:320px;margin:0 auto;padding:18px 16px;font-family:var(--mono);font-size:12.5px;line-height:1.5;color:var(--ink);box-shadow:var(--ring);border-radius:8px}
 .paper h4{text-align:center;font-size:15px;letter-spacing:.02em;font-family:var(--font)}
@@ -176,7 +193,11 @@ label.ck{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--ink-
   #printArea,#printArea *{visibility:visible}
   #printArea{position:absolute;left:0;top:0;width:100%}
   .paper{box-shadow:none;border-radius:0;max-width:none}
+  /* the portion picker lives inside the print area so it sits above the
+     paper on screen; it must never reach the printer */
+  .noprint{display:none!important}
 }
+.rcpick{display:flex;gap:8px;flex-wrap:wrap;margin:4px 0 12px}
 .toasts{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:200;display:flex;flex-direction:column;gap:8px;align-items:center}
 .toast{background:var(--ink);color:var(--bg);border-radius:999px;padding:9px 18px;font-size:13px;font-weight:600;
   box-shadow:var(--shadow-lg);max-width:min(520px,92vw);text-align:center;animation:rise .18s ease-out}
@@ -320,7 +341,11 @@ const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"
 const money=n=>"$"+(n/100).toFixed(2);
 const DEVICE=(()=>{try{let d=localStorage.getItem("ros.device");if(!d){d="web-"+crypto.randomUUID().slice(0,8);localStorage.setItem("ros.device",d);}return d;}catch(_){return "web-anon";}})();
 
-const state={menu:null,checks:[],currentId:null,draft:null,pay:null};
+/* state.split is the chosen split MODE only, and it is client-side on purpose:
+   the server stays stateless about how a party decided to divide the check
+   (E11 D18). It remembers {checkId, mode, ways} so the header chip and the
+   receipt picker survive closing the pay modal. */
+const state={menu:null,checks:[],currentId:null,draft:null,pay:null,split:null,receipt:null};
 
 function toast(msg,kind){const el=document.createElement("div");el.className="toast"+(kind?" "+kind:"");
   el.textContent=msg;$("#toasts").appendChild(el);setTimeout(()=>el.remove(),3400);}
@@ -360,10 +385,16 @@ async function refresh(){
   if(wanted&&state.checks.some(c=>c.id===wanted)){state.currentId=wanted;history.replaceState(null,"","/pos");}
   if(state.currentId&&!cur())state.currentId=null;
   if(!state.currentId&&state.checks.length)state.currentId=state.checks[0].id;
+  // a closed or voided check drops off the rail; its split mode goes with it
+  if(state.split&&!state.checks.some(c=>c.id===state.split.checkId))state.split=null;
   renderAll();
 }
 
-function renderAll(){renderRail();renderMenu();renderCheck();}
+function renderAll(){
+  renderRail();renderMenu();renderCheck();
+  // a portion settled on another terminal shows up here on the next poll
+  if($("#ovPay").classList.contains("open"))syncPortions();
+}
 
 function renderRail(){
   $("#railList").innerHTML=state.checks.length?state.checks.map(c=>
@@ -400,10 +431,12 @@ function renderCheck(){
   $("#chNo").textContent="#"+c.checkNo;
   const unsent=c.lines.filter(l=>l.status==="unsent").length;
   const offline=c.payments.filter(p=>p.status==="accepted_offline").length;
+  const sp=splitOf(c.id);
   $("#chTags").innerHTML=`<span class="chip mut">${c.covers} covers</span>
     <span class="chip ${c.status==="paid"?"green":"mut"}">${esc(c.status.replace("_"," "))}</span>
     ${unsent?`<span class="chip info">${unsent} unsent</span>`:""}
     ${offline?`<span class="chip amber">${offline} pending upload</span>`:""}
+    ${sp?`<span class="chip mut">split: ${sp.mode==="even"?"even "+sp.ways:"by seat"}</span>`:""}
     <span class="chip mut">v${c.version}</span>`;
   $("#chBody").innerHTML=c.lines.length?c.lines.map(l=>{
     const mods=describeMods(l.modifiers);
@@ -647,42 +680,83 @@ $("#moreGo").onclick=async()=>{
   await refresh();
 };
 
-/* ---------- guest receipt (E9 slice) ---------- */
+/* ---------- guest receipt (E9 slice, split portions per E11) ---------- */
+const cents=n=>(n/100).toFixed(2);
+
 function openReceipt(){
   const c=cur();if(!c)return;
+  state.receipt={checkId:c.id,label:null,portions:null};
+  renderReceipt();
+  openOv("ovReceipt");
+  // a split in progress means the guests may want one slip each
+  const sp=splitOf(c.id);
+  if(sp)loadPortions(c.id,sp.mode,sp.ways).then(portions=>{
+    if(state.receipt&&state.receipt.checkId===c.id){state.receipt.portions=portions;renderReceipt();}
+  });
+}
+
+function receiptLine(l){
+  const mods=describeMods(l.modifiers);
+  const voided=l.status==="voided";
+  return `<div class="r ${voided?"void":""}"><span class="grow">${l.quantity}× ${esc(l.capturedName)}${voided?" (void)":""}</span>
+    <span class="num">${voided?"0.00":cents((l.unitPriceMinor+l.modifierPriceMinor)*l.quantity)}</span></div>`
+    +(mods?`<div class="sub">${esc(mods)}</div>`:"");
+}
+
+function receiptPayments(pays){
+  return pays.map(p=>
+    `<div class="r"><span class="grow">${esc(p.method.toUpperCase())}${p.status==="accepted_offline"?" (pending upload)":""}${p.tipMinor?` · tip ${cents(p.tipMinor)}`:""}</span>
+     <span class="num">-${cents(p.amountMinor)}</span></div>`).join("");
+}
+
+function renderReceipt(){
+  const c=cur(),r=state.receipt;if(!c||!r)return;
   const now=new Date();
-  const t=c.totals;
-  const lines=c.lines.map(l=>{
-    const mods=describeMods(l.modifiers);
-    const voided=l.status==="voided";
-    return `<div class="r ${voided?"void":""}"><span class="grow">${l.quantity}× ${esc(l.capturedName)}${voided?" (void)":""}</span>
-      <span class="num">${voided?"0.00":((l.unitPriceMinor+l.modifierPriceMinor)*l.quantity/100).toFixed(2)}</span></div>`
-      +(mods?`<div class="sub">${esc(mods)}</div>`:"");
-  }).join("");
-  const pays=c.payments.map(p=>
-    `<div class="r"><span class="grow">${esc(p.method.toUpperCase())}${p.status==="accepted_offline"?" (pending upload)":""}${p.tipMinor?` · tip ${(p.tipMinor/100).toFixed(2)}`:""}</span>
-     <span class="num">-${(p.amountMinor/100).toFixed(2)}</span></div>`).join("");
-  $("#rcSub").textContent=c.tableName+" · check #"+c.checkNo;
-  $("#printArea").innerHTML=`<div class="paper">
+  const portions=r.portions||[];
+  const pt=r.label?portions.find(x=>x.label===r.label):null;
+  // the picker sits inside the print area so it stacks above the paper on
+  // screen, and .noprint keeps it off the paper itself
+  const pick=portions.length?`<div class="noprint rcpick">
+      <button class="opt tall ${r.label?"":"on"}" data-rc="">Whole check</button>
+      ${portions.map(x=>`<button class="opt tall ${r.label===x.label?"on":""}" data-rc="${esc(x.label)}">${esc(x.label)}</button>`).join("")}
+    </div>`:"";
+
+  // amounts are the server's: the whole check's totals, or the portion's
+  const t=pt?pt:c.totals;
+  const pays=pt?c.payments.filter(x=>x.label===pt.label):c.payments;
+  const body=pt
+    ? (pt.seatNos&&pt.seatNos.length
+        ? c.lines.filter(l=>pt.seatNos.includes(l.seatNo)).map(receiptLine).join("")
+          ||'<div class="ctr">No items on this seat</div>'
+        : `<div class="ctr">${esc(pt.label)} of check #${c.checkNo}</div>
+           <div class="ctr">an equal share, not an itemized seat</div>`)
+    : c.lines.map(receiptLine).join("")||'<div class="ctr">No items</div>';
+  const paysHtml=receiptPayments(pays);
+
+  $("#rcSub").textContent=c.tableName+" · check #"+c.checkNo+(pt?" · "+pt.label:"");
+  $("#printArea").innerHTML=pick+`<div class="paper">
     <h4>Osteria Nove</h4>
     <div class="ctr">9 Vicolo della Luna · New York</div>
     <div class="ctr">Concept prototype · demo data · not a fiscal receipt</div>
     <hr>
     <div class="r"><span>Check #${c.checkNo} · ${esc(c.tableName)}</span><span>${c.covers} covers</span></div>
     <div class="r"><span>${now.toLocaleDateString()}</span><span>${now.toLocaleTimeString([],{hour:"numeric",minute:"2-digit"})}</span></div>
+    ${pt?`<div class="r"><span>Portion</span><span>${esc(pt.label)}</span></div>`:""}
     ${me?`<div class="r"><span>Server</span><span>${esc(me.name)}</span></div>`:""}
     <hr>
-    ${lines||'<div class="ctr">No items</div>'}
+    ${body}
     <hr>
-    <div class="r"><span>Subtotal</span><span class="num">${(t.subtotalMinor/100).toFixed(2)}</span></div>
-    ${t.discountMinor?`<div class="r"><span>${esc(c.adjustments.map(a=>a.label).join(", ")||"Discount")}</span><span class="num">-${(t.discountMinor/100).toFixed(2)}</span></div>`:""}
-    <div class="r"><span>Tax 8.875%</span><span class="num">${(t.taxMinor/100).toFixed(2)}</span></div>
-    <div class="r big"><span>Total</span><span class="num">${(t.totalMinor/100).toFixed(2)}</span></div>
-    ${pays?`<hr>${pays}<div class="r big"><span>Due</span><span class="num">${(t.dueMinor/100).toFixed(2)}</span></div>`:""}
+    <div class="r"><span>Subtotal</span><span class="num">${cents(t.subtotalMinor)}</span></div>
+    ${t.discountMinor?`<div class="r"><span>${esc(c.adjustments.map(a=>a.label).join(", ")||"Discount")}</span><span class="num">-${cents(t.discountMinor)}</span></div>`:""}
+    <div class="r"><span>Tax 8.875%</span><span class="num">${cents(t.taxMinor)}</span></div>
+    <div class="r big"><span>Total</span><span class="num">${cents(t.totalMinor)}</span></div>
+    ${paysHtml?`<hr>${paysHtml}<div class="r big"><span>Due</span><span class="num">${cents(pt?pt.dueMinor:c.totals.dueMinor)}</span></div>`:""}
     <hr>
     <div class="ctr">Grazie! · osterianove.example</div>
   </div>`;
-  openOv("ovReceipt");
+  document.querySelectorAll("[data-rc]").forEach(b=>b.onclick=()=>{
+    state.receipt.label=b.dataset.rc||null;renderReceipt();
+  });
 }
 
 /* ---------- void a line (E12): reason + manager approval ---------- */
@@ -742,39 +816,181 @@ $("#btnSend").onclick=async()=>{
   await refresh();
   toast("Fired to kitchen","good");
 };
+/* ---------- split (E11) ----------
+   Portions are a server read: GET /v1/checks/:id/split. Nothing here adds up
+   a check amount. The one number this page computes is the tip the server has
+   no opinion about, exactly as the whole-check flow always has. */
+const SPLIT_TABS=[{k:"whole",t:"Whole check"},{k:"even",t:"Even"},{k:"seat",t:"By seat"}];
+const WAYS_PRESETS=[2,3,4];
+const MAX_WAYS=50; // matches the server's ceiling
+
+function splitOf(checkId){return state.split&&state.split.checkId===checkId?state.split:null;}
+function splitQuery(mode,ways){return mode==="even"?`mode=even&ways=${ways}`:"mode=bySeat";}
+function tipFor(baseMinor,pct){return Math.round(baseMinor*pct/100);}
+
+async function loadPortions(checkId,mode,ways){
+  try{return (await api(`/v1/checks/${checkId}/split?${splitQuery(mode,ways)}`)).portions;}
+  catch(_){return null;}
+}
+
+/** Re-read the portions behind an open pay modal (poll, or after a payment).
+ *  A request that arrives mid-flight is not dropped, it is queued: dropping it
+ *  would leave the cards rendered from a read taken BEFORE the payment landed,
+ *  and a stale card offers Pay on a portion that no longer owes anything. */
+async function syncPortions(){
+  const c=cur(),p=state.pay;
+  if(!c||!p||p.split==="whole")return;
+  if(p.busy){p.stale=true;return;}
+  p.busy=true;
+  do{p.stale=false;p.portions=await loadPortions(c.id,p.split,p.ways);}while(p.stale);
+  p.busy=false;
+  if($("#ovPay").classList.contains("open"))renderPay();
+}
+
 $("#btnPay").onclick=()=>{
   const c=cur();if(!c)return;
   if(c.totals.dueMinor===0&&c.status==="paid"){return closeCheck();}
-  state.pay={tipPct:20,method:"card",offline:false};
+  const sp=splitOf(c.id);
+  state.pay={tipPct:20,method:"card",offline:false,
+    split:sp?sp.mode:"whole",ways:sp?sp.ways:3,customWays:false,portions:null,busy:false};
   renderPay();openOv("ovPay");
+  if(state.pay.split!=="whole")syncPortions();
 };
+
+function splitTabsHtml(p){
+  return `<div class="og"><div class="og-h">Split</div>
+    <div class="opts">${SPLIT_TABS.map(s=>
+      `<button class="opt tall ${p.split===s.k?"on":""}" data-sp="${s.k}">${s.t}</button>`).join("")}</div>
+    ${p.split==="even"?`<div class="opts" style="margin-top:8px">${WAYS_PRESETS.map(w=>
+        `<button class="opt tall ${!p.customWays&&p.ways===w?"on":""}" data-w="${w}">${w} ways</button>`).join("")}
+        <button class="opt tall ${p.customWays?"on":""}" data-w="0">Custom</button></div>
+      ${p.customWays?`<input class="fld num" id="payWays" inputmode="numeric" value="${p.ways}" style="margin-top:8px">`:""}`:""}
+  </div>`;
+}
+
+function portionCardHtml(c,p,pt){
+  const tip=tipFor(pt.dueMinor,p.tipPct);
+  const pays=c.payments.filter(x=>x.label===pt.label);
+  const pending=pays.some(x=>x.status==="accepted_offline");
+  const settled=pt.dueMinor===0&&pt.paidMinor>0;
+  /* A portion can ask for more than the CHECK still owes, once money has come
+     in under another partition's labels (an even share paid, then the party
+     switches to by seat). The server's guard is per label, so it would happily
+     take that payment and overpay the check. The page refuses to offer it, and
+     says what the check actually owes. Both figures come from the server; this
+     compares them, it never computes a new amount. */
+  const blocked=!settled&&pt.dueMinor>c.totals.dueMinor;
+  const seats=pt.seatNos&&pt.seatNos.length?` · seat ${pt.seatNos.join(", ")}`:"";
+  const meta=settled
+    ? `paid ${money(pt.paidMinor)}`
+    : `${pt.paidMinor?`paid ${money(pt.paidMinor)} · `:""}due ${money(pt.dueMinor)}${tip&&!blocked?` + tip ${money(tip)}`:""}`;
+  return `<div class="pcard ${settled||blocked?"done":""}">
+    <span class="pl"><span class="plabel">${esc(pt.label)}${esc(seats)}</span>
+      <span class="pmeta num">${meta}</span></span>
+    ${settled
+      ? `<span class="chip ${pending?"amber":"green"}">${pending?"pending upload":"paid"}</span>`
+      : blocked
+        ? `<span class="chip mut">${c.totals.dueMinor===0?"check settled":"check owes "+money(c.totals.dueMinor)}</span>`
+        : `<span class="pdue num">${money(pt.dueMinor+tip)}</span>
+           <button class="pbtn" data-pay="${esc(pt.label)}">Pay</button>`}
+  </div>`;
+}
+
 function renderPay(){
-  const c=cur(),p=state.pay;if(!c)return;
-  const tip=Math.round(c.totals.dueMinor*p.tipPct/100);
+  const c=cur(),p=state.pay;if(!c||!p)return;
   $("#paySub").textContent=c.tableName+" · check #"+c.checkNo;
-  $("#payBody").innerHTML=
-    `<div style="text-align:center;padding:6px 0 12px">
-       <div style="font-size:11px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.05em;font-weight:700">Due now</div>
-       <div class="num" style="font-size:34px;font-weight:800">${money(c.totals.dueMinor+tip)}</div>
-       <div class="tip-note num">check ${money(c.totals.dueMinor)} + tip ${money(tip)}</div></div>
-     <div class="og"><div class="og-h">Tip</div><div class="opts">${[0,18,20,22,25].map(t=>
-       `<button class="opt ${p.tipPct===t?"on":""}" data-tip="${t}">${t===0?"None":t+"%"}</button>`).join("")}</div></div>
-     <div class="og"><div class="og-h">Method</div><div class="opts">
-       <button class="opt ${p.method==="card"?"on":""}" data-m="card">Card</button>
-       <button class="opt ${p.method==="cash"?"on":""}" data-m="cash">Cash</button></div></div>
-     <label class="ck"><input type="checkbox" id="payOff" ${p.offline?"checked":""}> Simulate offline card (books as pending upload; close will refuse)</label>`;
-  $("#payFoot").innerHTML=`<button class="btn btn-p" id="payGo">Charge ${money(c.totals.dueMinor+tip)}</button>`;
+  const tipRow=`<div class="og"><div class="og-h">Tip</div><div class="opts">${[0,18,20,22,25].map(t=>
+      `<button class="opt ${p.tipPct===t?"on":""}" data-tip="${t}">${t===0?"None":t+"%"}</button>`).join("")}</div></div>
+    <div class="og"><div class="og-h">Method</div><div class="opts">
+      <button class="opt ${p.method==="card"?"on":""}" data-m="card">Card</button>
+      <button class="opt ${p.method==="cash"?"on":""}" data-m="cash">Cash</button></div></div>
+    <label class="ck"><input type="checkbox" id="payOff" ${p.offline?"checked":""}> Simulate offline card (books as pending upload; close will refuse)</label>`;
+
+  if(p.split==="whole"){
+    const tip=tipFor(c.totals.dueMinor,p.tipPct);
+    $("#payBody").innerHTML=
+      `<div style="text-align:center;padding:6px 0 12px">
+         <div style="font-size:11px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.05em;font-weight:700">Due now</div>
+         <div class="num" style="font-size:34px;font-weight:800">${money(c.totals.dueMinor+tip)}</div>
+         <div class="tip-note num">check ${money(c.totals.dueMinor)} + tip ${money(tip)}</div></div>
+       ${splitTabsHtml(p)}${tipRow}`;
+    $("#payFoot").innerHTML=`<button class="btn btn-p" id="payGo">Charge ${money(c.totals.dueMinor+tip)}</button>`;
+  }else{
+    const pts=p.portions;
+    const cards=pts===null?`<div class="empty">Loading the split…</div>`
+      :pts.length?pts.map(pt=>portionCardHtml(c,p,pt)).join("")
+      :`<div class="empty">Nothing ordered yet,<br>so there is nothing to split by seat.</div>`;
+    // money already taken under labels this partition does not contain, so the
+    // page never quietly hides a payment the server knows about
+    const foreign=pts?[...new Set(c.payments.map(x=>x.label))].filter(l=>!pts.some(pt=>pt.label===l)):[];
+    $("#payBody").innerHTML=
+      `${splitTabsHtml(p)}
+       <div class="og"><div class="og-h">Portions
+         <span style="color:var(--ink-3);font-weight:600;font-size:11px">check due ${money(c.totals.dueMinor)}</span></div>
+         ${cards}
+         ${foreign.length?`<div class="tip-note">Already paid as ${esc(foreign.join(", "))}. The check itself owes ${money(c.totals.dueMinor)}.</div>`:""}</div>
+       ${tipRow}`;
+    const settledAll=c.totals.dueMinor===0&&c.status==="paid";
+    $("#payFoot").innerHTML=settledAll
+      ? `<button class="btn btn-s" data-close="ovPay">Done</button><button class="btn btn-p" id="payClose">Close check ✓</button>`
+      : `<button class="btn btn-s" data-close="ovPay">Done</button>`;
+  }
+
+  document.querySelectorAll("[data-sp]").forEach(b=>b.onclick=()=>{
+    p.split=b.dataset.sp;p.portions=null;p.customWays=false;
+    state.split=p.split==="whole"?null:{checkId:c.id,mode:p.split,ways:p.ways};
+    renderPay();renderCheck();
+    if(p.split!=="whole")syncPortions();
+  });
+  document.querySelectorAll("[data-w]").forEach(b=>b.onclick=()=>{
+    const w=+b.dataset.w;
+    p.customWays=w===0;
+    if(w>0)p.ways=w;
+    p.portions=null;
+    state.split={checkId:c.id,mode:p.split,ways:p.ways};
+    renderPay();renderCheck();
+    syncPortions();
+  });
+  const waysInput=$("#payWays");
+  if(waysInput)waysInput.onchange=()=>{
+    const w=parseInt(waysInput.value,10);
+    if(!(w>=2&&w<=MAX_WAYS)){toast(`Split between 2 and ${MAX_WAYS} ways`,"err");waysInput.value=p.ways;return;}
+    p.ways=w;p.portions=null;
+    state.split={checkId:c.id,mode:p.split,ways:w};
+    renderPay();renderCheck();syncPortions();
+  };
   document.querySelectorAll("[data-tip]").forEach(b=>b.onclick=()=>{p.tipPct=+b.dataset.tip;renderPay();});
   document.querySelectorAll("[data-m]").forEach(b=>b.onclick=()=>{p.method=b.dataset.m;renderPay();});
   $("#payOff").onchange=e=>{p.offline=e.target.checked;};
-  $("#payGo").onclick=async()=>{
-    const tip2=Math.round(c.totals.dueMinor*p.tipPct/100);
-    await api(`/v1/checks/${c.id}/payments`,{method:p.method,amountMinor:c.totals.dueMinor,tipMinor:tip2,
-      offline:p.offline,expectedVersion:c.version});
+  // the button goes dead on the first tap: a double tap would post twice, and
+  // the second post is money the portion no longer owes
+  document.querySelectorAll("[data-pay]").forEach(b=>b.onclick=()=>{b.disabled=true;payPortion(b.dataset.pay);});
+  const closeBtn=$("#payClose");
+  if(closeBtn)closeBtn.onclick=async()=>{closeOv("ovPay");await closeCheck();};
+  const go=$("#payGo");
+  if(go)go.onclick=async()=>{
+    await api(`/v1/checks/${c.id}/payments`,{method:p.method,amountMinor:c.totals.dueMinor,
+      tipMinor:tipFor(c.totals.dueMinor,p.tipPct),offline:p.offline,expectedVersion:c.version});
     closeOv("ovPay");
     await refresh();
     toast("Payment taken","good");
   };
+}
+
+/** Settle one portion: the server gets the portion's label and its own due,
+ *  and it refuses anything past that (E11-T2), so a mis-tap cannot overpay. */
+async function payPortion(label){
+  const c=cur(),p=state.pay;
+  if(!c||!p||!p.portions)return;
+  const pt=p.portions.find(x=>x.label===label);
+  if(!pt)return;
+  if(pt.dueMinor<=0){toast(label+" is already settled");return;}
+  await api(`/v1/checks/${c.id}/payments`,{method:p.method,amountMinor:pt.dueMinor,
+    tipMinor:tipFor(pt.dueMinor,p.tipPct),label:pt.label,offline:p.offline,expectedVersion:c.version});
+  state.split={checkId:c.id,mode:p.split,ways:p.ways};
+  toast(pt.label+" paid","good");
+  await refresh();
+  await syncPortions();
 }
 async function closeCheck(){
   const c=cur();if(!c)return;

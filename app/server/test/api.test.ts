@@ -799,6 +799,10 @@ describe("reads", () => {
     expect(pos.headers["content-type"]).toContain("text/html");
     expect(pos.body).toContain("RestaurantOS POS");
     expect(pos.body).toContain("operationId");
+    // E11: the pay modal's split selector and the portion cards it renders
+    expect(pos.body).toContain("Whole check");
+    expect(pos.body).toContain("By seat");
+    expect(pos.body).toContain("/split?");
   });
 
   it("serves the KDS, Tables, and Close pages and the floor", async () => {
