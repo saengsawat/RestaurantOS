@@ -117,7 +117,7 @@ Two hard rules fall out of this table: **no agent merges its own work**, and **n
 | CRUD endpoints, UI screens, fixtures, test scaffolding, docs, refactors already covered by tests | **Sonnet** | Sonnet (`/code-review`) | Token cost matters; existing tests catch regressions **[Decision]** |
 | Exploration/search (find where X is handled) | Explore subagent (cheap) | n/a | Read-only |
 
-Per **D17**, external models (e.g. Codex) may take row-3 (Sonnet-class) tickets under the same contract, review, and escalation rules; rows 1-2 stay with Opus/Fable.
+Per **D17**, external models (e.g. Codex) may take row-3 (Sonnet-class) tickets under the same contract, review, and escalation rules; rows 1-2 stay with Opus/Fable. Per **D21**, the orchestrator session (Fable) does not implement product code itself: it plans, writes contracts, assigns, and serves as the cross-model reviewer; Fable-tier build work goes to Opus worker sessions.
 
 **Escalation rules:**
 - A Sonnet ticket that **fails review twice**, or turns out to touch a §4 invariant, is re-run on Opus with the review findings attached.
@@ -357,6 +357,8 @@ Dependency-ordered; matches the [T] priority spine. **Build/Review** per §5.2 (
 | **E16** | EOD close | ✅ Completed | Business-day close with blockers | E13–E15 | Close is a workflow with blockers, not a report **[T]** | Close blocked by open check / unreconciled drawer | Sonnet |
 | **E17** | Offline UX + recovery | 🔄 In progress | Cloud/LAN/payment status indicators; crash restore | E9, E10 | Staff always know what's safe to do **[T]** | Status-indicator truth test per fault case | Sonnet |
 | **E18** | Hardening + SLOs | ⬜ In queue | Latency budgets measured; telemetry live | all | SLOs per **[S]** latency table | Measured: tap-to-check, crash-restore, 100-line re-render | Sonnet |
+| **E19** | Insights v1 (server report + heatmap) | ⬜ In queue | Per-server scorecard + hour/day sales heatmap as read-only ledger projections (D19; Phase 6 slice pulled forward) | E15 | Reports computed on read, never stored; per-server sums conserve against the day summary | Insights totals equal the close-day summary to the cent | Opus (core) + Sonnet/Codex (UI) |
+| **E20** | Guestbook / guest intelligence | ⬜ In queue (spec first) | Guest profiles: favorites, spend, visit history, preferred section/server (D20 identity ladder) | E13, E19 | Never store PAN (D2); privacy defaults per Matt deck | Spec signed off; later: returning-guest recognition in sandbox | Sonnet (spec), build TBD |
 
 **Status as of 2026-08-20** (11 completed, 2 in progress, 5 in queue). Where the non-clean rows stand:
 

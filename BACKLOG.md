@@ -53,7 +53,10 @@ The authoritative ticket list (master plan §5.5). Currently tracking Phase 0 wo
 | **E11-T1** split domain | Pure `splitCheck` in `app/domain` (even + byLines partitions, allocate-not-recompute, conservation property tests). Contract: `docs/tickets/E11-T1-split-domain.md` | **Ready** · Opus, cross-model review |
 | **E11-T2** split engine/API | Split preview reads + labeled portion payments on the server. Contract: `docs/tickets/E11-T2-split-engine-api.md` | Ready after T1 · Opus, cross-model review |
 | **E11-T3** split POS UI | Pay-modal split flow + per-portion receipts, tokens per DESIGN.md. Contract: `docs/tickets/E11-T3-split-pos-ui.md` | Ready after T2 · Sonnet or Codex (D17) |
-| Next after E11 | Relational menu editor (E5-full). E13 needs ADR-3 with Matt; E9/E10 need D6 | Queued |
+| **E19-T1** insights core | Server attribution (checks.server_id from the device session, party.cleared_at at close) + `/v1/insights/servers` and `/v1/insights/heatmap` read APIs with conservation tests. Contract: `docs/tickets/E19-T1-insights-core.md`. SEQUENCING: not concurrent with E11-T2 (both edit engine.ts) | **Ready** · Opus, cross-model review |
+| **E19-T2** insights page | `/insights` screen: tonight-at-a-glance tiles, server scorecard with course bars + detail popover, hour x day heatmap. Contract: `docs/tickets/E19-T2-insights-page.md` | Ready after E19-T1 · Sonnet or Codex (D17) |
+| **E20-T1** guestbook spec | `docs/prd/guestbook-spec.md`: guest entity proposal, D20 identity ladder, profile contents, privacy deck for Matt. Docs only. Contract: `docs/tickets/E20-T1-guestbook-spec.md` | **Ready** (independent) · Sonnet |
+| Next after E11 + E19 | Relational menu editor (E5-full). E13 needs ADR-3 with Matt; E9/E10 need D6 | Queued |
 
 Suite total: 83 tests green (54 domain + 29 server incl. PostgreSQL integration).
 
