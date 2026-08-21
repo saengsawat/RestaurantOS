@@ -1,7 +1,9 @@
 # Ticket E11-T2: Split commands on the check engine and API
 
 **Epic:** E11 Split checks · **Build model:** Opus · **Review tier:** cross-model (touches money flow)
-**Status:** Ready after E11-T1 merges (depends on `splitCheck` from `@restaurantos/domain`)
+**Status:** READY (E11-T1 merged 2026-08-20, cross-model review passed). SEQUENCING: not concurrent with E19-T1 (both edit engine.ts); one app/server ticket in flight at a time.
+
+**Handoff note from the E11-T1 worker (binding):** a dense `byLines` assignment cannot express a portion with no lines at all, so "seat 3 ordered nothing" must be handled by the ENGINE: build the by-seat preview only over seats that have non-voided lines (drop empty seats), never by padding placeholder lines into the domain call.
 
 ## Session preamble (read first, in order)
 
