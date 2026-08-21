@@ -11,7 +11,7 @@ Phase 0  Discovery        ████████░░  waiting on Matt sessio
 Phase 1  POS PRD          ██████░░░░  draft v0.1 done, Matt review pending
 Phase 2  Domain + arch    ██████░░░░  schema + domain model done; ADRs frozen on D6
 Phase 3  V1 backlog       ██░░░░░░░░  epic table exists; ticket contracts not yet written
-Phase 4  Build            █████████░  11 epics done, E5/E11/E17 in progress: lock screen + five screens + PostgreSQL (99 tests)
+Phase 4  Build            █████████░  11 epics done, E5/E11/E17 in progress: lock screen + five screens + PostgreSQL (104 tests)
 Phase 5  Pilot            ░░░░░░░░░░  venue not selected
 Phase 6  Intelligence     ░░░░░░░░░░  by design, after pilot
 ```
@@ -63,11 +63,11 @@ $env:DATABASE_URL = "postgres://postgres:YOURPASSWORD@localhost:5432/restauranto
 npm run dev
 ```
 
-Domain tests: `cd app\domain && npm test` (70). Server tests incl. a throwaway-PostgreSQL integration: `cd app\server && npm test` (29).
+Domain tests: `cd app\domain && npm test` (70). Server tests incl. a throwaway-PostgreSQL integration: `cd app\server && npm test` (34).
 
 ## How work runs now (D21)
 
-The orchestrator (Fable) plans, writes ticket contracts under `docs/tickets/`, assigns models, and reviews; worker sessions build. First delegated ticket (E11-T1, Opus) merged 2026-08-20 after cross-model review. Ready to fire: E11-T2 (Opus) OR E19-T1 (Opus, not both at once, both edit engine.ts), E20-T1 (Sonnet, docs). E19-T2 waits on E19-T1.
+The orchestrator (Fable) plans, writes ticket contracts under `docs/tickets/`, assigns models, and reviews; worker sessions build, ONE at a time (all sessions share this folder). E11-T1 and E11-T2 (Opus) merged 2026-08-20 after cross-model review. Firing order: E11-T3 (Sonnet/Codex) -> E19-T1 (Opus) -> E19-T2 (Sonnet/Codex) -> E20-T1 (Sonnet, docs, can slot in any gap). One-liner to fire a ticket: "You are a worker session. Execute the ticket at docs/tickets/<name>.md exactly; it is your entire scope."
 
 ## In flight
 
