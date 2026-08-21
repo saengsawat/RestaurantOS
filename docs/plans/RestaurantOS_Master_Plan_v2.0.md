@@ -117,6 +117,8 @@ Two hard rules fall out of this table: **no agent merges its own work**, and **n
 | CRUD endpoints, UI screens, fixtures, test scaffolding, docs, refactors already covered by tests | **Sonnet** | Sonnet (`/code-review`) | Token cost matters; existing tests catch regressions **[Decision]** |
 | Exploration/search (find where X is handled) | Explore subagent (cheap) | n/a | Read-only |
 
+Per **D17**, external models (e.g. Codex) may take row-3 (Sonnet-class) tickets under the same contract, review, and escalation rules; rows 1-2 stay with Opus/Fable.
+
 **Escalation rules:**
 - A Sonnet ticket that **fails review twice**, or turns out to touch a §4 invariant, is re-run on Opus with the review findings attached.
 - A worker that wants to change anything **outside its ticket's file scope** stops and returns the ticket to the orchestrator instead of improvising.
