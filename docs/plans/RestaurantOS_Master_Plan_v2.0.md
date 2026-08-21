@@ -333,26 +333,36 @@ Milestones (each independently demoable, epic mapping in §7):
 
 Dependency-ordered; matches the [T] priority spine. **Build/Review** per §5.2 (✱ = critical path: Opus/Fable build + cross-model review mandatory).
 
-| Epic | Name | Goal | Depends on | Key invariants (source) | Exit test | Build |
-|---|---|---|---|---|---|---|
-| **E1**✱ | Money engine | Integer minor units, deterministic rounding, tax calc |, | Rounding allocation sums exactly; no floats anywhere **[T]** | Property: allocation conserves cents for arbitrary splits | Opus |
-| **E2**✱ | State machines | Check + kitchen lifecycles as pure functions |, | Illegal transitions impossible; kitchen ≠ check state **[T]** | Exhaustive transition-table test | Opus |
-| **E3**✱ | Modifier validation | min/max/defaults/nesting enforced everywhere |, | Same validator on every client/server path **[T]** | Property: generated menus never accept invalid configs | Opus |
-| **E4**✱ | Schema + migrations | Postgres schema per [T] ER model; expand/contract discipline | E1–E3 | `MENU_SNAPSHOT` immutable; org/location IDs on every table **[T]** | Migration up/down round-trip; snapshot immutability test | Opus |
-| **E5** | Menu/config domain | Versioned menu graph, publishing snapshots | E3, E4 | Editing draft never mutates published snapshot **[T]** | Publish → order → edit menu → yesterday's check unchanged | Opus |
-| **E6** | Floor plan / tables | Areas, tables, parties, guest counts | E4 | Table status derived from domain state, not UI **[T]** | Two-terminal table-state consistency test | Sonnet |
-| **E7**✱ | Check engine | Commands: open/add/move/transfer; aggregate versions | E1–E5 | Order ≠ check; optimistic versioning **[T]** | Command idempotency + version-conflict tests | Opus |
-| **E8**✱ | Dispatch + KDS | Immutable `ORDER_DISPATCH`; station routing; bump/recall | E7 | A dispatch fires exactly once; late acks never re-fire **[T]** | Duplicate-fire test under retry | Opus |
-| **E9**✱ | Local durable store | Local DB + write-ahead of every command | E7 | Local commit precedes any sync attempt **[T][S]** | Crash-kill: active check survives forced termination | Opus |
-| **E10**✱ | Sync engine | Operation journal, idempotent `/sync`, conflict handling | E8, E9 | Replayed `operationId` returns known result **[T]** | **10-case network-fault suite** green **[T]** | Opus |
-| **E11**✱ | Split checks | By item/seat/amount as domain commands | E7, E1 | Money/quantity/tax conservation **[T]** | Property: random partitions conserve totals | Opus |
-| **E12** | Discounts/comps/voids | Reason + approval + audit; pre/post-fire void semantics | E7, E8 | Post-fire void hits kitchen + audit, not just totals **[T]** | Void-after-fire scenario test | Opus |
-| **E13**✱ | Payment adapter | PaymentIntent/Attempt model; one provider (ADR-3); webhooks | E1, E7 | Never store PAN; pending-upload ≠ authorized **[T][S]** | Sandbox: decline, timeout, duplicate webhook, late auth | Opus |
-| **E14** | Cash + drawer | Cash tender, drawer sessions, pay-in/out ledger | E13 | Cash events immutable **[T]** | Over/short reconciliation test | Sonnet |
-| **E15** | RBAC + audit | PIN sessions, manager-approval tokens, append-only audit | E4 | Server-enforced permissions; audit has actor+device+reason **[T]** | Privilege-escalation + audit-completeness tests | Opus |
-| **E16** | EOD close | Business-day close with blockers | E13–E15 | Close is a workflow with blockers, not a report **[T]** | Close blocked by open check / unreconciled drawer | Sonnet |
-| **E17** | Offline UX + recovery | Cloud/LAN/payment status indicators; crash restore | E9, E10 | Staff always know what's safe to do **[T]** | Status-indicator truth test per fault case | Sonnet |
-| **E18** | Hardening + SLOs | Latency budgets measured; telemetry live | all | SLOs per **[S]** latency table | Measured: tap-to-check, crash-restore, 100-line re-render | Sonnet |
+**Status** tracks build reality, not intent: ✅ Completed = shipped, running in `app/`, its tests green; 🔄 In progress = a working slice is live but the epic's exit test is not yet satisfied; ⬜ In queue = not started. Status is refreshed at the end of every working session alongside `STATUS.md`; per-ticket detail lives in `BACKLOG.md`. **Build** is the model the epic is assigned to, so an epic can be picked up by reading one row: status says whether it is open, Build says who to bring.
+
+| Epic | Name | Status | Goal | Depends on | Key invariants (source) | Exit test | Build |
+|---|---|---|---|---|---|---|---|
+| **E1**✱ | Money engine | ✅ Completed | Integer minor units, deterministic rounding, tax calc |, | Rounding allocation sums exactly; no floats anywhere **[T]** | Property: allocation conserves cents for arbitrary splits | Opus |
+| **E2**✱ | State machines | ✅ Completed | Check + kitchen lifecycles as pure functions |, | Illegal transitions impossible; kitchen ≠ check state **[T]** | Exhaustive transition-table test | Opus |
+| **E3**✱ | Modifier validation | ✅ Completed | min/max/defaults/nesting enforced everywhere |, | Same validator on every client/server path **[T]** | Property: generated menus never accept invalid configs | Opus |
+| **E4**✱ | Schema + migrations | ✅ Completed | Postgres schema per [T] ER model; expand/contract discipline | E1–E3 | `MENU_SNAPSHOT` immutable; org/location IDs on every table **[T]** | Migration up/down round-trip; snapshot immutability test | Opus |
+| **E5** | Menu/config domain | 🔄 In progress | Versioned menu graph, publishing snapshots | E3, E4 | Editing draft never mutates published snapshot **[T]** | Publish → order → edit menu → yesterday's check unchanged | Opus |
+| **E6** | Floor plan / tables | ✅ Completed | Areas, tables, parties, guest counts | E4 | Table status derived from domain state, not UI **[T]** | Two-terminal table-state consistency test | Sonnet |
+| **E7**✱ | Check engine | ✅ Completed | Commands: open/add/move/transfer; aggregate versions | E1–E5 | Order ≠ check; optimistic versioning **[T]** | Command idempotency + version-conflict tests | Opus |
+| **E8**✱ | Dispatch + KDS | ✅ Completed | Immutable `ORDER_DISPATCH`; station routing; bump/recall | E7 | A dispatch fires exactly once; late acks never re-fire **[T]** | Duplicate-fire test under retry | Opus |
+| **E9**✱ | Local durable store | ⬜ In queue | Local DB + write-ahead of every command | E7 | Local commit precedes any sync attempt **[T][S]** | Crash-kill: active check survives forced termination | Opus |
+| **E10**✱ | Sync engine | ⬜ In queue | Operation journal, idempotent `/sync`, conflict handling | E8, E9 | Replayed `operationId` returns known result **[T]** | **10-case network-fault suite** green **[T]** | Opus |
+| **E11**✱ | Split checks | ⬜ In queue | By item/seat/amount as domain commands | E7, E1 | Money/quantity/tax conservation **[T]** | Property: random partitions conserve totals | Opus |
+| **E12** | Discounts/comps/voids | ✅ Completed | Reason + approval + audit; pre/post-fire void semantics | E7, E8 | Post-fire void hits kitchen + audit, not just totals **[T]** | Void-after-fire scenario test | Opus |
+| **E13**✱ | Payment adapter | ⬜ In queue | PaymentIntent/Attempt model; one provider (ADR-3); webhooks | E1, E7 | Never store PAN; pending-upload ≠ authorized **[T][S]** | Sandbox: decline, timeout, duplicate webhook, late auth | Opus |
+| **E14** | Cash + drawer | ✅ Completed | Cash tender, drawer sessions, pay-in/out ledger | E13 | Cash events immutable **[T]** | Over/short reconciliation test | Sonnet |
+| **E15** | RBAC + audit | ✅ Completed | PIN sessions, manager-approval tokens, append-only audit | E4 | Server-enforced permissions; audit has actor+device+reason **[T]** | Privilege-escalation + audit-completeness tests | Opus |
+| **E16** | EOD close | ✅ Completed | Business-day close with blockers | E13–E15 | Close is a workflow with blockers, not a report **[T]** | Close blocked by open check / unreconciled drawer | Sonnet |
+| **E17** | Offline UX + recovery | 🔄 In progress | Cloud/LAN/payment status indicators; crash restore | E9, E10 | Staff always know what's safe to do **[T]** | Status-indicator truth test per fault case | Sonnet |
+| **E18** | Hardening + SLOs | ⬜ In queue | Latency budgets measured; telemetry live | all | SLOs per **[S]** latency table | Measured: tap-to-check, crash-restore, 100-line re-render | Sonnet |
+
+**Status as of 2026-08-20** (11 completed, 2 in progress, 5 in queue). Where the non-clean rows stand:
+
+- **E5 menu/config**: the draft → manager publish → immutable snapshot loop is live at `/menu`, with the 86 board and repricing. The draft is still a document (migration 0003) rather than the relational menu graph; group/modifier editing (E5-full) is the remainder.
+- **E17 offline UX**: offline card payments are honest today (pending-upload state, and the day close refuses to seal on them). The cloud/LAN status indicators and crash restore wait on E9 and E10, which is what the dependency column says.
+- **E9, E10** (local durable store, sync engine): the sync journal table and idempotent operation ids exist from E4/E7, but no local write-ahead store and no `/sync` endpoint. Both are gated on **D6** (Matt) via ADR-1/ADR-2: whether orders must reach the kitchen with the Internet down decides the whole shape.
+- **E11 split checks**: E1 already provides the exact allocation primitives (`allocateEvenly`, `allocateByWeights`); what is missing is the split as a domain command on the check aggregate. No decision blocks it, so it is the largest unblocked epic left.
+- **E13 payment adapter**: blocked on **ADR-3** (provider choice) with Matt. Payment is simulated end to end today, which is why E14 and E16 could ship ahead of it despite the stated dependency.
 
 UI epics (order-entry screens, KDS screen, floor-plan screen) ride alongside E6–E8 as Sonnet tickets, the prototypes are the UX reference **[S]**, the domain package is the only source of truth.
 
