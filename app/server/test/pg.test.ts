@@ -108,6 +108,16 @@ describe.skipIf(!PGBIN)("PostgreSQL persistence (E4)", () => {
     const serve = await app.inject({ method: "POST", url: "/v1/kds/serve", payload: ENV({ tableName: "Table 12" }) });
     expect(serve.statusCode).toBe(200);
 
+    // E11: the split preview is computed on read (nothing stored), and a
+    // labeled portion payment lands in payment_intent.split_label
+    const split = await app.inject({ method: "GET", url: `/v1/checks/${id}/split?mode=bySeat` });
+    expect(split.statusCode).toBe(200);
+    const portions = split.json().portions as { label: string; totalMinor: number }[];
+    expect(portions.map((p) => p.label)).toEqual(["Seat 2"]); // seat 1's acqua was voided
+    const seatPay = await app.inject({ method: "POST", url: `/v1/checks/${id}/payments`,
+      payload: ENV({ method: "card", amountMinor: 1_000, label: "Seat 2" }) });
+    expect(seatPay.statusCode).toBe(200);
+
     // pay in full, close
     const due = (await app.inject({ method: "GET", url: `/v1/checks/${id}` })).json().check.totals.dueMinor as number;
     await app.inject({ method: "POST", url: `/v1/checks/${id}/payments`, payload: ENV({ method: "card", amountMinor: due }) });
@@ -153,7 +163,15 @@ describe.skipIf(!PGBIN)("PostgreSQL persistence (E4)", () => {
     expect(check.tableName).toBe("Table 12"); // the transfer survived (party.table_id)
     expect(check.lines).toHaveLength(2);
     expect(check.totals.dueMinor).toBe(0);
-    expect(check.totals.paidMinor).toBe(due);
+    expect(check.totals.paidMinor).toBe(1_000 + due); // the labeled portion plus the remainder
+
+    // the split label survived as payment_intent.split_label, so the portion
+    // still reads as partly settled after the restart
+    const labeled = check.payments.find((p: { label: string }) => p.label === "Seat 2");
+    expect(labeled.amountMinor).toBe(1_000);
+    const portions2 = (await app2.inject({ method: "GET", url: `/v1/checks/${id}/split?mode=bySeat` })).json().portions;
+    expect(portions2).toHaveLength(1);
+    expect(portions2[0]).toMatchObject({ label: "Seat 2", paidMinor: 1_000 });
     const ragu = check.lines.find((l: { capturedName: string }) => l.capturedName === "Ragu alla Bolognese");
     expect(ragu.modifierPriceMinor).toBe(1000); // gf 200 + shrimp 800, survived as a tree
     expect(ragu.modifiers[1].children[0].modifierId).toBe("grill");

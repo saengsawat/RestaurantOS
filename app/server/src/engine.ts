@@ -13,11 +13,14 @@ import {
   lineTotalMinor,
   orderItemTransition,
   selectionPriceMinor,
+  splitCheck,
   ticketItemTransition,
   validateModifiers,
+  type Adjustment,
   type CheckLine,
   type ModifierError,
   type SelectedModifier,
+  type SplitPortion,
 } from "@restaurantos/domain";
 import type { MenuEntry } from "./menu.js";
 import { STAFF, type Employee } from "./staff.js";
@@ -49,18 +52,28 @@ export interface CheckView extends CheckAggregate {
   };
 }
 
-export function toView(check: CheckAggregate): CheckView {
-  const lines: CheckLine[] = check.lines.map((l) => ({
+/** The aggregate's lines in the domain's shape. One mapping, shared by the
+ *  totals and the split, so the two can never disagree about a voided line. */
+function toDomainLines(check: CheckAggregate): CheckLine[] {
+  return check.lines.map((l) => ({
     unitPriceMinor: l.unitPriceMinor,
     quantity: l.quantity,
     modifierPricesMinor: [l.modifierPriceMinor],
     voided: l.status === "voided",
   }));
-  const adjustments = check.adjustments.map((a) =>
+}
+
+function toDomainAdjustments(check: CheckAggregate): Adjustment[] {
+  return check.adjustments.map((a) =>
     a.amountMinor !== undefined
       ? { kind: "amount" as const, amountMinor: a.amountMinor }
       : { kind: "percent" as const, basisPoints: a.percentBp ?? 0 },
   );
+}
+
+export function toView(check: CheckAggregate): CheckView {
+  const lines = toDomainLines(check);
+  const adjustments = toDomainAdjustments(check);
   const t = computeCheckTotals(lines, adjustments, TAX_RATE);
   const paid = check.payments.reduce((a, p) => a + p.amountMinor, 0);
   return {
@@ -74,6 +87,100 @@ export function toView(check: CheckAggregate): CheckView {
       dueMinor: Math.max(0, t.totalMinor - paid),
     },
   };
+}
+
+/* ------------------------- split portions (E11) -------------------------
+ * A split is a PAYMENT PARTITION over one check (D18), not a fork into
+ * sibling checks. Nothing about a split is stored: portions are computed on
+ * read, like totals and floor status, and settled by payments carrying the
+ * portion's label. The money math is entirely the domain's splitCheck (E11-T1,
+ * conservation-proven); this layer only labels the portions and counts what
+ * has already been paid against each label.
+ */
+
+/** Ceiling on `ways`, so a crafted query string cannot ask for a million
+ *  portions. Comfortably above any real party. */
+export const MAX_SPLIT_WAYS = 50;
+
+export type SplitMode = { mode: "even"; ways: number } | { mode: "bySeat" };
+
+export interface SplitPortionView extends SplitPortion {
+  label: string;
+  /** which seats this portion covers (bySeat only) */
+  seatNos?: number[];
+  paidMinor: number;
+  dueMinor: number;
+}
+
+function settle(check: CheckAggregate, label: string, portion: SplitPortion, seatNos?: readonly number[]): SplitPortionView {
+  const paid = check.payments.filter((p) => p.label === label).reduce((a, p) => a + p.amountMinor, 0);
+  return {
+    label,
+    ...(seatNos ? { seatNos: [...seatNos] } : {}),
+    ...portion,
+    paidMinor: paid,
+    dueMinor: Math.max(0, portion.totalMinor - paid),
+  };
+}
+
+/**
+ * The portions of a check under one partition. Pure, and deliberately not a
+ * method: recordPayment needs it for the aggregate it already holds.
+ *
+ * bySeat gives a portion only to seats that actually ordered something. Two
+ * reasons: a dense byLines assignment cannot express a portion with no lines
+ * at all (E11-T1's binding note), and a seat that ordered nothing owes
+ * nothing, so printing it would just be noise on the terminal. Voided lines
+ * contribute zero to any portion, so a voided line whose own seat dropped out
+ * rides along on the first portion without moving a cent.
+ */
+export function splitPortions(check: CheckAggregate, spec: SplitMode): SplitPortionView[] {
+  const lines = toDomainLines(check);
+  const adjustments = toDomainAdjustments(check);
+
+  if (spec.mode === "even") {
+    const portions = splitCheck(lines, adjustments, TAX_RATE, { kind: "even", ways: spec.ways });
+    return portions.map((p, i) => settle(check, `Split ${i + 1} of ${spec.ways}`, p));
+  }
+
+  const seats = [...new Set(check.lines.filter((l) => l.status !== "voided").map((l) => l.seatNo))]
+    .sort((a, b) => a - b);
+  if (!seats.length) return []; // nothing ordered, nothing to split
+  const portionOfSeat = new Map(seats.map((s, i) => [s, i]));
+  const assignment = check.lines.map((l) => portionOfSeat.get(l.seatNo) ?? 0);
+  const portions = splitCheck(lines, adjustments, TAX_RATE, { kind: "byLines", assignment });
+  return portions.map((p, i) => settle(check, `Seat ${seats[i]}`, p, [seats[i] as number]));
+}
+
+/** Read a partition off a query string, refusing what the domain would throw on. */
+export function readSplitMode(input: { mode?: string | undefined; ways?: number | undefined }): SplitMode | { error: string } {
+  if (input.mode === "bySeat") return { mode: "bySeat" };
+  if (input.mode !== "even") return { error: "mode must be 'even' or 'bySeat'" };
+  const { ways } = input;
+  if (ways === undefined || !Number.isSafeInteger(ways) || ways < 2 || ways > MAX_SPLIT_WAYS) {
+    return { error: `an even split needs ways to be a whole number from 2 to ${MAX_SPLIT_WAYS}` };
+  }
+  return { mode: "even", ways };
+}
+
+/**
+ * The portion a payment label settles, if it names one of the check's current
+ * portions. The label is the only handle: nothing about the split is stored,
+ * so "Seat 2" and "Split 1 of 3" are parsed back into the partition that
+ * produced them. Anything else (the default "Whole check", a bar tab, a
+ * server's own note) is free text and settles nothing in particular.
+ */
+export function portionForLabel(check: CheckAggregate, label: string): SplitPortionView | undefined {
+  if (/^Seat \d+$/.test(label)) {
+    return splitPortions(check, { mode: "bySeat" }).find((p) => p.label === label);
+  }
+  const even = /^Split \d+ of (\d+)$/.exec(label);
+  if (even) {
+    const spec = readSplitMode({ mode: "even", ways: Number(even[1]) });
+    if ("error" in spec) return undefined;
+    return splitPortions(check, spec).find((p) => p.label === label);
+  }
+  return undefined;
 }
 
 export class Engine {
@@ -495,6 +602,19 @@ export class Engine {
       if (!Number.isSafeInteger(input.amountMinor) || input.amountMinor < 1) {
         return { kind: "rejected", reason: "amountMinor must be a positive integer" };
       }
+
+      // A labeled payment settles a split portion (E11), so it cannot run past
+      // what that portion still owes, plus whatever tip the guest adds on top.
+      // Seat 2 paying seat 3's food is a mis-tap, not a payment. The check as a
+      // whole still closes on TOTAL payments covering the total, unchanged.
+      const portion = input.label ? portionForLabel(check, input.label) : undefined;
+      if (portion && input.amountMinor > portion.dueMinor + (input.tipMinor ?? 0)) {
+        return {
+          kind: "rejected",
+          reason: `${portion.label} has ${portion.dueMinor} left to pay; ${input.amountMinor} exceeds that portion's remaining due`,
+        };
+      }
+
       const view = toView(check);
       const coversTotal = view.totals.paidMinor + input.amountMinor >= view.totals.totalMinor;
       const hasUnsentLines = check.lines.some((l) => l.status === "unsent");
@@ -981,6 +1101,20 @@ export class Engine {
 
   async listChecks(): Promise<CheckView[]> {
     return (await this.store.list()).map(toView);
+  }
+
+  /** What would each portion owe (E11). Computed on read, never stored.
+   *  undefined means no such check; { error } means the partition is not one
+   *  a check can have. */
+  async splitPreview(
+    id: string,
+    input: { mode?: string | undefined; ways?: number | undefined },
+  ): Promise<{ portions: SplitPortionView[] } | { error: string } | undefined> {
+    const check = await this.store.get(id);
+    if (!check) return undefined;
+    const spec = readSplitMode(input);
+    if ("error" in spec) return spec;
+    return { portions: splitPortions(check, spec) };
   }
 
   /** Floor with live status derived from checks and tickets (E6). */

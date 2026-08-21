@@ -812,3 +812,231 @@ describe("reads", () => {
     expect(floor.json().tables.find((t: { name: string }) => t.name === "Table 7").check).toBeNull();
   });
 });
+
+/* ----------------------------- split checks (E11) -----------------------------
+ * A split is a payment partition over ONE check (D18): the portions are a read,
+ * computed fresh every time, and settled by payments carrying the portion label.
+ * The money math is the domain's splitCheck; these tests prove the HTTP layer
+ * carries it faithfully, conservation included.
+ */
+
+interface Portion {
+  label: string;
+  seatNos?: number[];
+  subtotalMinor: number;
+  discountMinor: number;
+  taxMinor: number;
+  totalMinor: number;
+  paidMinor: number;
+  dueMinor: number;
+}
+
+const sum = (ns: readonly number[]) => ns.reduce((a, b) => a + b, 0);
+
+async function openTable(app: ReturnType<typeof buildServer>, tableName: string, covers: number) {
+  const res = await app.inject({ method: "POST", url: "/v1/checks", payload: { ...ENV(0), tableName, covers } });
+  expect(res.statusCode).toBe(200);
+  return res.json().check as { id: string };
+}
+
+async function preview(app: ReturnType<typeof buildServer>, id: string, query: string) {
+  const res = await app.inject({ method: "GET", url: `/v1/checks/${id}/split?${query}` });
+  expect(res.statusCode).toBe(200);
+  return res.json().portions as Portion[];
+}
+
+/** Every portion column sums to the check's own total, and every row adds up. */
+async function expectConservation(app: ReturnType<typeof buildServer>, id: string, portions: Portion[]) {
+  const totals = (await app.inject({ method: "GET", url: `/v1/checks/${id}` })).json().check.totals;
+  expect(sum(portions.map((p) => p.subtotalMinor))).toBe(totals.subtotalMinor);
+  expect(sum(portions.map((p) => p.discountMinor))).toBe(totals.discountMinor);
+  expect(sum(portions.map((p) => p.taxMinor))).toBe(totals.taxMinor);
+  expect(sum(portions.map((p) => p.totalMinor))).toBe(totals.totalMinor);
+  for (const p of portions) {
+    expect(p.totalMinor).toBe(p.subtotalMinor - p.discountMinor + p.taxMinor);
+    expect(p.dueMinor).toBe(Math.max(0, p.totalMinor - p.paidMinor));
+  }
+}
+
+/** Burrata for seat 1, acqua for seat 2, fired: subtotal 2200, tax 195, total 2395. */
+async function twoSeatCheck(app: ReturnType<typeof buildServer>, tableName = "Table 14") {
+  const check = await openTable(app, tableName, 2);
+  await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items`, payload: { ...ENV(1), itemId: "burrata", quantity: 1, seatNo: 1 } });
+  await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items`, payload: { ...ENV(2), itemId: "acqua", quantity: 1, seatNo: 2 } });
+  const send = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/send`, payload: ENV(3) });
+  expect(send.statusCode).toBe(200);
+  expect(send.json().check.totals.totalMinor).toBe(2395);
+  return check;
+}
+
+describe("split preview and labeled portion payments (E11)", () => {
+  it("splits evenly, settles portion by portion, and closes on the total", async () => {
+    const app = buildServer();
+    const check = await twoSeatCheck(app);
+
+    const portions = await preview(app, check.id, "mode=even&ways=3");
+    expect(portions.map((p) => p.label)).toEqual(["Split 1 of 3", "Split 2 of 3", "Split 3 of 3"]);
+    // 2200 subtotal splits 734/733/733, tax 195 splits 65/65/65
+    expect(portions.map((p) => p.totalMinor)).toEqual([799, 798, 798]);
+    expect(portions.every((p) => p.paidMinor === 0)).toBe(true);
+    expect(portions.map((p) => p.dueMinor)).toEqual([799, 798, 798]);
+    await expectConservation(app, check.id, portions);
+
+    const first = await app.inject({
+      method: "POST",
+      url: `/v1/checks/${check.id}/payments`,
+      payload: { ...ENV(4), method: "card", amountMinor: 799, label: "Split 1 of 3" },
+    });
+    expect(first.statusCode).toBe(200);
+    expect(first.json().check.status).toBe("partially_paid");
+
+    // the same read now knows portion 1 is settled and the others are not
+    const after = await preview(app, check.id, "mode=even&ways=3");
+    expect(after[0]).toMatchObject({ paidMinor: 799, dueMinor: 0 });
+    expect(after.slice(1).map((p) => p.dueMinor)).toEqual([798, 798]);
+
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/payments`, payload: { ...ENV(5), method: "card", amountMinor: 798, label: "Split 2 of 3" } });
+    const last = await app.inject({
+      method: "POST",
+      url: `/v1/checks/${check.id}/payments`,
+      payload: { ...ENV(6), method: "card", amountMinor: 798, label: "Split 3 of 3" },
+    });
+    expect(last.statusCode).toBe(200);
+    expect(last.json().check.status).toBe("paid");
+    expect(last.json().check.totals.dueMinor).toBe(0);
+
+    const close = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/close`, payload: ENV(7) });
+    expect(close.json().check.status).toBe("closed");
+  });
+
+  it("splits by seat: only seats that ordered get a portion, voided lines vanish", async () => {
+    const app = buildServer();
+    const check = await openTable(app, "Table 7", 4);
+    const add = async (n: number, itemId: string, seatNo: number) =>
+      app.inject({ method: "POST", url: `/v1/checks/${check.id}/items`, payload: { ...ENV(n), itemId, quantity: 1, seatNo } });
+    await add(1, "burrata", 1);   // 1600
+    await add(2, "acqua", 2);     //  600
+    await add(3, "tiramisu", 2);  // 1200
+    await add(4, "calamari", 3);  // 1500, voided below
+    await add(5, "acqua", 3);     //  600
+    await add(6, "acqua", 4);     //  600, voided below, so seat 4 drops out
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/send`, payload: ENV(7) });
+
+    const lines = (await app.inject({ method: "GET", url: `/v1/checks/${check.id}` })).json().check.lines as {
+      id: string; capturedName: string; seatNo: number;
+    }[];
+    const calamari = lines.find((l) => l.capturedName === "Calamari Fritti");
+    const seat4 = lines.find((l) => l.seatNo === 4);
+    for (const [n, line] of [[8, calamari], [9, seat4]] as const) {
+      const res = await app.inject({
+        method: "POST",
+        url: `/v1/checks/${check.id}/items/${line!.id}/void`,
+        payload: { ...ENV(n), reason: "guest changed mind", managerPin: "1122" },
+      });
+      expect(res.statusCode).toBe(200);
+    }
+
+    const portions = await preview(app, check.id, "mode=bySeat");
+    // seat 4 has nothing that stands, so it gets no portion at all
+    expect(portions.map((p) => p.label)).toEqual(["Seat 1", "Seat 2", "Seat 3"]);
+    expect(portions.map((p) => p.seatNos)).toEqual([[1], [2], [3]]);
+    // the voided calamari is gone from seat 3: 600, not 2100
+    expect(portions.map((p) => p.subtotalMinor)).toEqual([1600, 1800, 600]);
+    expect(portions.map((p) => p.taxMinor)).toEqual([142, 160, 53]);
+    expect(portions.map((p) => p.totalMinor)).toEqual([1742, 1960, 653]);
+    await expectConservation(app, check.id, portions);
+
+    // seat 2 pays its own portion; the check stays open for the rest
+    const pay = await app.inject({
+      method: "POST",
+      url: `/v1/checks/${check.id}/payments`,
+      payload: { ...ENV(10), method: "card", amountMinor: 1960, tipMinor: 400, label: "Seat 2" },
+    });
+    expect(pay.statusCode).toBe(200);
+    expect(pay.json().check.status).toBe("partially_paid");
+    const settled = await preview(app, check.id, "mode=bySeat");
+    expect(settled[1]).toMatchObject({ label: "Seat 2", paidMinor: 1960, dueMinor: 0 });
+    expect(settled[0]!.paidMinor).toBe(0);
+  });
+
+  it("refuses a labeled payment beyond its portion's due, tip aside", async () => {
+    const app = buildServer();
+    const check = await twoSeatCheck(app, "Table 12");
+
+    const over = await app.inject({
+      method: "POST",
+      url: `/v1/checks/${check.id}/payments`,
+      payload: { ...ENV(4), method: "card", amountMinor: 800, label: "Split 1 of 3" },
+    });
+    expect(over.statusCode).toBe(422);
+    expect(over.json().reason).toMatch(/Split 1 of 3 has 799 left to pay/);
+    expect(over.json().reason).toMatch(/exceeds/);
+
+    // the tip rides on top of the portion, so due + tip is fine
+    const ok = await app.inject({
+      method: "POST",
+      url: `/v1/checks/${check.id}/payments`,
+      payload: { ...ENV(5), method: "card", amountMinor: 799, tipMinor: 300, label: "Split 1 of 3" },
+    });
+    expect(ok.statusCode).toBe(200);
+
+    // and paying the same portion twice is refused: it owes nothing now
+    const again = await app.inject({
+      method: "POST",
+      url: `/v1/checks/${check.id}/payments`,
+      payload: { ...ENV(6), method: "card", amountMinor: 799, label: "Split 1 of 3" },
+    });
+    expect(again.statusCode).toBe(422);
+    expect(again.json().reason).toMatch(/has 0 left to pay/);
+
+    // an unlabeled payment is still free to settle whatever is left
+    const rest = await app.inject({
+      method: "POST",
+      url: `/v1/checks/${check.id}/payments`,
+      payload: { ...ENV(7), method: "card", amountMinor: 2395 - 799 },
+    });
+    expect(rest.statusCode).toBe(200);
+    expect(rest.json().check.status).toBe("paid");
+  });
+
+  it("conserves a discount across portions, both ways of splitting", async () => {
+    const app = buildServer();
+    const check = await twoSeatCheck(app, "Table 9");
+    const disc = await app.inject({
+      method: "POST",
+      url: `/v1/checks/${check.id}/adjustments`,
+      payload: { ...ENV(4), percentBp: 1000, reason: "birthday table", managerPin: "1122" },
+    });
+    expect(disc.statusCode).toBe(200);
+    // 10% of 2200 is 220, taxable 1980, tax 176, total 2156
+    expect(disc.json().check.totals).toMatchObject({ discountMinor: 220, taxMinor: 176, totalMinor: 2156 });
+
+    const even = await preview(app, check.id, "mode=even&ways=3");
+    expect(even.map((p) => p.discountMinor)).toEqual([74, 73, 73]);
+    expect(sum(even.map((p) => p.discountMinor))).toBe(220);
+    await expectConservation(app, check.id, even);
+
+    // by seat the discount follows what each seat ordered, not a flat share
+    const bySeat = await preview(app, check.id, "mode=bySeat");
+    expect(bySeat.map((p) => p.discountMinor)).toEqual([160, 60]);
+    expect(bySeat.map((p) => p.totalMinor)).toEqual([1568, 588]);
+    await expectConservation(app, check.id, bySeat);
+  });
+
+  it("refuses partitions a check cannot have, and 404s an unknown check", async () => {
+    const app = buildServer();
+    const check = await twoSeatCheck(app, "Table 3");
+    const bad = ["", "mode=perItem", "mode=even", "mode=even&ways=1", "mode=even&ways=0", "mode=even&ways=2.5", "mode=even&ways=500"];
+    for (const query of bad) {
+      const res = await app.inject({ method: "GET", url: `/v1/checks/${check.id}/split?${query}` });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().reason).toBeTruthy();
+    }
+    const missing = await app.inject({ method: "GET", url: "/v1/checks/nope/split?mode=bySeat" });
+    expect(missing.statusCode).toBe(404);
+
+    // a check with nothing on it has nothing to split by seat
+    const empty = await openTable(app, "Table 5", 2);
+    expect(await preview(app, empty.id, "mode=bySeat")).toEqual([]);
+  });
+});

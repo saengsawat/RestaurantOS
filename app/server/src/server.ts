@@ -125,6 +125,20 @@ export function buildServer(store: Store = new MemoryStore(), storeName = "memor
     return check ? { check } : reply.code(404).send({ status: "NOT_FOUND" });
   });
 
+  /** Split preview (E11): what each portion owes right now. A read, because
+   *  nothing about a split is stored. `?mode=even&ways=3` or `?mode=bySeat`. */
+  app.get("/v1/checks/:id/split", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const query = req.query as { mode?: string; ways?: string };
+    const result = await engine.splitPreview(id, {
+      ...(query.mode !== undefined ? { mode: query.mode } : {}),
+      ...(query.ways !== undefined ? { ways: Number(query.ways) } : {}),
+    });
+    if (!result) return reply.code(404).send({ status: "NOT_FOUND" });
+    if ("error" in result) return reply.code(400).send({ status: "BAD_REQUEST", reason: result.error });
+    return result;
+  });
+
   app.post("/v1/checks", async (req, reply) => {
     const body = (req.body ?? {}) as EnvelopeBody & { tableName?: unknown; covers?: unknown };
     const envelope = readEnvelope(body);
