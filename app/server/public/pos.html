@@ -337,6 +337,12 @@ textarea.fld{min-height:72px;resize:vertical;font:inherit;color:inherit;line-hei
   <div class="m-f" id="gFoot"></div>
 </div></div>
 
+<div class="ov" id="ovClose"><div class="modal" style="width:min(430px,100%)">
+  <div class="m-h"><div><h3>Close and refund</h3><div class="sub" id="clSub"></div></div><button class="m-x" data-close="ovClose">✕</button></div>
+  <div class="m-b" id="clBody"></div>
+  <div class="m-f"><button class="btn btn-p" id="clGo">Close check</button></div>
+</div></div>
+
 <div class="ov" id="ovVoid"><div class="modal">
   <div class="m-h"><div><h3>Void item</h3><div class="sub" id="voidSub"></div></div><button class="m-x" data-close="ovVoid">✕</button></div>
   <div class="m-b">
@@ -431,8 +437,12 @@ async function refresh(){
 
 function renderAll(){
   renderRail();renderMenu();renderCheck();
-  // a portion settled on another terminal shows up here on the next poll
-  if($("#ovPay").classList.contains("open"))syncPortions();
+  // a portion settled on another terminal shows up here on the next poll, and
+  // so does a whole check that stopped owing anything while the modal was open
+  if($("#ovPay").classList.contains("open")){
+    if(state.pay&&state.pay.split==="whole")renderPay();
+    else syncPortions();
+  }
 }
 
 function renderRail(){
@@ -502,11 +512,25 @@ function renderCheck(){
      ${c.totals.discountMinor?`<div class="trow"><span>${esc(c.adjustments.map(a=>a.label).join(", ")||"Discount")}</span><span class="num">−${money(c.totals.discountMinor)}</span></div>`:""}
      <div class="trow"><span>Tax (8.875% demo)</span><span class="num">${money(c.totals.taxMinor)}</span></div>
      ${c.totals.paidMinor?`<div class="trow"><span>Paid</span><span class="num">−${money(c.totals.paidMinor)}</span></div>`:""}
+     ${c.totals.refundDueMinor?`<div class="trow"><span>Refund due to guest</span><span class="num">${money(c.totals.refundDueMinor)}</span></div>`:""}
      <div class="trow g"><span>Due</span><span class="num">${money(c.totals.dueMinor)}</span></div>`;
   $("#btnSend").disabled=!unsent;
   $("#btnDisc").disabled=!(c.status==="open"||c.status==="reopened")||!c.lines.length;
   $("#btnPay").disabled=!c.lines.length;
-  $("#btnPay").textContent=c.totals.dueMinor===0&&c.status==="paid"?"Close check ✓":"Pay";
+  // nothing left to collect: the footer closes the check instead of opening a
+  // payment modal that could only have offered "Charge $0.00" (E2-T2)
+  $("#btnPay").textContent=closableNow(c)
+    ? (c.totals.refundDueMinor?"Close + refund due":"Close check ✓")
+    : "Pay";
+}
+
+/** A check with nothing left to collect, in a state the close is legal from:
+ *  paid, or reopened after a correction. Before E2-T2 a reopened check like
+ *  this had no exit at all, and the table sat occupied for the rest of the
+ *  night. The server decides; this only asks the same question the server
+ *  will, so the button can say the truth before it is pressed. */
+function closableNow(c){
+  return !!c.lines.length&&c.totals.dueMinor===0&&(c.status==="paid"||c.status==="reopened");
 }
 
 function describeMods(sels){
@@ -798,6 +822,7 @@ function renderReceipt(){
     <div class="r"><span>Tax 8.875%</span><span class="num">${cents(t.taxMinor)}</span></div>
     <div class="r big"><span>Total</span><span class="num">${cents(t.totalMinor)}</span></div>
     ${paysHtml?`<hr>${paysHtml}<div class="r big"><span>Due</span><span class="num">${cents(pt?pt.dueMinor:c.totals.dueMinor)}</span></div>`:""}
+    ${!pt&&c.totals.refundDueMinor?`<div class="r big"><span>Refund due to guest</span><span class="num">${cents(c.totals.refundDueMinor)}</span></div>`:""}
     <hr>
     <div class="ctr">Grazie! · osterianove.example</div>
   </div>`;
@@ -896,7 +921,7 @@ async function syncPortions(){
 
 $("#btnPay").onclick=()=>{
   const c=cur();if(!c)return;
-  if(c.totals.dueMinor===0&&c.status==="paid"){return closeCheck();}
+  if(closableNow(c))return c.totals.refundDueMinor?openRefundClose():closeCheck();
   const sp=splitOf(c.id);
   state.pay={tipPct:20,method:"card",offline:false,
     split:sp?sp.mode:"whole",ways:sp?sp.ways:3,customWays:false,portions:null,busy:false};
@@ -955,13 +980,23 @@ function renderPay(){
 
   if(p.split==="whole"){
     const tip=tipFor(c.totals.dueMinor,p.tipPct);
-    $("#payBody").innerHTML=
-      `<div style="text-align:center;padding:6px 0 12px">
-         <div style="font-size:11px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.05em;font-weight:700">Due now</div>
-         <div class="num" style="font-size:34px;font-weight:800">${money(c.totals.dueMinor+tip)}</div>
-         <div class="tip-note num">check ${money(c.totals.dueMinor)} + tip ${money(tip)}</div></div>
-       ${splitTabsHtml(p)}${tipRow}`;
-    $("#payFoot").innerHTML=`<button class="btn btn-p" id="payGo">Charge ${money(c.totals.dueMinor+tip)}</button>`;
+    // the check can settle while this modal sits open (a void here, a portion
+    // paid on the other terminal). Charging zero is not a thing, so the action
+    // becomes the same close the footer offers (E2-T2).
+    const settled=closableNow(c);
+    $("#payBody").innerHTML=settled
+      ? `<div style="text-align:center;padding:6px 0 12px">
+           <div style="font-size:11px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.05em;font-weight:700">Nothing left to collect</div>
+           <div class="num" style="font-size:34px;font-weight:800">${money(0)}</div>
+           <div class="tip-note num">paid ${money(c.totals.paidMinor)} of ${money(c.totals.totalMinor)}${c.totals.refundDueMinor?" · refund due "+money(c.totals.refundDueMinor):""}</div></div>`
+      : `<div style="text-align:center;padding:6px 0 12px">
+           <div style="font-size:11px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.05em;font-weight:700">Due now</div>
+           <div class="num" style="font-size:34px;font-weight:800">${money(c.totals.dueMinor+tip)}</div>
+           <div class="tip-note num">check ${money(c.totals.dueMinor)} + tip ${money(tip)}</div></div>
+         ${splitTabsHtml(p)}${tipRow}`;
+    $("#payFoot").innerHTML=settled
+      ? `<button class="btn btn-p" id="payCloseNow">${c.totals.refundDueMinor?"Close + refund due":"Close check ✓"}</button>`
+      : `<button class="btn btn-p" id="payGo">Charge ${money(c.totals.dueMinor+tip)}</button>`;
   }else{
     const pts=p.portions;
     const cards=pts===null?`<div class="empty">Loading the split…</div>`
@@ -1008,12 +1043,20 @@ function renderPay(){
   };
   document.querySelectorAll("[data-tip]").forEach(b=>b.onclick=()=>{p.tipPct=+b.dataset.tip;renderPay();});
   document.querySelectorAll("[data-m]").forEach(b=>b.onclick=()=>{p.method=b.dataset.m;renderPay();});
-  $("#payOff").onchange=e=>{p.offline=e.target.checked;};
+  // the settled branch (E2-T2) renders no tip row: there is nothing to tip on
+  // a check that owes nothing, so these controls can legitimately be missing
+  const off=$("#payOff");
+  if(off)off.onchange=e=>{p.offline=e.target.checked;};
   // the button goes dead on the first tap: a double tap would post twice, and
   // the second post is money the portion no longer owes
   document.querySelectorAll("[data-pay]").forEach(b=>b.onclick=()=>{b.disabled=true;payPortion(b.dataset.pay);});
   const closeBtn=$("#payClose");
   if(closeBtn)closeBtn.onclick=async()=>{closeOv("ovPay");await closeCheck();};
+  const closeNow=$("#payCloseNow");
+  if(closeNow)closeNow.onclick=()=>{
+    closeOv("ovPay");
+    if(c.totals.refundDueMinor)openRefundClose();else closeCheck();
+  };
   const go=$("#payGo");
   if(go)go.onclick=async()=>{
     await api(`/v1/checks/${c.id}/payments`,{method:p.method,amountMinor:c.totals.dueMinor,
@@ -1039,13 +1082,37 @@ async function payPortion(label){
   await refresh();
   await syncPortions();
 }
-async function closeCheck(){
+async function closeCheck(managerPin){
   const c=cur();if(!c)return;
-  await api(`/v1/checks/${c.id}/close`,{expectedVersion:c.version});
+  const r=await api(`/v1/checks/${c.id}/close`,
+    {expectedVersion:c.version,...(managerPin?{managerPin}:{})});
   state.currentId=null;
   await refresh();
-  toast("Check #"+c.checkNo+" closed","good");
+  toast(r.refundDueMinor
+    ? "Check #"+c.checkNo+" closed · "+money(r.refundDueMinor)+" refund recorded"
+    : "Check #"+c.checkNo+" closed","good");
 }
+
+/* An overpaid close-out (E2-T2): a void or a discount on a reopened check can
+   leave the guest ahead. Closing books what the house owes back, so it asks a
+   manager first and says the number out loud. Nobody edits the payments. */
+function openRefundClose(){
+  const c=cur();if(!c)return;
+  const owed=c.totals.refundDueMinor;
+  $("#clSub").textContent=c.tableName+" · check #"+c.checkNo;
+  $("#clBody").innerHTML=
+    `<div class="tip-note">${money(owed)} goes back to the guest; the refund is recorded on the check.
+       The payments already taken stay exactly as they are, and moving the money is the card provider's job.</div>
+     <div class="og-h">Manager PIN (demo manager: Marco B. · 1122)</div>
+     <input class="fld" id="clPin" inputmode="numeric" maxlength="4" placeholder="••••">`;
+  $("#clGo").textContent="Close · refund "+money(owed);
+  openOv("ovClose");
+  setTimeout(()=>{const el=$("#clPin");if(el)el.focus();},60);
+}
+$("#clGo").onclick=async()=>{
+  await closeCheck($("#clPin").value);
+  closeOv("ovClose");
+};
 
 
 /* ---------- guestbook (E20-T3): attach a regular, read their profile ----------

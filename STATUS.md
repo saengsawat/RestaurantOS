@@ -11,7 +11,7 @@ Phase 0  Discovery        ████████░░  waiting on Matt sessio
 Phase 1  POS PRD          ██████░░░░  draft v0.1 done, Matt review pending
 Phase 2  Domain + arch    ██████░░░░  schema + domain model done; ADRs frozen on D6
 Phase 3  V1 backlog       ██░░░░░░░░  epic table exists; ticket contracts not yet written
-Phase 4  Build            █████████░  13 epics done (E19 insights closed), E5/E17/E20 in progress: lock screen + six screens + PostgreSQL + guestbook API (125 tests)
+Phase 4  Build            █████████░  13 epics done (E19 insights closed), E5/E17/E20 in progress: lock screen + six screens + PostgreSQL + guestbook (133 tests)
 Phase 5  Pilot            ░░░░░░░░░░  venue not selected
 Phase 6  Intelligence     ░░░░░░░░░░  by design, after pilot
 ```
@@ -29,7 +29,7 @@ Phases overlap deliberately (decision D13): everything Matt-independent moves; e
 | Database schema, 44 tables | Verified against PostgreSQL 17: clean apply + constraint tests |
 | Domain model: aggregates, state machines, command surface | `docs/domain/domain-model.md` |
 | **E1 money engine** | 21 property tests: conservation, fairness, determinism |
-| **E2 state machines** (check + kitchen) | Exhaustive transition tables (all 66 check pairs) + random-walk properties |
+| **E2 state machines** (check + kitchen) | Exhaustive transition tables (all 72 check pairs) + random-walk properties, including the liveness fact that a reopened check can always close out (E2-T2) |
 | **E3 modifier validation** | 17 tests: fixtures + generated-menu properties, nesting, corrupt-snapshot safety |
 | **API server** (Fastify, D16): the command protocol live over HTTP: open/order/fire/pay/close, idempotent operation ids, 409 version conflicts, modifier refusals with exact errors, offline cards block close | 10 API tests + verified against the running server with curl |
 | **Insights read APIs (E19-T1)**: every check records the server who opened it; `/v1/insights/servers` (server scorecard: net, tips, covers, avg check, per cover, turn minutes, voids, per-course value, Average row) and `/v1/insights/heatmap` (day x hour net sales). Computed on read, nothing stored | 4 API tests incl. conservation against `/v1/day` (per-server net = gross - discount, per-server tips = day tips) + verified with curl against the running server |
@@ -68,7 +68,7 @@ $env:DATABASE_URL = "postgres://postgres:YOURPASSWORD@localhost:5432/restauranto
 npm run dev
 ```
 
-Domain tests: `cd app\domain && npm test` (70). Server tests incl. a throwaway-PostgreSQL integration: `cd app\server && npm test` (55).
+Domain tests: `cd app\domain && npm test` (73). Server tests incl. a throwaway-PostgreSQL integration: `cd app\server && npm test` (60).
 
 ## How work runs now (D21)
 

@@ -15,7 +15,7 @@ function allEvents(): CheckEvent[] {
   for (const coversTotal of bools)
     for (const hasUnsentLines of bools)
       events.push({ type: "payment_recorded", coversTotal, hasUnsentLines });
-  events.push({ type: "close" });
+  for (const coversTotal of bools) events.push({ type: "close", coversTotal });
   for (const approved of bools) events.push({ type: "reopen", approved });
   for (const approved of bools)
     for (const hasPayments of bools)
@@ -36,8 +36,10 @@ const LEGAL: Array<{ from: CheckStatus; event: CheckEvent; to: CheckStatus }> = 
   { from: "partially_paid", event: { type: "payment_recorded", coversTotal: true, hasUnsentLines: false }, to: "paid" },
   { from: "reopened", event: { type: "payment_recorded", coversTotal: false, hasUnsentLines: false }, to: "partially_paid" },
   { from: "reopened", event: { type: "payment_recorded", coversTotal: true, hasUnsentLines: false }, to: "paid" },
-  // close / reopen
-  { from: "paid", event: { type: "close" }, to: "closed" },
+  // close / reopen. A reopened check closes again with no new payment when
+  // its payments still cover the total: the E2-T2 dead end.
+  { from: "paid", event: { type: "close", coversTotal: true }, to: "closed" },
+  { from: "reopened", event: { type: "close", coversTotal: true }, to: "closed" },
   { from: "closed", event: { type: "reopen", approved: true }, to: "reopened" },
   // voiding an unpaid check, approved
   { from: "open", event: { type: "void_check", approved: true, hasPayments: false }, to: "voided" },
@@ -62,9 +64,9 @@ describe("checkTransition: exhaustive table", () => {
   });
 
   it("covers the whole space (sanity on the test itself)", () => {
-    // 6 statuses x 11 event variants = 66 pairs examined above
-    expect(CHECK_STATUSES.length * allEvents().length).toBe(66);
-    expect(LEGAL.length).toBe(10);
+    // 6 statuses x 12 event variants = 72 pairs examined above
+    expect(CHECK_STATUSES.length * allEvents().length).toBe(72);
+    expect(LEGAL.length).toBe(11);
   });
 });
 
@@ -105,6 +107,41 @@ describe("checkTransition: properties over random event walks", () => {
         expect(r.next).toBe("reopened");
       }
     }
+  });
+
+  it("a reopened check that still covers its total can always close, with no new payment", () => {
+    fc.assert(
+      fc.property(fc.array(eventArb, { maxLength: 40 }), (events) => {
+        let status: CheckStatus = "open";
+        for (const e of events) {
+          const r = checkTransition(status, e);
+          if (r.ok) status = r.next;
+        }
+        // wherever the walk landed, a closed check can reopen and a reopened
+        // check that owes nothing can leave again: that round trip is the
+        // liveness the founder's table lost (E2-T2)
+        if (status === "closed") {
+          expect(checkTransition(status, { type: "reopen", approved: true })).toEqual({ ok: true, next: "reopened" });
+        }
+        if (status === "reopened" || status === "closed") {
+          expect(checkTransition("reopened", { type: "close", coversTotal: true })).toEqual({ ok: true, next: "closed" });
+        }
+      }),
+    );
+  });
+
+  it("no live status is a dead end: every non-terminal status has a legal exit", () => {
+    for (const status of CHECK_STATUSES) {
+      if (isTerminalCheckStatus(status)) continue;
+      const exits = allEvents().filter((e) => checkTransition(status, e).ok);
+      expect(exits.length, `${status} has no legal exit`).toBeGreaterThan(0);
+    }
+  });
+
+  it("a reopened check whose payments fell short refuses to close, and says why", () => {
+    const r = checkTransition("reopened", { type: "close", coversTotal: false });
+    expect(r.ok).toBe(false);
+    expect(r.ok === false && r.reason).toMatch(/no longer cover the total/);
   });
 
   it("unsent lines block every payment, in every payable state", () => {
