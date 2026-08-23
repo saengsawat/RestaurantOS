@@ -1044,3 +1044,118 @@ describe("split preview and labeled portion payments (E11)", () => {
     expect(await preview(app, empty.id, "mode=bySeat")).toEqual([]);
   });
 });
+
+/* --------------------- cross-partition overpay guard (E11-T4) ---------------------
+ * A portion's paid amount counts only payments under its own label, so after
+ * settling portions from one partition, a portion of ANOTHER partition still
+ * reads as owing its whole share. Paying it in full would overpay the check.
+ * The POS refuses to offer it; the server has to refuse to take it.
+ */
+
+/** Seat 1 1600, seat 2 1800, seat 3 600: subtotal 4000, tax 355, total 4355. */
+async function threeSeatCheck(app: ReturnType<typeof buildServer>, tableName: string) {
+  const check = await openTable(app, tableName, 4);
+  const add = (n: number, itemId: string, seatNo: number) =>
+    app.inject({ method: "POST", url: `/v1/checks/${check.id}/items`, payload: { ...ENV(n), itemId, quantity: 1, seatNo } });
+  await add(1, "burrata", 1);
+  await add(2, "acqua", 2);
+  await add(3, "tiramisu", 2);
+  await add(4, "acqua", 3);
+  const send = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/send`, payload: ENV(5) });
+  expect(send.json().check.totals.totalMinor).toBe(4355);
+  return check;
+}
+
+const payLabel = (app: ReturnType<typeof buildServer>, id: string, n: number, body: Record<string, unknown>) =>
+  app.inject({ method: "POST", url: `/v1/checks/${id}/payments`, payload: { ...ENV(n), method: "card", ...body } });
+
+describe("cross-partition overpay guard (E11-T4)", () => {
+  it("refuses a portion payment bigger than the check's remaining due, naming both amounts", async () => {
+    const app = buildServer();
+    const check = await threeSeatCheck(app, "Table 7");
+
+    // even 3 ways: 1453 / 1451 / 1451
+    const even = await preview(app, check.id, "mode=even&ways=3");
+    expect(even.map((p) => p.totalMinor)).toEqual([1_453, 1_451, 1_451]);
+    expect((await payLabel(app, check.id, 6, { amountMinor: 1_453, label: "Split 1 of 3" })).statusCode).toBe(200);
+
+    // the party changes its mind and splits by seat instead
+    const seats = await preview(app, check.id, "mode=bySeat");
+    expect(seats.map((p) => p.totalMinor)).toEqual([1_742, 1_960, 653]);
+    expect((await payLabel(app, check.id, 7, { amountMinor: 1_742, label: "Seat 1" })).statusCode).toBe(200);
+
+    // seat 2 still reads as owing 1960, but the check only owes 1160 now
+    const mid = (await app.inject({ method: "GET", url: `/v1/checks/${check.id}` })).json().check;
+    expect(mid.totals.dueMinor).toBe(1_160);
+    const stillOwed = await preview(app, check.id, "mode=bySeat");
+    expect(stillOwed[1]).toMatchObject({ label: "Seat 2", dueMinor: 1_960 });
+
+    const over = await payLabel(app, check.id, 8, { amountMinor: 1_960, label: "Seat 2" });
+    expect(over.statusCode).toBe(422);
+    expect(over.json().reason).toMatch(/Seat 2 shows 1960 due but the check only owes 1160/);
+    expect(over.json().reason).toMatch(/payments under other portions already cover the rest/);
+
+    // paying what the check actually owes, tip on top, is accepted and closes
+    const ok = await payLabel(app, check.id, 9, { amountMinor: 1_160, tipMinor: 250, label: "Seat 2" });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json().check.status).toBe("paid");
+    expect(ok.json().check.totals.paidMinor).toBe(4_355);
+    expect(ok.json().check.totals.dueMinor).toBe(0);
+    const close = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/close`, payload: ENV(10) });
+    expect(close.json().check.status).toBe("closed");
+  });
+
+  it("keeps the per-portion message when the portion itself is the binding cap", async () => {
+    const app = buildServer();
+    const check = await threeSeatCheck(app, "Table 12");
+    // nothing paid yet, so the check owes more than any single portion
+    const over = await payLabel(app, check.id, 6, { amountMinor: 2_000, label: "Seat 3" });
+    expect(over.statusCode).toBe(422);
+    expect(over.json().reason).toMatch(/Seat 3 has 653 left to pay; 2000 exceeds that portion's remaining due/);
+  });
+
+  it("never lets labeled payments overpay, whatever order the partitions come in", async () => {
+    // Deterministic pseudo-random alternation (Lehmer), so a failure reproduces.
+    let seed = 20_260_822;
+    const rnd = (n: number) => { seed = (seed * 48_271) % 2_147_483_647; return seed % n; };
+    let capped = 0; // times the CHECK's due, not the portion's, was the binding cap
+
+    for (let round = 0; round < 6; round++) {
+      const app = buildServer();
+      const check = await threeSeatCheck(app, "Table 7");
+      const total = 4_355;
+      let paidNonTip = 0;
+      let op = 6;
+
+      for (let step = 0; step < 20; step++) {
+        const live = (await app.inject({ method: "GET", url: `/v1/checks/${check.id}` })).json().check;
+        if (live.totals.dueMinor === 0) break;
+        const mode = rnd(2) === 0 ? `mode=even&ways=${2 + rnd(4)}` : "mode=bySeat";
+        const portions = await preview(app, check.id, mode);
+        const owing = portions.filter((p) => p.dueMinor > 0);
+        expect(owing.length).toBeGreaterThan(0); // a check that owes has an owing portion
+        const pick = owing[rnd(owing.length)]!;
+        // pay exactly what the server quotes, capped by the check itself
+        const amount = Math.min(pick.dueMinor, live.totals.dueMinor);
+        if (amount < pick.dueMinor) {
+          capped++;
+          // the guard must refuse the portion's own full due here
+          const refused = await payLabel(app, check.id, op++, { amountMinor: pick.dueMinor, label: pick.label });
+          expect(refused.statusCode).toBe(422);
+          expect(refused.json().reason).toMatch(/the check only owes/);
+        }
+        const res = await payLabel(app, check.id, op++, { amountMinor: amount, tipMinor: rnd(300), label: pick.label });
+        expect(res.statusCode).toBe(200);
+        paidNonTip += amount;
+        expect(paidNonTip).toBeLessThanOrEqual(total); // non-tip money never exceeds the check
+      }
+
+      const done = (await app.inject({ method: "GET", url: `/v1/checks/${check.id}` })).json().check;
+      expect(done.totals.paidMinor).toBe(total); // exactly paid, never over
+      expect(done.totals.dueMinor).toBe(0);
+      expect(done.status).toBe("paid");
+    }
+    // the loop is only worth anything if it actually met the cross-partition case
+    expect(capped).toBeGreaterThan(0);
+  });
+});

@@ -603,19 +603,36 @@ export class Engine {
         return { kind: "rejected", reason: "amountMinor must be a positive integer" };
       }
 
-      // A labeled payment settles a split portion (E11), so it cannot run past
-      // what that portion still owes, plus whatever tip the guest adds on top.
-      // Seat 2 paying seat 3's food is a mis-tap, not a payment. The check as a
-      // whole still closes on TOTAL payments covering the total, unchanged.
+      const view = toView(check);
+
+      /* A labeled payment settles a split portion (E11), so it is capped twice:
+         by what that portion still owes, and by what the CHECK still owes.
+         Seat 2 paying seat 3's food is a mis-tap, not a payment.
+
+         The second cap is what stops a cross-partition overpay (E11-T4). A
+         portion's paid amount only counts payments under its OWN label, so
+         after "Split 1 of 3" and "Seat 1" are settled, "Seat 2" still reads as
+         owing its whole share even though most of that money is already in.
+         Paying it in full would put more money on the check than the check is
+         worth. The POS refuses to offer that, but a second terminal or a direct
+         API call would otherwise land it, so the guard belongs here.
+
+         Unlabeled payments are deliberately untouched: cash handed over
+         expecting change is normal service, and the check as a whole still
+         closes on TOTAL payments covering the total. */
       const portion = input.label ? portionForLabel(check, input.label) : undefined;
-      if (portion && input.amountMinor > portion.dueMinor + (input.tipMinor ?? 0)) {
-        return {
-          kind: "rejected",
-          reason: `${portion.label} has ${portion.dueMinor} left to pay; ${input.amountMinor} exceeds that portion's remaining due`,
-        };
+      if (portion) {
+        const cap = Math.min(portion.dueMinor, view.totals.dueMinor);
+        if (input.amountMinor > cap + (input.tipMinor ?? 0)) {
+          return {
+            kind: "rejected",
+            reason: view.totals.dueMinor < portion.dueMinor
+              ? `${portion.label} shows ${portion.dueMinor} due but the check only owes ${view.totals.dueMinor}; payments under other portions already cover the rest`
+              : `${portion.label} has ${portion.dueMinor} left to pay; ${input.amountMinor} exceeds that portion's remaining due`,
+          };
+        }
       }
 
-      const view = toView(check);
       const coversTotal = view.totals.paidMinor + input.amountMinor >= view.totals.totalMinor;
       const hasUnsentLines = check.lines.some((l) => l.status === "unsent");
       const r = checkTransition(check.status, { type: "payment_recorded", coversTotal, hasUnsentLines });
