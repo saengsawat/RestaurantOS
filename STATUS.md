@@ -11,7 +11,7 @@ Phase 0  Discovery        ████████░░  waiting on Matt sessio
 Phase 1  POS PRD          ██████░░░░  draft v0.1 done, Matt review pending
 Phase 2  Domain + arch    ██████░░░░  schema + domain model done; ADRs frozen on D6
 Phase 3  V1 backlog       ██░░░░░░░░  epic table exists; ticket contracts not yet written
-Phase 4  Build            █████████░  12 epics done (E11 splits closed), E5/E17/E19 in progress: lock screen + six screens + PostgreSQL (117 tests)
+Phase 4  Build            █████████░  12 epics done (E11 splits closed), E5/E17/E19 in progress: lock screen + six screens + PostgreSQL (118 tests)
 Phase 5  Pilot            ░░░░░░░░░░  venue not selected
 Phase 6  Intelligence     ░░░░░░░░░░  by design, after pilot
 ```
@@ -67,11 +67,11 @@ $env:DATABASE_URL = "postgres://postgres:YOURPASSWORD@localhost:5432/restauranto
 npm run dev
 ```
 
-Domain tests: `cd app\domain && npm test` (70). Server tests incl. a throwaway-PostgreSQL integration: `cd app\server && npm test` (47).
+Domain tests: `cd app\domain && npm test` (70). Server tests incl. a throwaway-PostgreSQL integration: `cd app\server && npm test` (48).
 
 ## How work runs now (D21)
 
-The orchestrator (Fable) plans, writes ticket contracts under `docs/tickets/`, assigns models, and reviews; worker sessions build, ONE at a time (all sessions share this folder). Merged so far: E11-T1 through T4, E8-T2, E19-T1, and E19-T2 (the /insights page, reviewed and merged 2026-08-23; the review confirmed one defect, the Tips tile's declared figure misses employees without a scorecard row, ticketed as E19-T3). Next to fire: E19-T3 (Opus, small: declared-tips total the tile can trust; closes epic E19), then E20-T1 (Sonnet, guestbook spec doc). One-liner to fire a ticket: "You are a worker session. Execute the ticket at docs/tickets/<name>.md exactly; it is your entire scope."
+The orchestrator (Fable) plans, writes ticket contracts under `docs/tickets/`, assigns models, and reviews; worker sessions build, ONE at a time (all sessions share this folder). Merged so far: E11-T1 through T4, E8-T2, E19-T1, and E19-T2 (the /insights page, reviewed and merged 2026-08-23; the review confirmed one defect, the Tips tile's declared figure misses employees without a scorecard row, ticketed as E19-T3). E19-T3 (the declared-tips total behind that defect) is implemented and awaiting its review; it closes epic E19. Next to fire: E20-T1 (Sonnet, guestbook spec doc). One-liner to fire a ticket: "You are a worker session. Execute the ticket at docs/tickets/<name>.md exactly; it is your entire scope."
 
 ## In flight
 

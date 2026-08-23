@@ -830,6 +830,9 @@ describe("reads", () => {
     // the page reads the two E19-T1 projections and nothing else
     expect(page.body).toContain("/v1/insights/servers");
     expect(page.body).toContain("/v1/insights/heatmap");
+    // and the Tips tile takes declared cash from the server's own total
+    // rather than summing the scorecard rows (E19-T3)
+    expect(page.body).toContain("declaredTipsTotalMinor");
     // and every other page can reach it
     for (const url of ["/pos", "/tables", "/kds", "/menu", "/close"]) {
       expect((await app.inject({ method: "GET", url })).body).toContain('href="/insights"');
@@ -1406,6 +1409,10 @@ describe("insights: server attribution and the sales heatmap (E19)", () => {
     const day2 = (await app.inject({ method: "GET", url: "/v1/day" })).json();
     expect((after.servers as ServerRowJson[])[0]!.declaredTipsMinor).toBe(900);
     expect(sum((after.servers as ServerRowJson[]).map((s) => s.declaredTipsMinor))).toBe(day2.summary.declaredTipsMinor);
+    // and the top-level total says the same thing (E19-T3), which is the
+    // figure the Tips tile prints
+    expect(after.declaredTipsTotalMinor).toBe(900);
+    expect(after.declaredTipsTotalMinor).toBe(day2.summary.declaredTipsMinor);
 
     // the heatmap holds the same money, bucketed by when the checks opened
     const heat = (await app.inject({ method: "GET", url: "/v1/insights/heatmap" })).json();
@@ -1418,6 +1425,40 @@ describe("insights: server attribution and the sales heatmap (E19)", () => {
     expect(heat.daysCovered).toBe(1);
     // one service, so all of it sits under today's column (index 0 = Sunday)
     expect((heat.dayTotals as number[])[new Date().getDay()]).toBe(6800);
+  });
+
+  it("counts declared tips from someone who never closed a check (E19-T3)", async () => {
+    const app = buildServer();
+    await signIn(app, "dev-gia", "2468");
+    await signIn(app, "dev-sofia", "3579");
+    await signIn(app, "dev-marco", "1122"); // Marco works the pass and the close, not a table
+
+    await serviceCheck(app, "dev-gia", "Table 14", [BURRATA, TWO_ACQUA], 100);
+    await serviceCheck(app, "dev-sofia", "Table 3", [TIRAMISU], 100);
+
+    const clockOut = async (device: string, pin: string, declaredTipsMinor: number) => {
+      const res = await app.inject({ method: "POST", url: "/v1/shifts/clockout",
+        payload: { ...ENV(20, { deviceId: device }), pin, declaredTipsMinor } });
+      expect(res.statusCode).toBe(200);
+    };
+    await clockOut("dev-gia", "2468", 500);
+    await clockOut("dev-sofia", "3579", 700);
+    await clockOut("dev-marco", "1122", 3400); // zero checks, so zero scorecard rows
+
+    const report = (await app.inject({ method: "GET", url: "/v1/insights/servers" })).json();
+    const servers = report.servers as ServerRowJson[];
+    // the scorecard is still the people who closed checks, and each row is
+    // still that person's OWN declaration: nobody carries Marco's cash
+    expect(servers.map((s) => s.serverName)).toEqual(["Gia R.", "Sofia T."]);
+    expect(servers.map((s) => s.declaredTipsMinor)).toEqual([500, 700]);
+
+    // the total is every declaration in the shift window, row or no row
+    const day = (await app.inject({ method: "GET", url: "/v1/day" })).json();
+    expect(report.declaredTipsTotalMinor).toBe(4600);
+    expect(report.declaredTipsTotalMinor).toBe(day.summary.declaredTipsMinor);
+    // the drift this closes: summing the rows loses the 3400 Marco declared
+    expect(sum(servers.map((s) => s.declaredTipsMinor))).toBe(1200);
+    expect(report.declaredTipsTotalMinor - sum(servers.map((s) => s.declaredTipsMinor))).toBe(3400);
   });
 
   it("counts a voided line as a void only, never as course value or net", async () => {

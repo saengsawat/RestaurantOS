@@ -1346,7 +1346,14 @@ export class Engine {
     }
     const servers = [...rows.values()].sort((a, b) => b.netMinor - a.netMinor);
     const courseKeys = COURSE_ORDER.filter((key) => servers.some((s) => (s.courses[key] ?? 0) > 0));
-    return { serviceDate: date, courseKeys, servers, average: averageRow(servers) };
+    // EVERY declaration in today's window, row or no row. A row exists only
+    // for someone who closed a check, but a manager sealing the day and a
+    // server who only ran food declare cash tips too, and their money is
+    // still the shift's money. Summing the rows would lose it, which is
+    // exactly the drift this field closes: it equals the day report's
+    // declaredTipsMinor unconditionally.
+    const declaredTipsTotalMinor = shifts.reduce((a, s) => a + (s.declaredTipsMinor ?? 0), 0);
+    return { serviceDate: date, courseKeys, servers, average: averageRow(servers), declaredTipsTotalMinor };
   }
 
   /**

@@ -248,13 +248,18 @@ function render(){
   /* tiles: covers and checks are sums of the report's own counts, the
      averages and tips come straight off the endpoint */
   const covers=sum(rows,s=>s.covers),checks=sum(rows,s=>s.checks);
-  const cardTips=sum(rows,s=>s.tipMinor),declared=sum(rows,s=>s.declaredTipsMinor);
+  /* card tips are safe to sum from the rows (a payment only exists on a
+     closed check, so no row can be missing one), but declared cash tips come
+     from SHIFTS: a manager who closed the day and never took a table has no
+     row, and their declaration still belongs to tonight. The server sends
+     that total, so the tile reads it instead of adding rows up. */
+  const cardTips=sum(rows,s=>s.tipMinor),declared=report.declaredTipsTotalMinor;
   $("#tiles").innerHTML=[
     ["Covers",String(covers),checks?"guests seated on closed checks":"nobody yet"],
     ["Checks closed",String(checks),rows.length?"across "+rows.length+" server"+(rows.length===1?"":"s"):""],
     ["Net sales",money(sum(rows,s=>s.netMinor)),"gross less discounts"],
     ["Avg check",avg?money(avg.avgCheckMinor):money(0),"per-server average"],
-    ["Tips",money(cardTips+declared),"card "+money(cardTips)+" + declared "+money(declared)],
+    ["Tips",money(cardTips+declared),"card "+money(cardTips)+" + declared "+money(declared)+" (every shift)"],
   ].map(([k,v,s])=>`<div class="card"><div class="k">${k}</div><div class="v num">${v}</div>${s?`<div class="s">${esc(s)}</div>`:""}</div>`).join("");
 
   /* legend: one chip per course actually sold, in the server's own order */
