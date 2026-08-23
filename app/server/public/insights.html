@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>RestaurantOS Insights · connected</title>
+<style>
+:root{
+  color-scheme:light;
+  --brand:#9fe870;--brand-ink:#163300;--brand-wash:rgba(159,232,112,.18);
+  --bg:#f2f1ec;--panel:#fff;--surface:#fff;--surface-2:#e9ebe4;
+  --ink:#0e0f0c;--ink-2:#3f423d;--ink-3:#5f635c;--ink-4:#787c74;
+  --info:#0a7ea4;--info-wash:rgba(10,126,164,.10);--info-line:rgba(10,126,164,.30);
+  --amber:#a16207;--amber-wash:rgba(161,98,7,.10);--amber-line:rgba(161,98,7,.30);
+  --green:#116e3b;--green-wash:rgba(17,110,59,.10);--green-line:rgba(17,110,59,.32);
+  --red:#c22f35;--red-wash:rgba(194,47,53,.09);--red-line:rgba(194,47,53,.32);
+  --line:rgba(14,15,12,.12);--line-subtle:rgba(14,15,12,.06);
+  --ring:0 0 0 1px rgba(14,15,12,.12);--shadow-lg:0 16px 40px rgba(14,15,12,.16);
+  --overlay:rgba(14,15,12,.45);
+  --font:"Inter",ui-sans-serif,system-ui,sans-serif;--mono:ui-monospace,Consolas,monospace;
+  --vph:100vh;--tap:44px;
+}
+@supports (height:100dvh){:root{--vph:100dvh}}
+@media (prefers-color-scheme:dark){:root{
+  color-scheme:dark;
+  --bg:#0e0f0c;--panel:#161814;--surface:#1d201b;--surface-2:#282c26;
+  --ink:#f2f1ec;--ink-2:#c9cdc4;--ink-3:#9a9e94;--ink-4:#83877d;
+  --info:#4cc3e8;--info-wash:rgba(76,195,232,.12);--info-line:rgba(76,195,232,.34);
+  --amber:#e3b341;--amber-wash:rgba(227,179,65,.12);--amber-line:rgba(227,179,65,.34);
+  --green:#34d399;--green-wash:rgba(52,211,153,.11);--green-line:rgba(52,211,153,.34);
+  --red:#f0555a;--red-wash:rgba(240,85,90,.12);--red-line:rgba(240,85,90,.36);
+  --line:rgba(242,241,236,.10);--line-subtle:rgba(242,241,236,.05);
+  --ring:0 0 0 1px rgba(242,241,236,.10);--overlay:rgba(0,0,0,.6);
+}}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:var(--vph)}
+body{background:var(--bg);color:var(--ink);font:14.5px/1.45 var(--font);overflow:hidden;user-select:none;
+  -webkit-font-smoothing:antialiased;display:flex;flex-direction:column}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+button:focus-visible,a:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+.num{font-variant-numeric:tabular-nums}
+
+.topbar{display:flex;align-items:center;gap:12px;background:var(--panel);border-bottom:1px solid var(--line);
+  padding:0 16px;min-height:54px}
+.logo{width:32px;height:32px;border-radius:999px;background:var(--brand);color:var(--brand-ink);
+  display:flex;align-items:center;justify-content:center;font-weight:800}
+.t b{font-size:15px}
+.t small{display:block;font-size:10px;color:var(--ink-4);letter-spacing:.05em;text-transform:uppercase}
+.nav{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap}
+.nav a{color:var(--ink-3);text-decoration:none;font-size:13px;font-weight:600;padding:0 14px;border-radius:999px;
+  min-height:var(--tap);display:inline-flex;align-items:center}
+.nav a.on{background:var(--brand-wash);color:var(--ink)}
+
+.wrap{flex:1;overflow-y:auto;overflow-x:hidden;padding:16px 18px 28px;max-width:1080px;width:100%;margin:0 auto}
+.banner{display:flex;align-items:center;gap:12px;flex-wrap:wrap;border-radius:14px;padding:13px 16px;margin-bottom:14px;
+  box-shadow:var(--ring);background:var(--surface)}
+.banner b{font-size:16px}
+.banner .sp{flex:1}
+.chip{border-radius:999px;padding:3px 10px;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;border:1px solid}
+.chip.green{color:var(--green);background:var(--green-wash);border-color:var(--green-line)}
+.chip.info{color:var(--info);background:var(--info-wash);border-color:var(--info-line)}
+.chip.amber{color:var(--amber);background:var(--amber-wash);border-color:var(--amber-line)}
+.chip.red{color:var(--red);background:var(--red-wash);border-color:var(--red-line)}
+.chip.mute{color:var(--ink-3);background:var(--surface-2);border-color:var(--line)}
+
+.sec-h{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);margin:18px 2px 8px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px}
+.card{background:var(--surface);border-radius:14px;box-shadow:var(--ring);padding:12px 14px}
+.card .k{font-size:11.5px;color:var(--ink-3);font-weight:600}
+.card .v{font-size:22px;font-weight:800;margin-top:2px}
+.card .s{font-size:11px;color:var(--ink-4);margin-top:1px}
+
+.blk{background:var(--surface);border-radius:14px;box-shadow:var(--ring);padding:4px 15px}
+.blk .empty{padding:14px 0;font-size:13.5px;color:var(--ink-2)}
+.blk .empty a{color:var(--info);font-weight:600;text-decoration:none}
+
+/* legend: the shipped chip component, one per course, same color every row */
+.legend{display:flex;gap:6px;flex-wrap:wrap;margin:0 2px 8px}
+
+/* server scorecard rows */
+.srow{display:grid;grid-template-columns:minmax(112px,1.1fr) minmax(120px,3fr) minmax(86px,auto);
+  gap:12px;align-items:center;width:100%;text-align:left;min-height:var(--tap);
+  padding:9px 0;border-bottom:1px solid var(--line-subtle);transition:transform .1s}
+.blk .srow:last-child{border-bottom:none}
+.srow:active{transform:scale(.97)}
+.srow .who b{font-size:14.5px;display:block}
+.srow .who span{font-size:11.5px;color:var(--ink-3)}
+.srow .amt{text-align:right;font-size:15px;font-weight:700}
+.srow.avg{color:var(--ink-3)}
+.srow.avg .who b{font-weight:600}
+.track{position:relative;height:22px;border-radius:8px;background:var(--surface-2);overflow:hidden}
+.srow.avg .track{background:transparent;box-shadow:inset 0 0 0 1px var(--line)}
+.bar{position:absolute;inset:0 auto 0 0;display:flex;border-radius:8px;overflow:hidden;min-width:2px}
+.seg{height:100%;box-shadow:inset 0 0 0 1px var(--line-subtle)}
+.seg.BEVERAGE{background:var(--info-wash);box-shadow:inset 0 0 0 1px var(--info-line)}
+.seg.ANTIPASTI{background:var(--amber-wash);box-shadow:inset 0 0 0 1px var(--amber-line)}
+.seg.PRIMI{background:var(--green-wash);box-shadow:inset 0 0 0 1px var(--green-line)}
+.seg.SECONDI{background:var(--red-wash);box-shadow:inset 0 0 0 1px var(--red-line)}
+.seg.DOLCI{background:var(--surface-2);box-shadow:inset 0 0 0 1px var(--line)}
+.hint{font-size:11.5px;color:var(--ink-4);margin:6px 2px 0}
+
+/* heatmap: wide content scrolls inside its own box, the page never does */
+.heatwrap{background:var(--surface);border-radius:14px;box-shadow:var(--ring);padding:12px;overflow-x:auto}
+.heat{display:grid;gap:3px;min-width:352px}
+.heat .hh{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3);
+  text-align:center;padding-bottom:2px}
+.heat .hr{font-size:11.5px;font-weight:600;color:var(--ink-3);display:flex;align-items:center;justify-content:flex-end;
+  padding-right:6px;white-space:nowrap}
+.cell{position:relative;min-height:var(--tap);border-radius:8px;background:var(--surface-2);overflow:hidden;
+  transition:transform .1s}
+.cell:active{transform:scale(.97)}
+.cell .fill{position:absolute;inset:0;background:var(--info)}
+.cell .dot{position:relative;display:block;height:100%;display:flex;align-items:center;justify-content:center;
+  font-size:11px;font-weight:700;color:var(--ink)}
+.cell.void{background:transparent;box-shadow:inset 0 0 0 1px var(--line-subtle)}
+.heat .pct{font-size:11.5px;font-weight:700;color:var(--ink-2);text-align:center;padding-top:4px}
+.heat .pctlbl{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3);
+  display:flex;align-items:center;justify-content:flex-end;padding:4px 6px 0 0}
+.cap{font-size:12.5px;color:var(--ink-2);margin:9px 2px 0;line-height:1.5}
+.foot{font-size:11.5px;color:var(--ink-4);margin:20px 2px 0;line-height:1.55}
+
+/* detail card (Lightspeed-style popover, rendered as a modal so touch works) */
+.ov{position:fixed;inset:0;background:var(--overlay);display:none;align-items:center;justify-content:center;z-index:100;padding:16px}
+.ov.open{display:flex}
+.modal{background:var(--surface);border-radius:16px;box-shadow:var(--shadow-lg);width:min(460px,100%);
+  max-height:calc(var(--vph) - 32px);display:flex;flex-direction:column;animation:pop .15s ease-out}
+@keyframes pop{from{transform:scale(.97);opacity:.6}to{transform:none;opacity:1}}
+.m-h{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:15px 18px 8px}
+.m-h h3{font-size:18px;font-weight:700}
+.m-h .sub{font-size:12px;color:var(--ink-3)}
+.m-x{width:var(--tap);height:var(--tap);flex:none;border-radius:999px;background:var(--surface-2)}
+.m-b{padding:2px 18px 16px;overflow-y:auto;min-height:0}
+.mtab{width:100%;border-collapse:collapse}
+.mtab th{font-size:11px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3);
+  text-align:right;padding:6px 0 6px 8px;border-bottom:1px solid var(--line)}
+.mtab th:first-child{text-align:left;padding-left:0}
+.mtab td{font-size:14px;padding:8px 0 8px 8px;text-align:right;border-bottom:1px solid var(--line-subtle);
+  font-variant-numeric:tabular-nums}
+.mtab td:first-child{text-align:left;padding-left:0;font-variant-numeric:normal}
+.mtab tr:last-child td{border-bottom:none}
+.mtab .up{color:var(--green);font-weight:600}
+.mtab .down{color:var(--red);font-weight:600}
+.mtab .flat{color:var(--ink-3);font-weight:600}
+.mtab .rk{color:var(--ink-3);font-size:12.5px}
+.mnote{font-size:11.5px;color:var(--ink-4);margin-top:10px;line-height:1.5}
+.rows{font-size:14px}
+.rows div{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--line-subtle)}
+.rows div:last-child{border-bottom:none}
+.rows b{font-variant-numeric:tabular-nums}
+
+.toasts{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:200;display:flex;flex-direction:column;gap:8px;align-items:center}
+.toast{background:var(--ink);color:var(--bg);border-radius:999px;padding:9px 18px;font-size:13px;font-weight:600;max-width:92vw}
+.toast.err{background:var(--red);color:#fff}
+
+@media (max-width:820px){
+  .wrap{padding:12px 12px 24px}
+  .srow{grid-template-columns:1fr auto;grid-template-areas:"who amt" "track track";row-gap:8px}
+  .srow .who{grid-area:who}.srow .amt{grid-area:amt}.srow .track{grid-area:track}
+  /* the topbar stays one 54px row: six links scroll sideways rather than
+     wrapping into three rows and shoving the title around */
+  .topbar{gap:8px;padding:0 12px}
+  .t small{display:none}
+  .t b{white-space:nowrap}
+  .nav{flex-wrap:nowrap;overflow-x:auto;gap:2px}
+  .nav a{padding:8px 10px;white-space:nowrap}
+}
+@media (hover:hover){
+  .srow:hover{background:var(--surface-2)}
+  .cell:hover{box-shadow:inset 0 0 0 2px var(--info-line)}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="logo">R</div>
+  <div class="t"><b>Insights · Osteria Nove</b><small>RestaurantOS operator report · live from the ledger</small></div>
+  <nav class="nav"><a href="/pos">Service</a><a href="/tables">Tables</a><a href="/kds">Kitchen</a><a href="/menu">Menu</a><a href="/close">Close</a><a href="/insights" class="on">Insights</a></nav>
+</header>
+<div class="wrap">
+  <div class="banner" id="banner"></div>
+
+  <div class="sec-h">Tonight at a glance</div>
+  <div class="grid" id="tiles"></div>
+
+  <div class="sec-h">Servers · net sales by course</div>
+  <div class="legend" id="legend"></div>
+  <div class="blk" id="servers"></div>
+  <p class="hint" id="serversHint"></p>
+
+  <div class="sec-h">Busiest times</div>
+  <div class="heatwrap"><div class="heat" id="heat"></div></div>
+  <p class="cap">Quiet hours are promotion hours; put your best servers on the dark ones.</p>
+  <p class="cap" id="heatNote"></p>
+
+  <p class="foot">Every figure on this page comes from the ledger: closed checks, their lines, their payments, their shifts. Nothing here is stored as a report, it is computed on read, so a number cannot drift from the money it describes. This page formats what the server sends and does no money math of its own. Demo data only: Osteria Nove is a fictional restaurant and these are concept-build figures.</p>
+</div>
+
+<div class="ov" id="ov"><div class="modal">
+  <div class="m-h"><div><h3 id="dTitle"></h3><div class="sub" id="dSub"></div></div><button class="m-x" id="dClose" aria-label="Close">✕</button></div>
+  <div class="m-b" id="dBody"></div>
+</div></div>
+
+<div class="toasts" id="toasts"></div>
+
+<script>
+/* Insights client (E19-T2): the operator report over the two read-only
+   projections from E19-T1. This page renders and formats; it never does
+   money math. The only arithmetic here is percent-for-pixel-width on the
+   bars and heatmap, and the variance percent the detail card prints. */
+const $=s=>document.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const money=n=>"$"+(n/100).toFixed(2);
+const sum=(list,pick)=>list.reduce((a,x)=>a+pick(x),0);
+const DAYS=[["Mon",1],["Tue",2],["Wed",3],["Thu",4],["Fri",5],["Sat",6],["Sun",0]];
+const COURSE_LABEL={BEVERAGE:"Beverage",ANTIPASTI:"Antipasti",PRIMI:"Primi",SECONDI:"Secondi",DOLCI:"Dolci"};
+const COURSE_CHIP={BEVERAGE:"info",ANTIPASTI:"amber",PRIMI:"green",SECONDI:"red",DOLCI:"mute"};
+let report=null,heat=null;
+
+function toast(m,k){const el=document.createElement("div");el.className="toast"+(k?" "+k:"");el.textContent=m;
+  $("#toasts").appendChild(el);setTimeout(()=>el.remove(),3400);}
+
+function hourLabel(h){
+  const am=h<12||h===24;const h12=h%12===0?12:h%12;
+  return h12+(am?" AM":" PM");
+}
+function minutes(n){return n>=60?Math.floor(n/60)+"h "+String(n%60).padStart(2,"0")+"m":n+" min";}
+
+async function refresh(){
+  const [servers,cells]=await Promise.all([
+    fetch("/v1/insights/servers").then(r=>r.json()),
+    fetch("/v1/insights/heatmap").then(r=>r.json()),
+  ]);
+  report=servers;heat=cells;
+  render();
+}
+
+/* ------------------------------- render ------------------------------- */
+
+function render(){
+  const rows=report.servers,avg=report.average;
+
+  $("#banner").innerHTML=`<b>Service date ${esc(report.serviceDate)}</b>
+    <span class="chip ${rows.length?"green":"mute"}">${rows.length?rows.length+(rows.length===1?" server":" servers")+" on the board":"No closed checks yet"}</span>
+    <span class="sp"></span>
+    <span class="chip info">Refreshes every 15s</span>`;
+
+  /* tiles: covers and checks are sums of the report's own counts, the
+     averages and tips come straight off the endpoint */
+  const covers=sum(rows,s=>s.covers),checks=sum(rows,s=>s.checks);
+  const cardTips=sum(rows,s=>s.tipMinor),declared=sum(rows,s=>s.declaredTipsMinor);
+  $("#tiles").innerHTML=[
+    ["Covers",String(covers),checks?"guests seated on closed checks":"nobody yet"],
+    ["Checks closed",String(checks),rows.length?"across "+rows.length+" server"+(rows.length===1?"":"s"):""],
+    ["Net sales",money(sum(rows,s=>s.netMinor)),"gross less discounts"],
+    ["Avg check",avg?money(avg.avgCheckMinor):money(0),"per-server average"],
+    ["Tips",money(cardTips+declared),"card "+money(cardTips)+" + declared "+money(declared)],
+  ].map(([k,v,s])=>`<div class="card"><div class="k">${k}</div><div class="v num">${v}</div>${s?`<div class="s">${esc(s)}</div>`:""}</div>`).join("");
+
+  /* legend: one chip per course actually sold, in the server's own order */
+  $("#legend").innerHTML=report.courseKeys.map(c=>
+    `<span class="chip ${COURSE_CHIP[c]||"mute"}">${esc(COURSE_LABEL[c]||c)}</span>`).join("");
+
+  /* scorecard: bar length is net against the top server, segments are that
+     server's course mix. Both are pixel math, never money math. */
+  const maxNet=Math.max(1,...rows.map(s=>s.netMinor),avg?avg.netMinor:0);
+  const bar=(row)=>{
+    const courses=report.courseKeys.filter(c=>(row.courses[c]||0)>0);
+    const inside=courses.reduce((a,c)=>a+row.courses[c],0)||1;
+    const segs=courses.map(c=>
+      `<span class="seg ${c}" style="width:${(row.courses[c]/inside*100).toFixed(2)}%" title="${esc(COURSE_LABEL[c]||c)} ${money(row.courses[c])}"></span>`).join("");
+    return `<div class="track"><div class="bar" style="width:${(row.netMinor/maxNet*100).toFixed(2)}%">${segs}</div></div>`;
+  };
+
+  $("#servers").innerHTML=rows.length?(rows.map(s=>
+    `<button class="srow" data-server="${esc(s.serverId)}">
+       <div class="who"><b>${esc(s.serverName)}</b><span>${s.checks} check${s.checks===1?"":"s"} · ${s.covers} cover${s.covers===1?"":"s"} · ${minutes(s.avgTurnMinutes)} turn</span></div>
+       ${bar(s)}
+       <div class="amt num">${money(s.netMinor)}</div>
+     </button>`).join("")
+    +(avg?`<div class="srow avg">
+       <div class="who"><b>Average server</b><span>${avg.checks} check${avg.checks===1?"":"s"} · ${avg.covers} cover${avg.covers===1?"":"s"} · ${minutes(avg.avgTurnMinutes)} turn</span></div>
+       ${bar(avg)}
+       <div class="amt num">${money(avg.netMinor)}</div>
+     </div>`:""))
+    :`<div class="empty">No closed checks yet today; close a few in Service and the scorecard fills in. <a href="/pos">Open Service ▸</a></div>`;
+  $("#serversHint").textContent=rows.length?"Tap a server for their card: rank, actual, average, and variance on every metric.":"";
+  document.querySelectorAll("[data-server]").forEach(b=>b.onclick=()=>serverCard(b.dataset.server));
+
+  renderHeat();
+}
+
+/* metric table for the detail card. good:"high" means above average is good
+   (sales, tips); good:"low" means below average is good (voids, turn time). */
+const METRICS=[
+  {k:"netMinor",      label:"Net sales",        fmt:money,   good:"high"},
+  {k:"checks",        label:"Checks",           fmt:String,  good:"high"},
+  {k:"covers",        label:"Covers",           fmt:String,  good:"high"},
+  {k:"avgCheckMinor", label:"Avg check",        fmt:money,   good:"high"},
+  {k:"perCoverMinor", label:"Per cover",        fmt:money,   good:"high"},
+  {k:"tipMinor",      label:"Card tips",        fmt:money,   good:"high"},
+  {k:"declaredTipsMinor",label:"Declared tips", fmt:money,   good:"high"},
+  {k:"avgTurnMinutes",label:"Turn time",        fmt:minutes, good:"low"},
+  {k:"voidCount",     label:"Voids",            fmt:String,  good:"low"},
+  {k:"voidValueMinor",label:"Void value",       fmt:money,   good:"low"},
+  {k:"discountMinor", label:"Discounts",        fmt:money,   good:"low"},
+];
+
+function serverCard(id){
+  const rows=report.servers,avg=report.average;
+  const s=rows.find(r=>r.serverId===id);
+  if(!s||!avg)return;
+  $("#dTitle").textContent=s.serverName;
+  $("#dSub").textContent=s.checks+" closed check"+(s.checks===1?"":"s")+" · service date "+report.serviceDate;
+  $("#dBody").innerHTML=`<table class="mtab">
+    <thead><tr><th>Metric</th><th>Actual</th><th>Average</th><th>Variance</th></tr></thead>
+    <tbody>${METRICS.map(m=>{
+      const actual=s[m.k],mean=avg[m.k];
+      /* rank: 1 is always the best end of that metric, not just the biggest */
+      const order=[...rows].sort((a,b)=>m.good==="low"?a[m.k]-b[m.k]:b[m.k]-a[m.k]);
+      const rank=order.findIndex(r=>r.serverId===s.serverId)+1;
+      const pct=mean?Math.round((actual-mean)/mean*100):null;
+      const better=m.good==="low"?actual<mean:actual>mean;
+      const cls=pct===null?"flat":(actual===mean?"flat":(better?"up":"down"));
+      const shown=pct===null?"n/a":(pct>0?"+":"")+pct+"%";
+      return `<tr><td>${m.label}<span class="rk"> · rank ${rank} of ${rows.length}</span></td>
+        <td><b>${esc(m.fmt(actual))}</b></td><td>${esc(m.fmt(mean))}</td><td class="${cls}">${shown}</td></tr>`;
+    }).join("")}</tbody></table>
+    <div class="sec-h" style="margin:14px 0 6px">Net sales by course</div>
+    <div class="rows">${report.courseKeys.map(c=>
+      `<div><span><span class="chip ${COURSE_CHIP[c]||"mute"}">${esc(COURSE_LABEL[c]||c)}</span></span>
+        <b>${money(s.courses[c]||0)}<span class="rk"> · avg ${money(avg.courses[c]||0)}</span></b></div>`).join("")}
+    </div>
+    <p class="mnote">Actual and average come from the server verbatim; the variance percent is display math against the average row. Rank 1 is the best of ${rows.length} on that metric. Course values are the lines that were served, so a discount on the check shows in net sales but not in a course.</p>`;
+  openCard();
+}
+
+/* ------------------------------ heatmap ------------------------------ */
+
+function renderHeat(){
+  const cells=heat.cells;
+  const byKey=new Map(cells.map(c=>[c.day+":"+c.hour,c]));
+  /* the default window is 8 AM to 11 PM, widened by any hour that actually
+     holds money, so nothing on the ledger is hidden by the grid */
+  const hours=[...new Set([...Array.from({length:16},(_,i)=>i+8),...cells.map(c=>c.hour)])].sort((a,b)=>a-b);
+  const max=Math.max(1,...cells.map(c=>c.netMinor));
+  const grand=heat.grandNetMinor;
+
+  const head=`<div class="hh"></div>`+DAYS.map(([n])=>`<div class="hh">${n}</div>`).join("");
+  const body=hours.map(h=>
+    `<div class="hr">${hourLabel(h)}</div>`+DAYS.map(([name,d])=>{
+      const c=byKey.get(d+":"+h);
+      if(!c)return `<div class="cell void"></div>`;
+      /* alpha scales with this cell's net against the busiest cell */
+      const a=(0.12+0.38*(c.netMinor/max)).toFixed(3);
+      const label=`${name} ${hourLabel(h)}: net ${money(c.netMinor)}, ${c.checks} check${c.checks===1?"":"s"}, ${c.covers} cover${c.covers===1?"":"s"}`;
+      return `<button class="cell" data-cell="${d}:${h}" aria-label="${esc(label)}" title="${esc(label)}">
+        <span class="fill" style="opacity:${a}"></span><span class="dot num">${c.checks}</span></button>`;
+    }).join("")).join("");
+  const foot=`<div class="pctlbl">Share</div>`+DAYS.map(([,d])=>{
+    const total=heat.dayTotals[d]||0;
+    return `<div class="pct num">${grand?Math.round(total/grand*100)+"%":"0%"}</div>`;
+  }).join("");
+
+  $("#heat").style.gridTemplateColumns="56px repeat(7,minmax(44px,1fr))";
+  $("#heat").innerHTML=cells.length?head+body+foot
+    :`<div class="hr"></div><div class="hh" style="grid-column:span 7;text-align:left;text-transform:none;letter-spacing:0;font-size:13.5px;font-weight:500;color:var(--ink-2)">No closed checks in the ledger yet. The grid fills in as service days close.</div>`;
+  $("#heatNote").textContent=cells.length
+    ? "Cell number is checks closed in that hour; the shade is net sales against the busiest hour. "
+      +heat.daysCovered+" service day"+(heat.daysCovered===1?"":"s")+" of history, "+money(grand)+" net in total. Share is each day's percent of that net."
+    : "";
+
+  document.querySelectorAll("[data-cell]").forEach(b=>b.onclick=()=>cellCard(b.dataset.cell));
+}
+
+function cellCard(key){
+  const c=heat.cells.find(x=>x.day+":"+x.hour===key);
+  if(!c)return;
+  const name=(DAYS.find(([,d])=>d===c.day)||["Day"])[0];
+  $("#dTitle").textContent=name+" · "+hourLabel(c.hour);
+  $("#dSub").textContent="Every closed check that opened in this hour";
+  $("#dBody").innerHTML=`<div class="rows">
+    <div><span>Net sales</span><b>${money(c.netMinor)}</b></div>
+    <div><span>Checks</span><b>${c.checks}</b></div>
+    <div><span>Covers</span><b>${c.covers}</b></div>
+    <div><span>Share of all net</span><b>${heat.grandNetMinor?Math.round(c.netMinor/heat.grandNetMinor*100)+"%":"0%"}</b></div>
+  </div>
+  <p class="mnote">Bucketed by when each check was opened, in the restaurant's own clock, over ${heat.daysCovered} service day${heat.daysCovered===1?"":"s"}.</p>`;
+  openCard();
+}
+
+/* --------------------------- card plumbing --------------------------- */
+
+function openCard(){$("#ov").classList.add("open");$("#dClose").focus();}
+function closeCard(){$("#ov").classList.remove("open");}
+$("#dClose").onclick=closeCard;
+$("#ov").onclick=e=>{if(e.target===$("#ov"))closeCard();};
+addEventListener("keydown",e=>{if(e.key==="Escape")closeCard();});
+
+function setViewportH(){document.documentElement.style.setProperty("--vph",window.innerHeight+"px");}
+addEventListener("resize",setViewportH);setViewportH();
+
+/* on a phone the six nav pills scroll sideways, and the pill for THIS page
+   would start off the right edge; bring it into view once at boot */
+const here=document.querySelector(".nav a.on");
+if(here)here.scrollIntoView({block:"nearest",inline:"end"});
+
+refresh().catch(()=>toast("Cannot reach the server","err"));
+/* reports change slowly, so poll gently, and never while a card is open */
+setInterval(()=>{if(!$("#ov").classList.contains("open"))refresh().catch(()=>{});},15000);
+</script>
+</body>
+</html>

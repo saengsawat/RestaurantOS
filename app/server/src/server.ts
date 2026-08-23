@@ -14,6 +14,7 @@ const POS_PAGE = page("pos.html");
 const KDS_PAGE = page("kds.html");
 const TABLES_PAGE = page("tables.html");
 const CLOSE_PAGE = page("close.html");
+const INSIGHTS_PAGE = page("insights.html");
 const MENU_PAGE = page("menu.html");
 const LOCK_PAGE = page("lock.html");
 
@@ -79,6 +80,7 @@ export function buildServer(store: Store = new MemoryStore(), storeName = "memor
   app.get("/kds", async (_req, reply) => reply.type("text/html").send(KDS_PAGE));
   app.get("/tables", async (_req, reply) => reply.type("text/html").send(TABLES_PAGE));
   app.get("/close", async (_req, reply) => reply.type("text/html").send(CLOSE_PAGE));
+  app.get("/insights", async (_req, reply) => reply.type("text/html").send(INSIGHTS_PAGE));
   app.get("/menu", async (_req, reply) => reply.type("text/html").send(MENU_PAGE));
   app.get("/health/live", async () => ({ ok: true, service: "restaurantos-server", store: storeName }));
 

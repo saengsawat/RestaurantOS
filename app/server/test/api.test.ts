@@ -821,6 +821,21 @@ describe("reads", () => {
     expect(pos.body).toContain("/split?");
   });
 
+  it("serves the Insights page at /insights (E19-T2)", async () => {
+    const app = buildServer();
+    const page = await app.inject({ method: "GET", url: "/insights" });
+    expect(page.statusCode).toBe(200);
+    expect(page.headers["content-type"]).toContain("text/html");
+    expect(page.body).toContain("Insights");
+    // the page reads the two E19-T1 projections and nothing else
+    expect(page.body).toContain("/v1/insights/servers");
+    expect(page.body).toContain("/v1/insights/heatmap");
+    // and every other page can reach it
+    for (const url of ["/pos", "/tables", "/kds", "/menu", "/close"]) {
+      expect((await app.inject({ method: "GET", url })).body).toContain('href="/insights"');
+    }
+  });
+
   it("serves the KDS, Tables, and Close pages and the floor", async () => {
     const app = buildServer();
     expect((await app.inject({ method: "GET", url: "/kds" })).statusCode).toBe(200);
