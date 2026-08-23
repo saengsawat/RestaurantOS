@@ -62,6 +62,12 @@ export interface CheckAggregate {
   checkNo: number;
   tableName: string;
   covers: number;
+  /** the employee who OPENED the check (E19): the attribution the server
+   *  report groups on. Optional because a check written before E19 has no
+   *  opener on it; every new check stamps one, falling back to the seeded
+   *  default so unsigned demo flows still attribute somewhere real. */
+  serverId?: string;
+  serverName?: string;
   status: CheckStatus;
   version: number;
   menuSnapshotId: string;

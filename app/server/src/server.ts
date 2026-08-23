@@ -314,6 +314,13 @@ export function buildServer(store: Store = new MemoryStore(), storeName = "memor
 
   app.get("/v1/day", async () => engine.dayReport());
 
+  /* --------------------------- insights (E19) ---------------------------
+   * Both are pure reads over the ledger, so no envelope and no version:
+   * there is nothing to replay and nothing to conflict with. */
+
+  app.get("/v1/insights/servers", async () => engine.insightsServers());
+  app.get("/v1/insights/heatmap", async () => engine.insightsHeatmap());
+
   app.post("/v1/drawer/open", async (req, reply) => {
     const body = (req.body ?? {}) as EnvelopeBody & { drawerName?: unknown; openingFloatMinor?: unknown };
     const envelope = readEnvelope(body);

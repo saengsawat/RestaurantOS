@@ -161,6 +161,20 @@ describe.skipIf(!PGBIN)("PostgreSQL persistence (E4)", () => {
     const check = back.json().check;
     expect(check.status).toBe("closed");
     expect(check.tableName).toBe("Table 12"); // the transfer survived (party.table_id)
+
+    // E19: the opener came back off the employee join. Nobody signs in during
+    // this test, so the check carries the seeded default, which is exactly
+    // what an unsigned demo terminal stamps: attribution, never null.
+    expect(check.serverId).toBe("33333333-3333-3333-3333-333333333333");
+    expect(check.serverName).toBe("Gia R.");
+
+    // and the close stamped the party's own endpoint (seated_at to cleared_at
+    // is the turn time). No read exposes cleared_at yet, so ask the table.
+    const cleared = execFileSync(path.join(PGBIN!, "psql.exe"),
+      ["-h", "127.0.0.1", "-p", String(PORT), "-U", "rostest", "-d", "ros", "-tAc",
+        `SELECT p.cleared_at IS NOT NULL FROM party p JOIN checks ch ON ch.party_id = p.id WHERE ch.id = '${id}'`],
+      { encoding: "utf8" }).trim();
+    expect(cleared).toBe("t");
     expect(check.lines).toHaveLength(2);
     expect(check.totals.dueMinor).toBe(0);
     expect(check.totals.paidMinor).toBe(1_000 + due); // the labeled portion plus the remainder

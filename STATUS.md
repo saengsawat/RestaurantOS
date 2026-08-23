@@ -11,7 +11,7 @@ Phase 0  Discovery        ████████░░  waiting on Matt sessio
 Phase 1  POS PRD          ██████░░░░  draft v0.1 done, Matt review pending
 Phase 2  Domain + arch    ██████░░░░  schema + domain model done; ADRs frozen on D6
 Phase 3  V1 backlog       ██░░░░░░░░  epic table exists; ticket contracts not yet written
-Phase 4  Build            █████████░  12 epics done (E11 splits closed), E5/E17 in progress: lock screen + five screens + PostgreSQL (112 tests)
+Phase 4  Build            █████████░  12 epics done (E11 splits closed), E5/E17/E19 in progress: lock screen + five screens + PostgreSQL (116 tests)
 Phase 5  Pilot            ░░░░░░░░░░  venue not selected
 Phase 6  Intelligence     ░░░░░░░░░░  by design, after pilot
 ```
@@ -32,6 +32,7 @@ Phases overlap deliberately (decision D13): everything Matt-independent moves; e
 | **E2 state machines** (check + kitchen) | Exhaustive transition tables (all 66 check pairs) + random-walk properties |
 | **E3 modifier validation** | 17 tests: fixtures + generated-menu properties, nesting, corrupt-snapshot safety |
 | **API server** (Fastify, D16): the command protocol live over HTTP: open/order/fire/pay/close, idempotent operation ids, 409 version conflicts, modifier refusals with exact errors, offline cards block close | 10 API tests + verified against the running server with curl |
+| **Insights read APIs (E19-T1)**: every check records the server who opened it; `/v1/insights/servers` (server scorecard: net, tips, covers, avg check, per cover, turn minutes, voids, per-course value, Average row) and `/v1/insights/heatmap` (day x hour net sales). Computed on read, nothing stored | 4 API tests incl. conservation against `/v1/day` (per-server net = gross - discount, per-server tips = day tips) + verified with curl against the running server |
 | **POS web client v0** at `/pos`: the page experience on the real engine: checks rail, menu, modifier modal (required groups, nesting), seats, send, tip/pay, close, 409 recovery, mobile tabs | Screenshot-verified against the running server with seeded live state |
 
 ## Run it
@@ -63,11 +64,11 @@ $env:DATABASE_URL = "postgres://postgres:YOURPASSWORD@localhost:5432/restauranto
 npm run dev
 ```
 
-Domain tests: `cd app\domain && npm test` (70). Server tests incl. a throwaway-PostgreSQL integration: `cd app\server && npm test` (42).
+Domain tests: `cd app\domain && npm test` (70). Server tests incl. a throwaway-PostgreSQL integration: `cd app\server && npm test` (46).
 
 ## How work runs now (D21)
 
-The orchestrator (Fable) plans, writes ticket contracts under `docs/tickets/`, assigns models, and reviews; worker sessions build, ONE at a time (all sessions share this folder). Merged so far: E11-T1 through T4 and E8-T2 (T4 + E8-T2 as the first D22 batch, one session, two labeled commits, one review pass). Next to fire: E19-T1 (Opus, insights core; not concurrent with other app/server tickets), then E19-T2 (Sonnet/Codex, /insights page), and E20-T1 (Sonnet, guestbook spec doc) fits any gap. One-liner to fire a ticket: "You are a worker session. Execute the ticket at docs/tickets/<name>.md exactly; it is your entire scope."
+The orchestrator (Fable) plans, writes ticket contracts under `docs/tickets/`, assigns models, and reviews; worker sessions build, ONE at a time (all sessions share this folder). Merged so far: E11-T1 through T4 and E8-T2 (T4 + E8-T2 as the first D22 batch, one session, two labeled commits, one review pass). E19-T1 (insights core) is implemented and awaiting its cross-model review. Next to fire: E19-T2 (Sonnet/Codex, /insights page, consumes the two E19-T1 endpoints), and E20-T1 (Sonnet, guestbook spec doc) fits any gap. One-liner to fire a ticket: "You are a worker session. Execute the ticket at docs/tickets/<name>.md exactly; it is your entire scope."
 
 ## In flight
 

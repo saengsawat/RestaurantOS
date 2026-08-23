@@ -1279,3 +1279,178 @@ describe("KDS and a check that already settled (E8-T2)", () => {
     expect(kds.body).toContain("chip amber");
   });
 });
+
+interface ServerRowJson {
+  serverId: string;
+  serverName: string;
+  checks: number;
+  covers: number;
+  netMinor: number;
+  totalMinor: number;
+  tipMinor: number;
+  discountMinor: number;
+  declaredTipsMinor: number;
+  voidCount: number;
+  voidValueMinor: number;
+  courses: Record<string, number>;
+  avgCheckMinor: number;
+  perCoverMinor: number;
+  avgTurnMinutes: number;
+}
+
+interface CellJson {
+  day: number;
+  hour: number;
+  netMinor: number;
+  checks: number;
+  covers: number;
+}
+
+async function signIn(app: ReturnType<typeof buildServer>, deviceId: string, pin: string) {
+  const res = await app.inject({ method: "POST", url: "/v1/session", payload: { deviceId, pin } });
+  expect(res.statusCode).toBe(200);
+  return res.json().employee as { id: string; name: string };
+}
+
+/** One whole lifecycle on one device: open, order, fire, pay with a tip, close. */
+async function serviceCheck(
+  app: ReturnType<typeof buildServer>,
+  deviceId: string,
+  tableName: string,
+  items: readonly { itemId: string; quantity: number; seatNo: number }[],
+  tipMinor: number,
+) {
+  const env = (n: number) => ENV(n, { deviceId });
+  const open = await app.inject({ method: "POST", url: "/v1/checks", payload: { ...env(0), tableName, covers: 2 } });
+  expect(open.statusCode).toBe(200);
+  const id = open.json().check.id as string;
+  for (const item of items) {
+    const add = await app.inject({ method: "POST", url: `/v1/checks/${id}/items`, payload: { ...env(1), ...item } });
+    expect(add.statusCode).toBe(200);
+  }
+  expect((await app.inject({ method: "POST", url: `/v1/checks/${id}/send`, payload: env(2) })).statusCode).toBe(200);
+  const due = (await app.inject({ method: "GET", url: `/v1/checks/${id}` })).json().check.totals.dueMinor as number;
+  const pay = await app.inject({ method: "POST", url: `/v1/checks/${id}/payments`,
+    payload: { ...env(3), method: "card", amountMinor: due, tipMinor } });
+  expect(pay.statusCode).toBe(200);
+  const close = await app.inject({ method: "POST", url: `/v1/checks/${id}/close`, payload: env(4) });
+  expect(close.statusCode).toBe(200);
+  return id;
+}
+
+const GIA = "33333333-3333-3333-3333-333333333333";
+const SOFIA = "77777777-7777-4777-8777-777777777777";
+const BURRATA = { itemId: "burrata", quantity: 1, seatNo: 1 };
+const TWO_ACQUA = { itemId: "acqua", quantity: 2, seatNo: 2 };
+const TIRAMISU = { itemId: "tiramisu", quantity: 1, seatNo: 1 };
+
+describe("insights: server attribution and the sales heatmap (E19)", () => {
+  it("credits each check to the server who opened it, and conserves the day's money", async () => {
+    const app = buildServer();
+    await signIn(app, "dev-gia", "2468");
+    await signIn(app, "dev-sofia", "3579");
+
+    // Gia turns two tables: burrata 1600 + two acqua 1200 = 2800 net each
+    await serviceCheck(app, "dev-gia", "Table 14", [BURRATA, TWO_ACQUA], 100);
+    await serviceCheck(app, "dev-gia", "Table 5", [BURRATA, TWO_ACQUA], 100);
+    // Sofia turns one dessert table: 1200 net
+    await serviceCheck(app, "dev-sofia", "Table 3", [TIRAMISU], 100);
+
+    const report = (await app.inject({ method: "GET", url: "/v1/insights/servers" })).json();
+    const servers = report.servers as ServerRowJson[];
+    expect(servers).toHaveLength(2);
+
+    // sorted by net sales, so Gia's 5600 leads Sofia's 1200
+    const [gia, sofia] = servers as [ServerRowJson, ServerRowJson];
+    expect(gia).toMatchObject({
+      serverId: GIA, serverName: "Gia R.", checks: 2, covers: 4,
+      netMinor: 5600, tipMinor: 200, avgCheckMinor: 2800, perCoverMinor: 1400,
+    });
+    expect(gia.courses).toEqual({ ANTIPASTI: 3200, BEVERAGE: 2400 });
+    expect(sofia).toMatchObject({
+      serverId: SOFIA, serverName: "Sofia T.", checks: 1, covers: 2,
+      netMinor: 1200, tipMinor: 100, avgCheckMinor: 1200, perCoverMinor: 600,
+    });
+    expect(sofia.courses).toEqual({ DOLCI: 1200 });
+    // only the courses somebody actually sold, in the fixed menu order
+    expect(report.courseKeys).toEqual(["BEVERAGE", "ANTIPASTI", "DOLCI"]);
+    expect(report.average).toMatchObject({ checks: 2, covers: 3, netMinor: 3400, tipMinor: 150 });
+
+    // CONSERVATION: the per-server sums are the day summary, split up
+    const day = (await app.inject({ method: "GET", url: "/v1/day" })).json();
+    expect(sum(servers.map((s) => s.netMinor))).toBe(day.summary.grossMinor - day.summary.discountMinor);
+    expect(sum(servers.map((s) => s.tipMinor))).toBe(day.summary.tipsMinor);
+    expect(sum(servers.map((s) => s.checks))).toBe(day.summary.checksClosed);
+    expect(sum(servers.map((s) => s.covers))).toBe(day.summary.covers);
+
+    // declared cash tips ride along from the shift, same window as the Close screen
+    const out = await app.inject({ method: "POST", url: "/v1/shifts/clockout",
+      payload: { ...ENV(9, { deviceId: "dev-gia" }), pin: "2468", declaredTipsMinor: 900 } });
+    expect(out.statusCode).toBe(200);
+    const after = (await app.inject({ method: "GET", url: "/v1/insights/servers" })).json();
+    const day2 = (await app.inject({ method: "GET", url: "/v1/day" })).json();
+    expect((after.servers as ServerRowJson[])[0]!.declaredTipsMinor).toBe(900);
+    expect(sum((after.servers as ServerRowJson[]).map((s) => s.declaredTipsMinor))).toBe(day2.summary.declaredTipsMinor);
+
+    // the heatmap holds the same money, bucketed by when the checks opened
+    const heat = (await app.inject({ method: "GET", url: "/v1/insights/heatmap" })).json();
+    const cells = heat.cells as CellJson[];
+    expect(heat.grandNetMinor).toBe(6800);
+    expect(sum(cells.map((c) => c.checks))).toBe(3);
+    expect(sum(cells.map((c) => c.covers))).toBe(6);
+    expect(sum(cells.map((c) => c.netMinor))).toBe(6800);
+    expect(sum(heat.dayTotals as number[])).toBe(6800);
+    expect(heat.daysCovered).toBe(1);
+    // one service, so all of it sits under today's column (index 0 = Sunday)
+    expect((heat.dayTotals as number[])[new Date().getDay()]).toBe(6800);
+  });
+
+  it("counts a voided line as a void only, never as course value or net", async () => {
+    const app = buildServer();
+    await signIn(app, "dev-gia", "2468");
+    const env = (n: number) => ENV(n, { deviceId: "dev-gia" });
+
+    const open = await app.inject({ method: "POST", url: "/v1/checks",
+      payload: { ...env(0), tableName: "Table 14", covers: 2 } });
+    const id = open.json().check.id as string;
+    await app.inject({ method: "POST", url: `/v1/checks/${id}/items`, payload: { ...env(1), ...BURRATA } });
+    await app.inject({ method: "POST", url: `/v1/checks/${id}/items`, payload: { ...env(2), itemId: "acqua", quantity: 1, seatNo: 2 } });
+    await app.inject({ method: "POST", url: `/v1/checks/${id}/send`, payload: env(3) });
+    const acqua = (await app.inject({ method: "GET", url: `/v1/checks/${id}` })).json().check.lines
+      .find((l: { capturedName: string }) => l.capturedName === "Acqua Panna");
+    const voided = await app.inject({ method: "POST", url: `/v1/checks/${id}/items/${acqua.id}/void`,
+      payload: { ...env(4), reason: "guest changed order", managerPin: "1122" } });
+    expect(voided.statusCode).toBe(200);
+    const due = (await app.inject({ method: "GET", url: `/v1/checks/${id}` })).json().check.totals.dueMinor as number;
+    await app.inject({ method: "POST", url: `/v1/checks/${id}/payments`, payload: { ...env(5), method: "card", amountMinor: due } });
+    await app.inject({ method: "POST", url: `/v1/checks/${id}/close`, payload: env(6) });
+
+    const row = ((await app.inject({ method: "GET", url: "/v1/insights/servers" })).json().servers as ServerRowJson[])[0]!;
+    expect(row).toMatchObject({ netMinor: 1600, voidCount: 1, voidValueMinor: 600 });
+    expect(row.courses).toEqual({ ANTIPASTI: 1600 }); // no BEVERAGE: the acqua died
+    const heat = (await app.inject({ method: "GET", url: "/v1/insights/heatmap" })).json();
+    expect(heat.grandNetMinor).toBe(1600);
+  });
+
+  it("attributes an unsigned terminal to the seeded default, never to nobody", async () => {
+    const app = buildServer();
+    await serviceCheck(app, "term-nobody", "Table 9", [TIRAMISU], 0);
+    const servers = (await app.inject({ method: "GET", url: "/v1/insights/servers" })).json().servers as ServerRowJson[];
+    expect(servers).toHaveLength(1);
+    expect(servers[0]!.serverId).toBe(GIA);
+    expect(servers[0]!.serverName).toBe("Gia R.");
+  });
+
+  it("reports an empty day honestly: no rows, no average, no cells", async () => {
+    const app = buildServer();
+    const report = (await app.inject({ method: "GET", url: "/v1/insights/servers" })).json();
+    expect(report.servers).toEqual([]);
+    expect(report.average).toBeNull();
+    expect(report.courseKeys).toEqual([]);
+    const heat = (await app.inject({ method: "GET", url: "/v1/insights/heatmap" })).json();
+    expect(heat.cells).toEqual([]);
+    expect(heat.grandNetMinor).toBe(0);
+    expect(heat.daysCovered).toBe(0);
+    expect(heat.dayTotals).toEqual([0, 0, 0, 0, 0, 0, 0]);
+  });
+});

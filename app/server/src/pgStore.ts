@@ -194,14 +194,20 @@ export class PgStore implements Store {
         this.partyByCheck.set(check.id, partyId);
       }
       // the party follows the check: transfers and merges move table_id,
-      // and covers grows when checks merge
+      // and covers grows when checks merge. cleared_at is the party's own
+      // endpoint (seated_at to cleared_at is the real turn time): stamped when
+      // the check closes, and cleared again by a reopen, because a reopened
+      // check means the table is occupied once more.
       const tableIdNow = await this.ensureTable(c, check.tableName);
-      await c.query("UPDATE party SET table_id = $1, covers = $2 WHERE id = $3", [tableIdNow, check.covers, partyId]);
+      await c.query(
+        "UPDATE party SET table_id = $1, covers = $2, cleared_at = $3 WHERE id = $4",
+        [tableIdNow, check.covers, check.status === "closed" ? (check.closedAt ?? null) : null, partyId],
+      );
       await c.query(
         `INSERT INTO checks (id, org_id, location_id, business_day_id, party_id, check_no, server_id, menu_snapshot_id, status, covers, version, opened_at, closed_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
          ON CONFLICT (id) DO UPDATE SET status = $9, covers = $10, version = $11, closed_at = $13`,
-        [check.id, ORG, LOC, dayId, partyId, check.checkNo, EMP, snapUuidFor(check.menuSnapshotId), check.status, check.covers, check.version, check.openedAt, check.closedAt ?? null],
+        [check.id, ORG, LOC, dayId, partyId, check.checkNo, check.serverId ?? EMP, snapUuidFor(check.menuSnapshotId), check.status, check.covers, check.version, check.openedAt, check.closedAt ?? null],
       );
       for (const l of check.lines) {
         await c.query(
@@ -266,10 +272,12 @@ export class PgStore implements Store {
   private async hydrate(where: string, params: unknown[]): Promise<CheckAggregate[]> {
     const checks = await this.pool.query(
       `SELECT ch.id, ch.check_no, ch.status, ch.covers, ch.version, ch.opened_at, ch.closed_at, dt.name AS table_name,
+              ch.server_id, e.display_name AS server_name,
               ms.document->>'snapshotId' AS snap_id
        FROM checks ch
        JOIN party p ON p.id = ch.party_id
        JOIN menu_snapshot ms ON ms.id = ch.menu_snapshot_id
+       JOIN employee e ON e.id = ch.server_id
        LEFT JOIN dining_table dt ON dt.id = p.table_id
        ${where} ORDER BY ch.opened_at`,
       params,
@@ -297,6 +305,10 @@ export class PgStore implements Store {
       checkNo: Number(r.check_no),
       tableName: (r.table_name as string | null) ?? "Walk-in",
       covers: r.covers as number,
+      // checks.server_id is NOT NULL and FK'd to employee, so the join always
+      // resolves: the report never has to invent an "unknown server"
+      serverId: r.server_id as string,
+      serverName: r.server_name as string,
       status: r.status,
       version: Number(r.version),
       menuSnapshotId: (r.snap_id as string | null) ?? SNAPSHOT_ID,

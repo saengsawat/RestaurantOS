@@ -191,6 +191,90 @@ export interface KitchenTicketView extends KitchenTicket {
   checkStatus: CheckStatus | "unknown";
 }
 
+/* ---------------------------- insights (E19) ----------------------------
+ * Read-only projections over the ledger the POS already writes (D19).
+ * Nothing here is stored: the rule that keeps check totals computed keeps
+ * the reports computed too, so a report cannot drift from the money it
+ * describes. toView is the single money source, every accumulator is
+ * integer addition, and the only division is the display averages.
+ */
+
+/** The fixed course order the scorecard's bars follow, so one course reads as
+ *  the same segment on every row. Mirrors MenuEntry["course"]. */
+export const COURSE_ORDER = ["BEVERAGE", "ANTIPASTI", "PRIMI", "SECONDI", "DOLCI"] as const;
+
+/** What one server did tonight. Every count and every *Minor field is an EXACT
+ *  integer sum over closed checks; the three average fields are display math
+ *  derived from those sums, so the SUMS are what has to conserve. */
+export interface ServerMetrics {
+  checks: number;
+  covers: number;
+  netMinor: number;
+  totalMinor: number;
+  tipMinor: number;
+  discountMinor: number;
+  declaredTipsMinor: number;
+  voidCount: number;
+  voidValueMinor: number;
+  /** exact sum of closedAt - openedAt in ms, so avgTurnMinutes stays derived */
+  turnMs: number;
+  /** value per course, the category bars: voided lines contribute nothing */
+  courses: Record<string, number>;
+  avgCheckMinor: number;
+  perCoverMinor: number;
+  avgTurnMinutes: number;
+}
+
+export interface ServerRow extends ServerMetrics {
+  serverId: string;
+  serverName: string;
+}
+
+/** One day-of-week x hour bucket of the sales heatmap. */
+export interface HeatmapCell {
+  day: number; // 0 = Sunday, matching Date#getDay
+  hour: number;
+  netMinor: number;
+  checks: number;
+  covers: number;
+}
+
+/** Display-only division: the sums are the truth, this is what the scorecard
+ *  prints. A zero denominator reads as zero, never NaN. */
+function per(total: number, divisor: number): number {
+  return divisor > 0 ? Math.round(total / divisor) : 0;
+}
+
+/** The per-server mean of every metric. Lightspeed prints an Average row so a
+ *  server can be read against the shift instead of against nothing. null when
+ *  nobody closed a check: the average of no rows is absent, not zero. */
+function averageRow(servers: readonly ServerRow[]): ServerMetrics | null {
+  const n = servers.length;
+  if (!n) return null;
+  const mean = (pick: (r: ServerRow) => number) => per(servers.reduce((a, r) => a + pick(r), 0), n);
+  const courses: Record<string, number> = {};
+  for (const key of COURSE_ORDER) {
+    const total = servers.reduce((a, r) => a + (r.courses[key] ?? 0), 0);
+    if (total > 0) courses[key] = per(total, n);
+  }
+  return {
+    checks: mean((r) => r.checks),
+    covers: mean((r) => r.covers),
+    netMinor: mean((r) => r.netMinor),
+    totalMinor: mean((r) => r.totalMinor),
+    tipMinor: mean((r) => r.tipMinor),
+    discountMinor: mean((r) => r.discountMinor),
+    declaredTipsMinor: mean((r) => r.declaredTipsMinor),
+    voidCount: mean((r) => r.voidCount),
+    voidValueMinor: mean((r) => r.voidValueMinor),
+    turnMs: mean((r) => r.turnMs),
+    courses,
+    avgCheckMinor: mean((r) => r.avgCheckMinor),
+    perCoverMinor: mean((r) => r.perCoverMinor),
+    avgTurnMinutes: mean((r) => r.avgTurnMinutes),
+  };
+}
+
 export class Engine {
   constructor(private readonly store: Store) {}
 
@@ -325,11 +409,17 @@ export class Engine {
         return this.remember(envelope, { kind: "rejected", reason: `${input.tableName} already has an open check` }, "check", "new");
       }
     }
+    // who opened it (E19): the employee signed in on this device, or the
+    // seeded default when nobody is, so an unsigned demo terminal still
+    // attributes its checks to a real server instead of to nobody
+    const opener = this.sessions.get(envelope.deviceId) ?? STAFF[0]!;
     const check: CheckAggregate = {
       id: randomUUID(),
       checkNo: await this.store.nextCheckNo(),
       tableName: input.tableName,
       covers: input.covers,
+      serverId: opener.id,
+      serverName: opener.name,
       status: "open",
       version: 0,
       menuSnapshotId: (await this.store.getActiveSnapshot()).id,
@@ -1194,6 +1284,102 @@ export class Engine {
         kitchenLate: late,
       };
     });
+  }
+
+  /* --------------------------- insights (E19) --------------------------- */
+
+  /**
+   * Tonight's server scorecard: one row per employee who opened a check that
+   * closed today, sorted by net sales, plus the Average row the detail card
+   * ranks against. Read-only, computed here, stored nowhere.
+   */
+  async insightsServers() {
+    const date = serviceDate();
+    const [checks, allShifts] = await Promise.all([this.store.list(), this.store.listShifts()]);
+    const closed = checks.filter((c) => c.status === "closed" && serviceDateOf(c.openedAt) === date);
+    // the same shift window the day report uses, so declared tips here and
+    // declared tips on the Close screen are one number, not two
+    const shifts = allShifts.filter((s) => serviceDateOf(s.clockIn) === date || !s.clockOut);
+
+    const rows = new Map<string, ServerRow>();
+    for (const c of closed) {
+      // a check written before E19 carries no opener; it lands on the same
+      // seeded default an unsigned device would have stamped
+      const serverId = c.serverId ?? STAFF[0]!.id;
+      let row = rows.get(serverId);
+      if (!row) {
+        row = {
+          serverId, serverName: c.serverName ?? STAFF[0]!.name,
+          checks: 0, covers: 0, netMinor: 0, totalMinor: 0, tipMinor: 0, discountMinor: 0,
+          declaredTipsMinor: 0, voidCount: 0, voidValueMinor: 0, turnMs: 0, courses: {},
+          avgCheckMinor: 0, perCoverMinor: 0, avgTurnMinutes: 0,
+        };
+        rows.set(serverId, row);
+      }
+      const totals = toView(c).totals;
+      row.checks += 1;
+      row.covers += c.covers;
+      row.netMinor += totals.subtotalMinor - totals.discountMinor;
+      row.totalMinor += totals.totalMinor;
+      row.discountMinor += totals.discountMinor;
+      for (const p of c.payments) row.tipMinor += p.tipMinor;
+      for (const l of c.lines) {
+        // the line value the day report voids at: (unit + mods) x quantity
+        const value = (l.unitPriceMinor + l.modifierPriceMinor) * l.quantity;
+        if (l.status === "voided") {
+          row.voidCount += 1;
+          row.voidValueMinor += value;
+          continue; // a voided line is void metrics only, never course value
+        }
+        row.courses[l.course] = (row.courses[l.course] ?? 0) + value;
+      }
+      if (c.closedAt) row.turnMs += Date.parse(c.closedAt) - Date.parse(c.openedAt);
+    }
+
+    for (const row of rows.values()) {
+      for (const s of shifts) {
+        if (s.employeeId === row.serverId) row.declaredTipsMinor += s.declaredTipsMinor ?? 0;
+      }
+      row.avgCheckMinor = per(row.netMinor, row.checks);
+      row.perCoverMinor = per(row.netMinor, row.covers);
+      row.avgTurnMinutes = per(row.turnMs, row.checks * 60_000);
+    }
+    const servers = [...rows.values()].sort((a, b) => b.netMinor - a.netMinor);
+    const courseKeys = COURSE_ORDER.filter((key) => servers.some((s) => (s.courses[key] ?? 0) > 0));
+    return { serviceDate: date, courseKeys, servers, average: averageRow(servers) };
+  }
+
+  /**
+   * Busy and quiet: net sales by day-of-week x hour over EVERY closed check
+   * the store holds. The memory store holds today only; PostgreSQL accumulates
+   * history, which is what makes the grid worth reading.
+   */
+  async insightsHeatmap() {
+    const closed = (await this.store.list()).filter((c) => c.status === "closed");
+    const cells = new Map<string, HeatmapCell>();
+    const dayTotals = [0, 0, 0, 0, 0, 0, 0];
+    const dates = new Set<string>();
+    let grandNetMinor = 0;
+    for (const c of closed) {
+      const totals = toView(c).totals;
+      const net = totals.subtotalMinor - totals.discountMinor;
+      // server-local day and hour, the clock serviceDateOf already reads, so a
+      // late check lands on the evening it was actually served
+      const at = new Date(c.openedAt);
+      const day = at.getDay();
+      const hour = at.getHours();
+      const key = `${day}:${hour}`;
+      const cell = cells.get(key) ?? { day, hour, netMinor: 0, checks: 0, covers: 0 };
+      cell.netMinor += net;
+      cell.checks += 1;
+      cell.covers += c.covers;
+      cells.set(key, cell);
+      dayTotals[day] = (dayTotals[day] ?? 0) + net;
+      grandNetMinor += net;
+      dates.add(serviceDateOf(c.openedAt));
+    }
+    const cellList = [...cells.values()].sort((a, b) => a.day - b.day || a.hour - b.hour);
+    return { cells: cellList, dayTotals, grandNetMinor, daysCovered: dates.size };
   }
 }
 
