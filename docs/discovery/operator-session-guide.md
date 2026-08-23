@@ -57,6 +57,20 @@ Each of these is currently a guess baked into the prototype. Cheap to change now
 - How do you decide order quantities and labor levels today?
 - What would you pay to have automated? What would make you trust an automated recommendation?
 
+## Question deck C: guest data and privacy (from the guestbook spec, E20)
+
+Only if the guestbook interests him (`docs/prd/guestbook-spec.md` has the full proposal). Every question carries the default we would ship, so a shrug is still an answer.
+
+- **What does the guest know about the record?** (Default: staff-facing only, no guest-facing surface, and a manager can read a record back to any guest who asks.)
+- **Is consent asked before creating a record?** (Default: no prompt for service records, since a paper reservation book is the same artifact; explicit opt-in for marketing.)
+- **How long is a record kept?** (Default: 24 months after the last visit, then identity fields purge automatically. The checks stay in the ledger, unattributed.)
+- **Who on staff can see the notes?** (Default: all service staff, because a note only helps if the server on the floor can read it. Sensitive detail belongs in a manager-only field, which the first build does not have.)
+- **Do we allow health and allergy notes?** (Default: yes as structured allergen tags that pre-flag the order and the kitchen ticket, no as free prose about a person's medical history.)
+- **Does marketing use require opt-in?** (Default: yes, per record, captured by a human, never inferred from a phone number given for a reservation.)
+- **What happens on a deletion request?** (Default: a manager Delete clears identity fields and drops the guest's check links within the same service day; the checks themselves are never deleted.)
+
+Also worth asking, because it decides whether this gets built at all: **would his servers actually use it during a rush?** A guest record nobody attaches is worse than no guest record.
+
 ## Pilot-selection criteria (WP-0.4 draft, edit with Matt)
 
 | Criterion | Target |

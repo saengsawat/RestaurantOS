@@ -612,6 +612,7 @@ Possible future capabilities:
 - Daily financial close
 - Operator alerts
 - Approval-based automated actions
+- Guest intelligence (the guestbook): per-guest favorites, spend, visit cadence, preferred section and server, specified in [guestbook-spec.md](guestbook-spec.md) as a Phase 6 addition sourced from competitor observation (Lightspeed Restaurant's Guestbook), identity ladder per decision D20
 
 These are **not commitments**.
 
