@@ -71,7 +71,7 @@ Domain tests: `cd app\domain && npm test` (70). Server tests incl. a throwaway-P
 
 ## How work runs now (D21)
 
-The orchestrator (Fable) plans, writes ticket contracts under `docs/tickets/`, assigns models, and reviews; worker sessions build, ONE at a time (all sessions share this folder). Merged so far: E11-T1 through T4, E8-T2, and all of E19 (T1 attribution + read APIs, T2 the /insights page, T3 the declared-tips fix found in T2's review). Epic E19 closed 2026-08-23: the reporting slice is live end to end. Next to fire: E20-T1 (Sonnet, guestbook spec doc). One-liner to fire a ticket: "You are a worker session. Execute the ticket at docs/tickets/<name>.md exactly; it is your entire scope."
+The orchestrator (Fable) plans, writes ticket contracts under `docs/tickets/`, assigns models, and reviews; worker sessions build, ONE at a time (all sessions share this folder). Merged so far: E11-T1 through T4, E8-T2, and all of E19 (T1 attribution + read APIs, T2 the /insights page, T3 the declared-tips fix found in T2's review). Epic E19 closed 2026-08-23: the reporting slice is live end to end. E20-T1 (the guestbook spec, `docs/prd/guestbook-spec.md`) merged the same day: guest entity, identity ladder, derived profile, and privacy deck C for Matt; the build itself stays out of pilot scope unless Matt asks. The worker queue is now empty; what remains either deepens existing epics (E5-full) or waits on Matt (E13, E9/E10). One-liner to fire a ticket: "You are a worker session. Execute the ticket at docs/tickets/<name>.md exactly; it is your entire scope."
 
 ## In flight
 
@@ -86,7 +86,7 @@ The orchestrator (Fable) plans, writes ticket contracts under `docs/tickets/`, a
 ## Waiting on Matt
 
 1. **D6: must orders reach the kitchen when the Internet is down?** Gates ADR-1 (stack) and ADR-2 (edge hardware), which gate the server build (E4+).
-2. The question decks (A, A2, B) in the session guide: policy answers that retrofit cleanly.
+2. The question decks (A, A2, B, and now C: guest data and privacy) in the session guide: policy answers that retrofit cleanly.
 3. PRD review and scope signoff (WP-1.2).
 
 ## Risks being watched
