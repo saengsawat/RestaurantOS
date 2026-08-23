@@ -358,9 +358,9 @@ Dependency-ordered; matches the [T] priority spine. **Build/Review** per §5.2 (
 | **E17** | Offline UX + recovery | 🔄 In progress | Cloud/LAN/payment status indicators; crash restore | E9, E10 | Staff always know what's safe to do **[T]** | Status-indicator truth test per fault case | Sonnet |
 | **E18** | Hardening + SLOs | ⬜ In queue | Latency budgets measured; telemetry live | all | SLOs per **[S]** latency table | Measured: tap-to-check, crash-restore, 100-line re-render | Sonnet |
 | **E19** | Insights v1 (server report + heatmap) | ✅ Completed | Per-server scorecard + hour/day sales heatmap as read-only ledger projections (D19; Phase 6 slice pulled forward) | E15 | Reports computed on read, never stored; per-server sums conserve against the day summary | Insights totals equal the close-day summary to the cent | Opus (core) + Sonnet/Codex (UI) |
-| **E20** | Guestbook / guest intelligence | 🔄 In progress (spec done; v0 build approved by founder 2026-08-23, D23; fingerprints stay E13-gated) | Guest profiles: favorites, spend, visit history, preferred section/server (D20 identity ladder) | E13, E19 | Never store PAN (D2); privacy defaults per Matt deck | Spec signed off; later: returning-guest recognition in sandbox | Sonnet (spec), build TBD |
+| **E20** | Guestbook / guest intelligence | ✅ v0 completed 2026-08-23 (spec + core + screens; card-recognition rung waits on E13) | Guest profiles: favorites, spend, visit history, preferred section/server (D20 identity ladder) | E13, E19 | Never store PAN (D2); privacy defaults per Matt deck | Spec signed off; later: returning-guest recognition in sandbox | Sonnet (spec), build TBD |
 
-**Status as of 2026-08-23** (13 completed, 3 in progress, 2 in queue). Where the non-clean rows stand:
+**Status as of 2026-08-23** (14 completed, 2 in progress, 4 in queue). Where the non-clean rows stand:
 
 - **E5 menu/config**: the draft → manager publish → immutable snapshot loop is live at `/menu`, with the 86 board and repricing. The draft is still a document (migration 0003) rather than the relational menu graph; group/modifier editing (E5-full) is the remainder.
 - **E17 offline UX**: offline card payments are honest today (pending-upload state, and the day close refuses to seal on them). The cloud/LAN status indicators and crash restore wait on E9 and E10, which is what the dependency column says.
