@@ -67,7 +67,7 @@ Domain tests: `cd app\domain && npm test` (70). Server tests incl. a throwaway-P
 
 ## How work runs now (D21)
 
-The orchestrator (Fable) plans, writes ticket contracts under `docs/tickets/`, assigns models, and reviews; worker sessions build, ONE at a time (all sessions share this folder). Merged so far: E11-T1, E11-T2, E11-T3 (each after review). Firing order: E11-T4 (Opus, small: the cross-partition payment guard) -> E8-T2 (Opus: KDS closed-check chip + day-close rail sweep, founder-reported) -> E19-T1 (Opus) -> E19-T2 (Sonnet/Codex) -> E20-T1 (Sonnet, docs, can slot in any gap). One-liner to fire a ticket: "You are a worker session. Execute the ticket at docs/tickets/<name>.md exactly; it is your entire scope."
+The orchestrator (Fable) plans, writes ticket contracts under `docs/tickets/`, assigns models, and reviews; worker sessions build, ONE at a time (all sessions share this folder). Merged so far: E11-T1, E11-T2, E11-T3 (each after review). Next: ONE Opus session batching E11-T4 then E8-T2 sequentially (D22: one labeled commit per ticket, suite green at each boundary), reviewed together in one Fable pass. Then E19-T1 (Opus) -> E19-T2 (Sonnet/Codex) -> E20-T1 (Sonnet, docs, any gap). One-liner to fire a ticket: "You are a worker session. Execute the ticket at docs/tickets/<name>.md exactly; it is your entire scope."
 
 ## In flight
 
