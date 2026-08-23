@@ -71,7 +71,7 @@ Domain tests: `cd app\domain && npm test` (70). Server tests incl. a throwaway-P
 
 ## How work runs now (D21)
 
-The orchestrator (Fable) plans, writes ticket contracts under `docs/tickets/`, assigns models, and reviews; worker sessions build, ONE at a time (all sessions share this folder). Merged so far: E11-T1 through T4, E8-T2, and E19-T1 (insights core: server attribution + the two read APIs, reviewed and merged 2026-08-23). E19-T2 (the /insights page) is implemented and awaiting its review. Next to fire: E20-T1 (Sonnet, guestbook spec doc), then whatever the founder ranks next. One-liner to fire a ticket: "You are a worker session. Execute the ticket at docs/tickets/<name>.md exactly; it is your entire scope."
+The orchestrator (Fable) plans, writes ticket contracts under `docs/tickets/`, assigns models, and reviews; worker sessions build, ONE at a time (all sessions share this folder). Merged so far: E11-T1 through T4, E8-T2, E19-T1, and E19-T2 (the /insights page, reviewed and merged 2026-08-23; the review confirmed one defect, the Tips tile's declared figure misses employees without a scorecard row, ticketed as E19-T3). Next to fire: E19-T3 (Opus, small: declared-tips total the tile can trust; closes epic E19), then E20-T1 (Sonnet, guestbook spec doc). One-liner to fire a ticket: "You are a worker session. Execute the ticket at docs/tickets/<name>.md exactly; it is your entire scope."
 
 ## In flight
 
