@@ -821,12 +821,18 @@ describe("reads", () => {
     expect(pos.body).toContain("/split?");
   });
 
-  it("serves the Insights page at /insights (E19-T2)", async () => {
+  it("serves the Reports page at /reports, and /insights still lands (E19-T4)", async () => {
     const app = buildServer();
-    const page = await app.inject({ method: "GET", url: "/insights" });
+    const page = await app.inject({ method: "GET", url: "/reports" });
     expect(page.statusCode).toBe(200);
     expect(page.headers["content-type"]).toContain("text/html");
-    expect(page.body).toContain("Insights");
+    expect(page.body).toContain("Reports");
+    // D24 reserved "Insights" for the Phase 6 layer, so it is gone from the
+    // live page copy, but the old URL still gets you there
+    expect(page.body).not.toContain(">Insights<");
+    const old = await app.inject({ method: "GET", url: "/insights" });
+    expect(old.statusCode).toBe(302);
+    expect(old.headers["location"]).toBe("/reports");
     // the page reads the two E19-T1 projections and nothing else
     expect(page.body).toContain("/v1/insights/servers");
     expect(page.body).toContain("/v1/insights/heatmap");
@@ -835,7 +841,7 @@ describe("reads", () => {
     expect(page.body).toContain("declaredTipsTotalMinor");
     // and every other page can reach it
     for (const url of ["/pos", "/tables", "/kds", "/menu", "/close"]) {
-      expect((await app.inject({ method: "GET", url })).body).toContain('href="/insights"');
+      expect((await app.inject({ method: "GET", url })).body).toContain('href="/reports"');
     }
   });
 

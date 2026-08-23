@@ -14,7 +14,7 @@ const POS_PAGE = page("pos.html");
 const KDS_PAGE = page("kds.html");
 const TABLES_PAGE = page("tables.html");
 const CLOSE_PAGE = page("close.html");
-const INSIGHTS_PAGE = page("insights.html");
+const REPORTS_PAGE = page("reports.html");
 const MENU_PAGE = page("menu.html");
 const LOCK_PAGE = page("lock.html");
 
@@ -94,7 +94,10 @@ export function buildServer(store: Store = new MemoryStore(), storeName = "memor
   app.get("/kds", async (_req, reply) => reply.type("text/html").send(KDS_PAGE));
   app.get("/tables", async (_req, reply) => reply.type("text/html").send(TABLES_PAGE));
   app.get("/close", async (_req, reply) => reply.type("text/html").send(CLOSE_PAGE));
-  app.get("/insights", async (_req, reply) => reply.type("text/html").send(INSIGHTS_PAGE));
+  app.get("/reports", async (_req, reply) => reply.type("text/html").send(REPORTS_PAGE));
+  // the screen was called Insights until D24 reserved that word for the
+  // Phase 6 intelligence layer; bookmarks and muscle memory still land
+  app.get("/insights", async (_req, reply) => reply.redirect("/reports", 302));
   app.get("/menu", async (_req, reply) => reply.type("text/html").send(MENU_PAGE));
   app.get("/health/live", async () => ({ ok: true, service: "restaurantos-server", store: storeName }));
 
@@ -330,9 +333,13 @@ export function buildServer(store: Store = new MemoryStore(), storeName = "memor
 
   app.get("/v1/day", async () => engine.dayReport());
 
-  /* --------------------------- insights (E19) ---------------------------
+  /* --------------------------- reports (E19) ---------------------------
    * Both are pure reads over the ledger, so no envelope and no version:
-   * there is nothing to replay and nothing to conflict with. */
+   * there is nothing to replay and nothing to conflict with.
+   *
+   * The paths keep their /v1/insights names on purpose (D24): the screen was
+   * renamed because "Insights" is the Phase 6 intelligence layer's word, and
+   * an API path is not user-facing copy worth a breaking change. */
 
   app.get("/v1/insights/servers", async () => engine.insightsServers());
   app.get("/v1/insights/heatmap", async () => engine.insightsHeatmap());

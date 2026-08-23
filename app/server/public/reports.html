@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>RestaurantOS Insights · connected</title>
+<title>RestaurantOS Reports · connected</title>
 <style>
 :root{
   color-scheme:light;
@@ -174,8 +174,8 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--brand);outline-offs
 <body>
 <header class="topbar">
   <div class="logo">R</div>
-  <div class="t"><b>Insights · Osteria Nove</b><small>RestaurantOS operator report · live from the ledger</small></div>
-  <nav class="nav"><a href="/pos">Service</a><a href="/tables">Tables</a><a href="/kds">Kitchen</a><a href="/menu">Menu</a><a href="/close">Close</a><a href="/insights" class="on">Insights</a></nav>
+  <div class="t"><b>Reports · Osteria Nove</b><small>RestaurantOS operator report · live from the ledger</small></div>
+  <nav class="nav"><a href="/pos">Service</a><a href="/tables">Tables</a><a href="/kds">Kitchen</a><a href="/menu">Menu</a><a href="/close">Close</a><a href="/reports" class="on">Reports</a></nav>
 </header>
 <div class="wrap">
   <div class="banner" id="banner"></div>
@@ -204,7 +204,7 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--brand);outline-offs
 <div class="toasts" id="toasts"></div>
 
 <script>
-/* Insights client (E19-T2): the operator report over the two read-only
+/* Reports client (E19-T2, renamed by D24): the operator report over the two read-only
    projections from E19-T1. This page renders and formats; it never does
    money math. The only arithmetic here is percent-for-pixel-width on the
    bars and heatmap, and the variance percent the detail card prints. */
