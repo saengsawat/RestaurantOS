@@ -2,7 +2,7 @@
 
 **The at-a-glance view: where the project is right now.** Updated at the end of every working session. Detail lives in [BACKLOG.md](BACKLOG.md) (tickets), [DECISIONS.md](DECISIONS.md) (decisions), and the [master plan](docs/plans/RestaurantOS_Master_Plan_v2.0.md) (the map).
 
-**Last updated:** 2026-08-22
+**Last updated:** 2026-08-23
 
 ## Where we are
 
@@ -68,7 +68,7 @@ Domain tests: `cd app\domain && npm test` (70). Server tests incl. a throwaway-P
 
 ## How work runs now (D21)
 
-The orchestrator (Fable) plans, writes ticket contracts under `docs/tickets/`, assigns models, and reviews; worker sessions build, ONE at a time (all sessions share this folder). Merged so far: E11-T1 through T4 and E8-T2 (T4 + E8-T2 as the first D22 batch, one session, two labeled commits, one review pass). E19-T1 (insights core) is implemented and awaiting its cross-model review. Next to fire: E19-T2 (Sonnet/Codex, /insights page, consumes the two E19-T1 endpoints), and E20-T1 (Sonnet, guestbook spec doc) fits any gap. One-liner to fire a ticket: "You are a worker session. Execute the ticket at docs/tickets/<name>.md exactly; it is your entire scope."
+The orchestrator (Fable) plans, writes ticket contracts under `docs/tickets/`, assigns models, and reviews; worker sessions build, ONE at a time (all sessions share this folder). Merged so far: E11-T1 through T4, E8-T2, and E19-T1 (insights core: server attribution + the two read APIs, reviewed and merged 2026-08-23). Next to fire: E19-T2 (Sonnet/Codex, /insights page, consumes the two E19-T1 endpoints), and E20-T1 (Sonnet, guestbook spec doc) fits any gap. One-liner to fire a ticket: "You are a worker session. Execute the ticket at docs/tickets/<name>.md exactly; it is your entire scope."
 
 ## In flight
 
