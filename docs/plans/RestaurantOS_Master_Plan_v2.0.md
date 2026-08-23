@@ -349,7 +349,7 @@ Dependency-ordered; matches the [T] priority spine. **Build/Review** per §5.2 (
 | **E8**✱ | Dispatch + KDS | ✅ Completed | Immutable `ORDER_DISPATCH`; station routing; bump/recall | E7 | A dispatch fires exactly once; late acks never re-fire **[T]** | Duplicate-fire test under retry | Opus |
 | **E9**✱ | Local durable store | ⬜ In queue | Local DB + write-ahead of every command | E7 | Local commit precedes any sync attempt **[T][S]** | Crash-kill: active check survives forced termination | Opus |
 | **E10**✱ | Sync engine | ⬜ In queue | Operation journal, idempotent `/sync`, conflict handling | E8, E9 | Replayed `operationId` returns known result **[T]** | **10-case network-fault suite** green **[T]** | Opus |
-| **E11**✱ | Split checks | 🔄 In progress | By item/seat/amount as domain commands | E7, E1 | Money/quantity/tax conservation **[T]** | Property: random partitions conserve totals | Opus |
+| **E11**✱ | Split checks | ✅ Completed | By item/seat/amount as domain commands | E7, E1 | Money/quantity/tax conservation **[T]** | Property: random partitions conserve totals | Opus |
 | **E12** | Discounts/comps/voids | ✅ Completed | Reason + approval + audit; pre/post-fire void semantics | E7, E8 | Post-fire void hits kitchen + audit, not just totals **[T]** | Void-after-fire scenario test | Opus |
 | **E13**✱ | Payment adapter | ⬜ In queue | PaymentIntent/Attempt model; one provider (ADR-3); webhooks | E1, E7 | Never store PAN; pending-upload ≠ authorized **[T][S]** | Sandbox: decline, timeout, duplicate webhook, late auth | Opus |
 | **E14** | Cash + drawer | ✅ Completed | Cash tender, drawer sessions, pay-in/out ledger | E13 | Cash events immutable **[T]** | Over/short reconciliation test | Sonnet |
@@ -360,12 +360,12 @@ Dependency-ordered; matches the [T] priority spine. **Build/Review** per §5.2 (
 | **E19** | Insights v1 (server report + heatmap) | ⬜ In queue | Per-server scorecard + hour/day sales heatmap as read-only ledger projections (D19; Phase 6 slice pulled forward) | E15 | Reports computed on read, never stored; per-server sums conserve against the day summary | Insights totals equal the close-day summary to the cent | Opus (core) + Sonnet/Codex (UI) |
 | **E20** | Guestbook / guest intelligence | ⬜ In queue (spec first) | Guest profiles: favorites, spend, visit history, preferred section/server (D20 identity ladder) | E13, E19 | Never store PAN (D2); privacy defaults per Matt deck | Spec signed off; later: returning-guest recognition in sandbox | Sonnet (spec), build TBD |
 
-**Status as of 2026-08-20** (11 completed, 2 in progress, 5 in queue). Where the non-clean rows stand:
+**Status as of 2026-08-22** (12 completed, 2 in progress, 4 in queue). Where the non-clean rows stand:
 
 - **E5 menu/config**: the draft → manager publish → immutable snapshot loop is live at `/menu`, with the 86 board and repricing. The draft is still a document (migration 0003) rather than the relational menu graph; group/modifier editing (E5-full) is the remainder.
 - **E17 offline UX**: offline card payments are honest today (pending-upload state, and the day close refuses to seal on them). The cloud/LAN status indicators and crash restore wait on E9 and E10, which is what the dependency column says.
 - **E9, E10** (local durable store, sync engine): the sync journal table and idempotent operation ids exist from E4/E7, but no local write-ahead store and no `/sync` endpoint. Both are gated on **D6** (Matt) via ADR-1/ADR-2: whether orders must reach the kitchen with the Internet down decides the whole shape.
-- **E11 split checks**: T1 (pure `splitCheck`), T2 (split preview API + labeled portion payments), and T3 (POS split flow + per-portion receipts) all merged by 2026-08-22, each built by a delegated worker session and cross-model reviewed. One hardening ticket remains before the epic closes: T4, the server-side cross-partition overpay guard the T3 worker discovered.
+- **E11 split checks (closed 2026-08-22)**: T1 (pure `splitCheck`), T2 (split preview API + labeled portion payments), T3 (POS split flow + per-portion receipts), and T4 (server-side cross-partition overpay guard) all merged, each built by a delegated worker session and cross-model reviewed. The same D22-batched session also shipped E8-T2 (KDS settled-check chip + day-close rail sweep) as a guardrail on the completed E8/E16 epics.
 - **E13 payment adapter**: blocked on **ADR-3** (provider choice) with Matt. Payment is simulated end to end today, which is why E14 and E16 could ship ahead of it despite the stated dependency.
 
 UI epics (order-entry screens, KDS screen, floor-plan screen) ride alongside E6–E8 as Sonnet tickets, the prototypes are the UX reference **[S]**, the domain package is the only source of truth.

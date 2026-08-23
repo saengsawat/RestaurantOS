@@ -2,7 +2,7 @@
 
 **The at-a-glance view: where the project is right now.** Updated at the end of every working session. Detail lives in [BACKLOG.md](BACKLOG.md) (tickets), [DECISIONS.md](DECISIONS.md) (decisions), and the [master plan](docs/plans/RestaurantOS_Master_Plan_v2.0.md) (the map).
 
-**Last updated:** 2026-08-18
+**Last updated:** 2026-08-22
 
 ## Where we are
 
@@ -11,7 +11,7 @@ Phase 0  Discovery        ████████░░  waiting on Matt sessio
 Phase 1  POS PRD          ██████░░░░  draft v0.1 done, Matt review pending
 Phase 2  Domain + arch    ██████░░░░  schema + domain model done; ADRs frozen on D6
 Phase 3  V1 backlog       ██░░░░░░░░  epic table exists; ticket contracts not yet written
-Phase 4  Build            █████████░  11 epics done, E5/E11/E17 in progress: lock screen + five screens + PostgreSQL (104 tests)
+Phase 4  Build            █████████░  12 epics done (E11 splits closed), E5/E17 in progress: lock screen + five screens + PostgreSQL (112 tests)
 Phase 5  Pilot            ░░░░░░░░░░  venue not selected
 Phase 6  Intelligence     ░░░░░░░░░░  by design, after pilot
 ```
@@ -50,9 +50,9 @@ Five live screens, all real commands to the server:
 
 - **/pos** Service: checks rail, table picker from the live floor, modifier modal (required groups, nesting), seats, send, tip/pay (offline simulation), close. Tap a line to void it (reason + manager PIN, audited); the % button applies discounts/comps; the ⋯ button transfers, merges (manager), or shows the **printable guest receipt**
 - **/tables** Floor: the spatial room per section, live status (open/seated/paying/kitchen-late), tap an open table to seat a party, tap an occupied one to jump to its check. **Edit layout** mode: drag tables to match your real room; each drop saves to the server and shows on every device
-- **/kds** Kitchen: one card per table, New flags, per-item bump, expo-gated Serve, 10-minute recall, cook-together pane. A voided item shows struck-through in red and never blocks Serve
+- **/kds** Kitchen: one card per table, New flags, per-item bump, expo-gated Serve, 10-minute recall, cook-together pane. A voided item shows struck-through in red and never blocks Serve. A card whose check already paid or closed carries an amber "check closed" chip and stops counting late: settled guests are a cleanup task, not a late table
 - **/menu** Menu manager: edit a draft (add/change/remove items), then a manager publish freezes it into the next immutable snapshot version; new orders reprice, ordered lines never move. The live 86 board (instant 86, running counts that auto-86 at zero) needs no publish and shows on POS tiles as "3 left" badges
-- **/close** End of day: this is the lunch+dinner close-out. Drawers from counted float to frozen over/short, the Team section (clock out + declared cash tips, confirmed by the employee's own PIN), today's closed checks with a manager Reopen button, and the day close that refuses until every check is settled, every drawer counted, and everyone is clocked out. Blockers link straight to the offending item
+- **/close** End of day: this is the lunch+dinner close-out. Drawers from counted float to frozen over/short, the Team section (clock out + declared cash tips, confirmed by the employee's own PIN), today's closed checks with a manager Reopen button, and the day close that refuses until every check is settled, every drawer counted, the kitchen rail swept (unbumped tickets are named by table and course), and everyone is clocked out. Blockers link straight to the offending item
 
 Try the two-device demo: `/pos` on a phone, `/kds` on the laptop, fire an order and watch it land.
 
@@ -63,11 +63,11 @@ $env:DATABASE_URL = "postgres://postgres:YOURPASSWORD@localhost:5432/restauranto
 npm run dev
 ```
 
-Domain tests: `cd app\domain && npm test` (70). Server tests incl. a throwaway-PostgreSQL integration: `cd app\server && npm test` (34).
+Domain tests: `cd app\domain && npm test` (70). Server tests incl. a throwaway-PostgreSQL integration: `cd app\server && npm test` (42).
 
 ## How work runs now (D21)
 
-The orchestrator (Fable) plans, writes ticket contracts under `docs/tickets/`, assigns models, and reviews; worker sessions build, ONE at a time (all sessions share this folder). Merged so far: E11-T1, E11-T2, E11-T3 (each after review). Next: ONE Opus session batching E11-T4 then E8-T2 sequentially (D22: one labeled commit per ticket, suite green at each boundary), reviewed together in one Fable pass. Then E19-T1 (Opus) -> E19-T2 (Sonnet/Codex) -> E20-T1 (Sonnet, docs, any gap). One-liner to fire a ticket: "You are a worker session. Execute the ticket at docs/tickets/<name>.md exactly; it is your entire scope."
+The orchestrator (Fable) plans, writes ticket contracts under `docs/tickets/`, assigns models, and reviews; worker sessions build, ONE at a time (all sessions share this folder). Merged so far: E11-T1 through T4 and E8-T2 (T4 + E8-T2 as the first D22 batch, one session, two labeled commits, one review pass). Next to fire: E19-T1 (Opus, insights core; not concurrent with other app/server tickets), then E19-T2 (Sonnet/Codex, /insights page), and E20-T1 (Sonnet, guestbook spec doc) fits any gap. One-liner to fire a ticket: "You are a worker session. Execute the ticket at docs/tickets/<name>.md exactly; it is your entire scope."
 
 ## In flight
 
