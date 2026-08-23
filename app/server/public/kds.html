@@ -55,6 +55,9 @@ button:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
 .ticket.served{opacity:.55;border-top-color:var(--line)}
 .tk-h{display:flex;justify-content:space-between;padding:9px 13px;background:var(--info-wash);
   font-family:var(--mono);font-size:12.5px;font-weight:700}
+/* table name plus the settled-check chip, so the header keeps two children
+   and the age stays hard right */
+.tk-t{display:flex;align-items:center;gap:8px;min-width:0}
 .ticket.working .tk-h{background:var(--amber-wash)}
 .ticket.ready .tk-h{background:var(--green-wash)}
 .ticket.late .tk-h{background:var(--red-wash)}
@@ -68,6 +71,7 @@ button:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
 .chip{border-radius:999px;padding:1px 8px;font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;border:1px solid}
 .chip.info{color:var(--info);background:var(--info-wash);border-color:var(--info-line)}
 .chip.red{color:var(--red);background:var(--red-wash);border-color:var(--red-line)}
+.chip.amber{color:var(--amber);background:var(--amber-wash);border-color:var(--amber-line)}
 .tki{display:flex;gap:9px;align-items:flex-start;padding:7px 0;border-bottom:1px solid var(--line-subtle);width:100%;text-align:left}
 .tki:active{background:var(--surface-2)}
 @media (hover:hover){.tki:not(.voided):hover{background:var(--surface-2)}}
@@ -167,12 +171,20 @@ function render(){
     const settled=i=>i.done||i.voided;
     const allDone=items.length>0&&items.every(settled);
     const anyDone=items.some(settled);
-    const late=list.some(t=>!t.items.every(settled)&&Date.now()-Date.parse(t.firedAt)>=LATE_MS);
+    /* A table whose guests already paid is a cleanup task, not a late table:
+       the check closing does NOT clear its tickets (order is not check), so the
+       card stays until the line bumps it. Suppress the red escalation and say
+       plainly that the check settled, per E8-T2. */
+    const paidUp=t=>t.checkStatus==="paid"||t.checkStatus==="closed";
+    const closedOut=list.length>0&&list.every(paidUp);
+    const settledChip=closedOut
+      ?`<span class="chip amber">${list.every(t=>t.checkStatus==="closed")?"check closed":"check paid"}</span>`:"";
+    const late=list.some(t=>!paidUp(t)&&!t.items.every(settled)&&Date.now()-Date.parse(t.firedAt)>=LATE_MS);
     const cls=late?"late":allDone?"ready":anyDone?"working":"";
     const oldest=Math.max(...list.map(t=>mins(t.firedAt)));
     const body=list.map(t=>{
       const isNew=Date.now()-Date.parse(t.firedAt)<NEW_MS;
-      const tlate=!t.items.every(i=>i.done||i.voided)&&Date.now()-Date.parse(t.firedAt)>=LATE_MS;
+      const tlate=!paidUp(t)&&!t.items.every(i=>i.done||i.voided)&&Date.now()-Date.parse(t.firedAt)>=LATE_MS;
       return `<div class="batch"><div class="batch-h">${esc(t.course)}
         ${isNew?'<span class="chip info">New</span>':""}${tlate?'<span class="chip red">Late</span>':""}
         <span class="bt">${mins(t.firedAt)}m</span></div>`+
@@ -187,7 +199,7 @@ function render(){
             ${i.mods?`<span class="tki-s">${esc(i.mods)}</span>`:""}</span></button>`).join("")+`</div>`;
     }).join("");
     return `<div class="ticket ${cls}">
-      <div class="tk-h"><span>${esc(table.toUpperCase())}</span><span class="tk-time num">${oldest}m</span></div>
+      <div class="tk-h"><span class="tk-t">${esc(table.toUpperCase())}${settledChip}</span><span class="tk-time num">${oldest}m</span></div>
       ${body}
       <div class="tk-a"><button class="btn ${allDone?"btn-p":"btn-s"}" data-serve="${esc(table)}" ${allDone?"":"disabled"}>
         ${allDone?"Serve table ✓":"Serve (finish items first)"}</button></div></div>`;

@@ -18,6 +18,7 @@ import {
   validateModifiers,
   type Adjustment,
   type CheckLine,
+  type CheckStatus,
   type ModifierError,
   type SelectedModifier,
   type SplitPortion,
@@ -181,6 +182,13 @@ export function portionForLabel(check: CheckAggregate, label: string): SplitPort
     return splitPortions(check, spec).find((p) => p.label === label);
   }
   return undefined;
+}
+
+/** A rail ticket as the KDS reads it: the stored ticket plus the paying status
+ *  of its check, joined on read (E8-T2). "unknown" covers a ticket whose check
+ *  is no longer in the store at all. */
+export interface KitchenTicketView extends KitchenTicket {
+  checkStatus: CheckStatus | "unknown";
 }
 
 export class Engine {
@@ -711,8 +719,22 @@ export class Engine {
     );
   }
 
-  async kds(): Promise<KitchenTicket[]> {
-    return this.activeTickets();
+  /**
+   * The rail, with each ticket carrying the paying status of its check (E8-T2).
+   *
+   * A closed check does NOT clear its tickets: the two state machines are
+   * separate on purpose, and auto-killing a ticket on payment would vanish
+   * real work (the to-go dessert fired as the guests pay). So the kitchen sees
+   * that the table settled and sweeps the rail itself, and the day close
+   * refuses until it is swept.
+   *
+   * Joined at read time. The status is never copied onto the stored ticket,
+   * which would give the same fact two homes and let them disagree.
+   */
+  async kds(): Promise<KitchenTicketView[]> {
+    const [tickets, checks] = await Promise.all([this.activeTickets(), this.store.list()]);
+    const statusOf = new Map(checks.map((c) => [c.id, c.status]));
+    return tickets.map((t) => ({ ...t, checkStatus: statusOf.get(t.checkId) ?? "unknown" }));
   }
 
   async toggleItem(envelope: Envelope, ticketId: string, orderItemId: string): Promise<CommandOutcome> {
@@ -979,12 +1001,16 @@ export class Engine {
     }
     const report = await this.dayReport();
     const b = report.blockers;
-    if (b.openChecks.length || b.openDrawers.length || b.offlinePayments || b.openShifts.length) {
+    if (b.openChecks.length || b.openDrawers.length || b.offlinePayments || b.openShifts.length || b.openKitchenTickets.length) {
       const parts = [
         b.openChecks.length ? `${b.openChecks.length} open check(s)` : "",
         b.openDrawers.length ? `${b.openDrawers.length} open drawer(s)` : "",
         b.offlinePayments ? `${b.offlinePayments} offline payment(s) pending upload` : "",
         b.openShifts.length ? `${b.openShifts.length} staff still clocked in` : "",
+        // named, because "a ticket is open" is useless to the closing manager
+        b.openKitchenTickets.length
+          ? `${b.openKitchenTickets.length} kitchen ticket(s) still open (${b.openKitchenTickets.map((t) => `${t.tableName} ${t.course}`).join(", ")})`
+          : "",
       ].filter(Boolean).join(", ");
       return this.remember(envelope, { kind: "rejected", reason: `cannot close the day with ${parts}` }, "business_day", date);
     }
@@ -1011,11 +1037,12 @@ export class Engine {
    *  blocks the close. Everything is computed, nothing stored (schema rule). */
   async dayReport() {
     const date = serviceDate();
-    const [status, checks, sessions, allShifts] = await Promise.all([
+    const [status, checks, sessions, allShifts, allTickets] = await Promise.all([
       this.store.dayStatus(date),
       this.store.list(),
       this.store.listDrawerSessions(),
       this.store.listShifts(),
+      this.store.listTickets(),
     ]);
     const todays = checks.filter((c) => serviceDateOf(c.openedAt) === date);
     const closed = todays.filter((c) => c.status === "closed");
@@ -1065,6 +1092,11 @@ export class Engine {
         openDrawers: sessions.filter((s) => !s.closedAt).map((s) => s.drawerName),
         offlinePayments,
         openShifts: allShifts.filter((s) => !s.clockOut).map((s) => s.employeeName),
+        // the rail sweep (E8-T2): an unbumped ticket is real work or a mistake,
+        // and either way somebody has to look at it before the day is sealed
+        openKitchenTickets: allTickets
+          .filter((t) => t.status === "open")
+          .map((t) => ({ id: t.id, tableName: t.tableName, course: t.course, firedAt: t.firedAt })),
       },
     };
   }

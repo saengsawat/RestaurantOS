@@ -182,7 +182,7 @@ function hhmm(iso){return new Date(iso).toLocaleTimeString([], {hour:"numeric",m
 function render(){
   const d=day,s=d.summary,closed=d.status==="closed";
   const clear=!d.blockers.openChecks.length&&!d.blockers.openDrawers.length&&!d.blockers.offlinePayments
-    &&!(d.blockers.openShifts||[]).length;
+    &&!(d.blockers.openShifts||[]).length&&!(d.blockers.openKitchenTickets||[]).length;
 
   $("#banner").className="banner"+(closed?" closed":"");
   $("#banner").innerHTML=`<b>Business day ${esc(d.serviceDate)}</b>
@@ -270,7 +270,11 @@ function render(){
     b.openDrawers.forEach(n=>rows.push(`<div class="row"><span>${esc(n)} is still open</span><span>count + close it above</span></div>`));
     if(b.offlinePayments)rows.push(`<div class="row"><span>${b.offlinePayments} offline card payment(s) pending upload</span><span>they must authorize first</span></div>`);
     (b.openShifts||[]).forEach(n=>rows.push(`<div class="row"><span>${esc(n)} is still clocked in</span><span>clock out + declare tips above</span></div>`));
-    return rows.length?rows.join(""):`<div class="allclear">All clear. Every check settled, every drawer counted, everyone clocked out.</div>`;
+    // the rail sweep (E8-T2): a fired course nobody bumped, named by table
+    (b.openKitchenTickets||[]).forEach(t=>rows.push(
+      `<div class="row"><span>${esc(t.tableName)} · ${esc(t.course)} is still on the kitchen rail</span>
+       <a href="/kds">bump and serve them on the Kitchen screen, or void the items if they were never made ▸</a></div>`));
+    return rows.length?rows.join(""):`<div class="allclear">All clear. Every check settled, every drawer counted, the rail swept, everyone clocked out.</div>`;
   })();
 
   /* closed checks today: the manager's reopen door */

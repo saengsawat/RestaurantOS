@@ -746,6 +746,22 @@ describe("cash drawers and the business day (E14/E16)", () => {
 
     await app.inject({ method: "POST", url: "/v1/drawer/close", payload: { ...ENV(8), sessionId, countedMinor: 10000 } });
 
+    // blocked: the ragu was fired and never bumped, so the rail still has work
+    // on it even though the check is paid and closed (E8-T2)
+    const railOpen = await app.inject({ method: "POST", url: "/v1/day/close", payload: { ...ENV(8), managerPin: "1122" } });
+    expect(railOpen.statusCode).toBe(422);
+    expect(railOpen.json().reason).toMatch(/kitchen ticket\(s\) still open \(Table 14 PRIMI\)/);
+
+    // sweep it: bump every item, serve the table
+    const rail = (await app.inject({ method: "GET", url: "/v1/kds" })).json().tickets as
+      { id: string; items: { orderItemId: string }[] }[];
+    for (const t of rail) {
+      for (const i of t.items) {
+        await app.inject({ method: "POST", url: "/v1/kds/toggle", payload: { ...ENV(8), ticketId: t.id, orderItemId: i.orderItemId } });
+      }
+    }
+    await app.inject({ method: "POST", url: "/v1/kds/serve", payload: { ...ENV(8), tableName: "Table 14" } });
+
     // no PIN, no close
     const noPin = await app.inject({ method: "POST", url: "/v1/day/close", payload: ENV(9) });
     expect(noPin.statusCode).toBe(422);
@@ -1157,5 +1173,109 @@ describe("cross-partition overpay guard (E11-T4)", () => {
     }
     // the loop is only worth anything if it actually met the cross-partition case
     expect(capped).toBeGreaterThan(0);
+  });
+});
+
+/* ------------------ KDS awareness of a settled check (E8-T2) ------------------
+ * The founder's scenario: Table 3 paid and closed, but the kitchen never
+ * bumped the tiramisu. The card must stay (order is not check, and the dessert
+ * may be real work), it must say the check settled, it must not be counted
+ * late, and the day must not seal until somebody sweeps the rail.
+ */
+describe("KDS and a check that already settled (E8-T2)", () => {
+  /** Table 3 orders a tiramisu, it is fired, paid, and the check closes,
+   *  with the dessert still sitting unbumped on the rail. */
+  async function settledButUnbumped(app: ReturnType<typeof buildServer>) {
+    const check = await openTable(app, "Table 3", 2);
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items`,
+      payload: { ...ENV(1), itemId: "tiramisu", quantity: 1, seatNo: 1 } });
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/send`, payload: ENV(2) });
+    const due = (await app.inject({ method: "GET", url: `/v1/checks/${check.id}` })).json().check.totals.dueMinor as number;
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/payments`,
+      payload: { ...ENV(3), method: "card", amountMinor: due } });
+    const closed = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/close`, payload: ENV(4) });
+    expect(closed.json().check.status).toBe("closed");
+    return check;
+  }
+
+  it("keeps the ticket on the rail, tells the kitchen the check closed, and leaves the table free", async () => {
+    const app = buildServer();
+    await settledButUnbumped(app);
+
+    // the rail still carries the work, now labelled with the check's status
+    const rail = (await app.inject({ method: "GET", url: "/v1/kds" })).json().tickets;
+    expect(rail).toHaveLength(1);
+    expect(rail[0]).toMatchObject({ tableName: "Table 3", course: "DOLCI", status: "open", checkStatus: "closed" });
+    expect(rail[0].items[0].done).toBe(false);
+
+    // and the floor does not hold the table or call it late: the guests left
+    const table = (await app.inject({ method: "GET", url: "/v1/floor" })).json()
+      .tables.find((t: { name: string }) => t.name === "Table 3");
+    expect(table.check).toBeNull();
+    expect(table.kitchenLate).toBe(false);
+  });
+
+  it("treats a paid but not yet closed check the same way", async () => {
+    const app = buildServer();
+    const check = await openTable(app, "Table 9", 2);
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items`,
+      payload: { ...ENV(1), itemId: "tiramisu", quantity: 1, seatNo: 1 } });
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/send`, payload: ENV(2) });
+    const due = (await app.inject({ method: "GET", url: `/v1/checks/${check.id}` })).json().check.totals.dueMinor as number;
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/payments`,
+      payload: { ...ENV(3), method: "card", amountMinor: due } });
+    const rail = (await app.inject({ method: "GET", url: "/v1/kds" })).json().tickets;
+    expect(rail[0].checkStatus).toBe("paid"); // the guests settled either way
+  });
+
+  it("blocks the day close by table and course until the rail is swept", async () => {
+    const app = buildServer();
+    await settledButUnbumped(app);
+
+    const blocked = await app.inject({ method: "POST", url: "/v1/day/close", payload: { ...ENV(5), managerPin: "1122" } });
+    expect(blocked.statusCode).toBe(422);
+    expect(blocked.json().reason).toMatch(/1 kitchen ticket\(s\) still open \(Table 3 DOLCI\)/);
+
+    // the day report names it too, so the Close screen can link to the rail
+    const report = (await app.inject({ method: "GET", url: "/v1/day" })).json();
+    expect(report.blockers.openKitchenTickets).toHaveLength(1);
+    expect(report.blockers.openKitchenTickets[0]).toMatchObject({ tableName: "Table 3", course: "DOLCI" });
+
+    // sweep it the way the kitchen would: bump the dessert, serve the table
+    const ticket = (await app.inject({ method: "GET", url: "/v1/kds" })).json().tickets[0];
+    await app.inject({ method: "POST", url: "/v1/kds/toggle",
+      payload: { ...ENV(6), ticketId: ticket.id, orderItemId: ticket.items[0].orderItemId } });
+    const served = await app.inject({ method: "POST", url: "/v1/kds/serve", payload: { ...ENV(7), tableName: "Table 3" } });
+    expect(served.statusCode).toBe(200);
+
+    // nothing else outstanding, so the day seals
+    const done = await app.inject({ method: "POST", url: "/v1/day/close", payload: { ...ENV(8), managerPin: "1122" } });
+    expect(done.statusCode).toBe(200);
+    expect(done.json().day.status).toBe("closed");
+    expect(done.json().day.blockers.openKitchenTickets).toEqual([]);
+  });
+
+  it("does not block on a ticket the kitchen already served", async () => {
+    const app = buildServer();
+    const check = await openTable(app, "Table 5", 2);
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items`,
+      payload: { ...ENV(1), itemId: "acqua", quantity: 1, seatNo: 1 } });
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/send`, payload: ENV(2) });
+    const ticket = (await app.inject({ method: "GET", url: "/v1/kds" })).json().tickets[0];
+    await app.inject({ method: "POST", url: "/v1/kds/toggle",
+      payload: { ...ENV(3), ticketId: ticket.id, orderItemId: ticket.items[0].orderItemId } });
+    await app.inject({ method: "POST", url: "/v1/kds/serve", payload: { ...ENV(4), tableName: "Table 5" } });
+    // still recallable, so it is still on the read, but it no longer blocks
+    const report = (await app.inject({ method: "GET", url: "/v1/day" })).json();
+    expect(report.blockers.openKitchenTickets).toEqual([]);
+  });
+
+  it("serves the KDS page with the settled-check chip", async () => {
+    const app = buildServer();
+    const kds = await app.inject({ method: "GET", url: "/kds" });
+    expect(kds.statusCode).toBe(200);
+    expect(kds.body).toContain("check closed");
+    expect(kds.body).toContain("check paid");
+    expect(kds.body).toContain("chip amber");
   });
 });
