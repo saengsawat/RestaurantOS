@@ -11,7 +11,7 @@ Phase 0  Discovery        ████████░░  waiting on Matt sessio
 Phase 1  POS PRD          ██████░░░░  draft v0.1 done, Matt review pending
 Phase 2  Domain + arch    ██████░░░░  schema + domain model done; ADRs frozen on D6
 Phase 3  V1 backlog       ██░░░░░░░░  epic table exists; ticket contracts not yet written
-Phase 4  Build            █████████░  12 epics done (E11 splits closed), E5/E17/E19 in progress: lock screen + six screens + PostgreSQL (118 tests)
+Phase 4  Build            █████████░  13 epics done (E19 insights closed), E5/E17/E20 in progress: lock screen + six screens + PostgreSQL + guestbook API (125 tests)
 Phase 5  Pilot            ░░░░░░░░░░  venue not selected
 Phase 6  Intelligence     ░░░░░░░░░░  by design, after pilot
 ```
@@ -34,6 +34,7 @@ Phases overlap deliberately (decision D13): everything Matt-independent moves; e
 | **API server** (Fastify, D16): the command protocol live over HTTP: open/order/fire/pay/close, idempotent operation ids, 409 version conflicts, modifier refusals with exact errors, offline cards block close | 10 API tests + verified against the running server with curl |
 | **Insights read APIs (E19-T1)**: every check records the server who opened it; `/v1/insights/servers` (server scorecard: net, tips, covers, avg check, per cover, turn minutes, voids, per-course value, Average row) and `/v1/insights/heatmap` (day x hour net sales). Computed on read, nothing stored | 4 API tests incl. conservation against `/v1/day` (per-server net = gross - discount, per-server tips = day tips) + verified with curl against the running server |
 | **Insights screen (E19-T2)** at `/insights`: tonight-at-a-glance tiles, the server scorecard (stacked course bars per server, muted Average row, tap for rank/actual/average/variance on eleven metrics plus net by course), and the hour x day heatmap with a per-day share row | Verified in Chrome, Day and Night at 1280px and at 390px, against a seeded two-server service; tiles agree with `/close` to the cent |
+| **Guestbook API (E20-T2)**: `guest` + `check_guest` (migration 0004) with attach on any check, manager-gated merge and delete, guest search, and the derived profile (favorites, spend, cadence, preferred section and server, tip percent). Nothing aggregated is stored, so merging or deleting a guest cannot move a cent | 7 API tests incl. conservation at two and three guests (a discounted check splits 871+871+871 = 2613), merge and delete proven not to touch a check, plus a PostgreSQL round trip | 
 | **POS web client v0** at `/pos`: the page experience on the real engine: checks rail, menu, modifier modal (required groups, nesting), seats, send, tip/pay, close, 409 recovery, mobile tabs | Screenshot-verified against the running server with seeded live state |
 
 ## Run it
@@ -67,11 +68,11 @@ $env:DATABASE_URL = "postgres://postgres:YOURPASSWORD@localhost:5432/restauranto
 npm run dev
 ```
 
-Domain tests: `cd app\domain && npm test` (70). Server tests incl. a throwaway-PostgreSQL integration: `cd app\server && npm test` (48).
+Domain tests: `cd app\domain && npm test` (70). Server tests incl. a throwaway-PostgreSQL integration: `cd app\server && npm test` (55).
 
 ## How work runs now (D21)
 
-The orchestrator (Fable) plans, writes ticket contracts under `docs/tickets/`, assigns models, and reviews; worker sessions build, ONE at a time (all sessions share this folder). Merged so far: E11-T1 through T4, E8-T2, and all of E19 (T1 attribution + read APIs, T2 the /insights page, T3 the declared-tips fix found in T2's review). Epic E19 closed 2026-08-23: the reporting slice is live end to end. E20-T1 (the guestbook spec) merged the same day. The founder then approved building the guestbook v0 now (D23) and renaming the reporting tab to Reports (D24, "Insights" is reserved for the AI layer). Firing order: 1) E20-T2 (Opus, guestbook core). 2) ONE Sonnet/Codex session batching E19-T4 (rename) then E20-T3 (guestbook screens) per D22. Then the queue waits on Matt or on an E5-full ticket. One-liner to fire a ticket: "You are a worker session. Execute the ticket at docs/tickets/<name>.md exactly; it is your entire scope."
+The orchestrator (Fable) plans, writes ticket contracts under `docs/tickets/`, assigns models, and reviews; worker sessions build, ONE at a time (all sessions share this folder). Merged so far: E11-T1 through T4, E8-T2, and all of E19 (T1 attribution + read APIs, T2 the /insights page, T3 the declared-tips fix found in T2's review). Epic E19 closed 2026-08-23: the reporting slice is live end to end. E20-T1 (the guestbook spec) merged the same day. The founder then approved building the guestbook v0 now (D23) and renaming the reporting tab to Reports (D24, "Insights" is reserved for the AI layer). E20-T2 (guestbook core: the two tables, the commands, and the derived profile) is implemented and awaiting its cross-model review. Firing order from here: ONE Sonnet/Codex session batching E19-T4 (rename) then E20-T3 (guestbook screens) per D22. Then the queue waits on Matt or on an E5-full ticket. One-liner to fire a ticket: "You are a worker session. Execute the ticket at docs/tickets/<name>.md exactly; it is your entire scope."
 
 ## In flight
 

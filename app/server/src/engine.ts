@@ -26,7 +26,7 @@ import {
 import type { MenuEntry } from "./menu.js";
 import { STAFF, type Employee } from "./staff.js";
 import { randomUUID } from "node:crypto";
-import { serviceDateOf, type CashEvent, type CheckAggregate, type DrawerSession, type Envelope, type KitchenTicket, type MenuSnapshot, type Store } from "./types.js";
+import { serviceDateOf, type CashEvent, type CheckAggregate, type DrawerSession, type Envelope, type Guest, type KitchenTicket, type MenuSnapshot, type Store } from "./types.js";
 import type { GroupIndex } from "@restaurantos/domain";
 
 export const TAX_RATE = { num: 8_875, den: 100_000 };
@@ -36,7 +36,7 @@ export const RECALL_WINDOW_MS = 10 * 60_000;
 // an employee who holds the manager role. See Engine.manager().
 
 export type CommandOutcome =
-  | { kind: "applied"; check?: CheckView; tickets?: KitchenTicket[]; session?: DrawerSession; day?: unknown; menu?: unknown }
+  | { kind: "applied"; check?: CheckView; tickets?: KitchenTicket[]; session?: DrawerSession; day?: unknown; menu?: unknown; guest?: unknown; audit?: unknown }
   | { kind: "replay"; result: CommandOutcome }
   | { kind: "conflict"; expectedVersion: number | undefined; currentVersion: number }
   | { kind: "rejected"; reason: string; modifierErrors?: readonly ModifierError[] }
@@ -51,6 +51,9 @@ export interface CheckView extends CheckAggregate {
     paidMinor: number;
     dueMinor: number;
   };
+  /** guests attached to this check (E20), joined at read time, empty when
+   *  nobody is: the link lives in check_guest, never on the aggregate */
+  guests: GuestChip[];
 }
 
 /** The aggregate's lines in the domain's shape. One mapping, shared by the
@@ -72,13 +75,14 @@ function toDomainAdjustments(check: CheckAggregate): Adjustment[] {
   );
 }
 
-export function toView(check: CheckAggregate): CheckView {
+export function toView(check: CheckAggregate, guests: readonly GuestChip[] = []): CheckView {
   const lines = toDomainLines(check);
   const adjustments = toDomainAdjustments(check);
   const t = computeCheckTotals(lines, adjustments, TAX_RATE);
   const paid = check.payments.reduce((a, p) => a + p.amountMinor, 0);
   return {
     ...check,
+    guests: [...guests],
     totals: {
       subtotalMinor: t.subtotalMinor,
       discountMinor: t.discountMinor,
@@ -275,6 +279,45 @@ function averageRow(servers: readonly ServerRow[]): ServerMetrics | null {
   };
 }
 
+/* ---------------------------- guestbook (E20) ----------------------------
+ * A guest is identity plus a link to a check, and nothing else: no stored
+ * spend, no stored visit count (D19's rule, the same one the reports obey).
+ * The profile is assembled in Engine.guestProfile below.
+ */
+
+/** How many results a guest search hands back, so a crafted query cannot ask
+ *  for the whole book. The attach flow types until it narrows. */
+export const MAX_GUEST_RESULTS = 25;
+export const MAX_FAVORITES = 5;
+
+/** A guest chip on the check header: who is sitting there, joined on read. */
+export interface GuestChip {
+  id: string;
+  name: string;
+}
+
+/** An optional trimmed field: an empty string means absent, not "". */
+function text<K extends string>(value: string | undefined, key: K): { [P in K]?: string } {
+  const trimmed = (value ?? "").trim();
+  return (trimmed ? { [key]: trimmed } : {}) as { [P in K]?: string };
+}
+
+/** Shape a mode result for the payload, or keep the honest null. */
+function mapOrNull<T, U>(value: T | null, shape: (value: T) => U): U | null {
+  return value === null ? null : shape(value);
+}
+
+/** The middle gap between visits, rounded. null below two visits, because one
+ *  visit has no cadence and pretending otherwise would be a made-up number. */
+function median(values: readonly number[]): number | null {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2
+    ? (sorted[mid] as number)
+    : Math.round(((sorted[mid - 1] as number) + (sorted[mid] as number)) / 2);
+}
+
 export class Engine {
   constructor(private readonly store: Store) {}
 
@@ -383,7 +426,10 @@ export class Engine {
     const outcome = await body(check);
     if (outcome.kind === "applied") {
       check.version += 1;
-      if (outcome.check) outcome.check.version = check.version;
+      if (outcome.check) {
+        outcome.check.version = check.version;
+        outcome.check.guests = await this.guestChips(checkId);
+      }
       await this.store.put(check);
     }
     return this.remember(envelope, outcome, "check", checkId);
@@ -1235,11 +1281,23 @@ export class Engine {
 
   async getCheck(id: string): Promise<CheckView | undefined> {
     const check = await this.store.get(id);
-    return check ? toView(check) : undefined;
+    return check ? toView(check, await this.guestChips(check.id)) : undefined;
   }
 
   async listChecks(): Promise<CheckView[]> {
-    return (await this.store.list()).map(toView);
+    const [checks, links, guests] = await Promise.all([
+      this.store.list(),
+      this.store.listCheckGuests(),
+      this.store.listGuests(),
+    ]);
+    const nameOf = new Map(guests.map((g) => [g.id, g.displayName]));
+    return checks.map((c) =>
+      toView(c, links
+        .filter((l) => l.checkId === c.id)
+        .flatMap((l) => {
+          const name = nameOf.get(l.guestId);
+          return name ? [{ id: l.guestId, name }] : [];
+        })));
   }
 
   /** What would each portion owe (E11). Computed on read, never stored.
@@ -1387,6 +1445,339 @@ export class Engine {
     }
     const cellList = [...cells.values()].sort((a, b) => a.day - b.day || a.hour - b.hour);
     return { cells: cellList, dayTotals, grandNetMinor, daysCovered: dates.size };
+  }
+
+  /* --------------------------- guestbook (E20) ---------------------------
+   * The v0 rung of the D20 ladder: a guest record staff attach by hand, and a
+   * profile joined out of the ledger. Nothing about a guest is aggregated and
+   * stored, so merging or deleting a guest cannot move a cent: the profile is
+   * the money, read through check_guest, and the checks never learn about it.
+   */
+
+  /** Who is attached to this check, for the header chips. Joined on read; the
+   *  link never rides on the check aggregate itself. */
+  private async guestChips(checkId: string): Promise<GuestChip[]> {
+    const links = await this.store.listCheckGuests(checkId);
+    const chips: GuestChip[] = [];
+    for (const link of links) {
+      const guest = await this.store.getGuest(link.guestId);
+      if (guest) chips.push({ id: guest.id, name: guest.displayName });
+    }
+    return chips;
+  }
+
+  /** Quick-create from one field, because the spec's bar is five seconds on a
+   *  busy Friday. No PIN: writing a name down is not a privileged act. */
+  async createGuest(
+    envelope: Envelope,
+    input: { displayName: string; phone?: string; email?: string; notes?: string; marketingOptIn?: boolean },
+  ): Promise<CommandOutcome> {
+    const replay = await this.store.opResult(envelope.operationId);
+    if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
+    const displayName = (input.displayName ?? "").trim();
+    if (!displayName) {
+      return this.remember(envelope, { kind: "rejected", reason: "a guest needs a name" }, "guest", "new");
+    }
+    const actor = this.actorId(envelope);
+    const guest: Guest = {
+      id: randomUUID(),
+      displayName,
+      ...text(input.phone, "phone"),
+      ...text(input.email, "email"),
+      ...text(input.notes, "notes"),
+      // privacy default (spec C6): opt-in is never inferred from a phone
+      // number somebody gave to hold a table
+      marketingOptIn: input.marketingOptIn === true,
+      ...(actor ? { createdBy: actor } : {}),
+      createdAt: new Date().toISOString(),
+    };
+    await this.store.putGuest(guest);
+    return this.remember(envelope, { kind: "applied", guest }, "guest", guest.id);
+  }
+
+  /** Edit the record. Passing an empty string clears the field, which is how
+   *  a guest who asks for their phone to come off gets their wish. */
+  async updateGuest(
+    envelope: Envelope,
+    id: string,
+    input: { displayName?: string; phone?: string; email?: string; notes?: string; marketingOptIn?: boolean },
+  ): Promise<CommandOutcome> {
+    const replay = await this.store.opResult(envelope.operationId);
+    if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
+    const guest = await this.store.getGuest(id);
+    if (!guest) return { kind: "not_found" };
+    if (input.displayName !== undefined) {
+      const displayName = input.displayName.trim();
+      if (!displayName) {
+        return this.remember(envelope, { kind: "rejected", reason: "a guest needs a name" }, "guest", id);
+      }
+      guest.displayName = displayName;
+    }
+    for (const field of ["phone", "email", "notes"] as const) {
+      const value = input[field];
+      if (value === undefined) continue;
+      const trimmed = value.trim();
+      if (trimmed) guest[field] = trimmed;
+      else delete guest[field];
+    }
+    if (input.marketingOptIn !== undefined) guest.marketingOptIn = input.marketingOptIn === true;
+    await this.store.putGuest(guest);
+    return this.remember(envelope, { kind: "applied", guest }, "guest", id);
+  }
+
+  /**
+   * Attach a guest to a check. Allowed on a CLOSED check on purpose: the
+   * moment a server has time to type who was at table 7 is after they leave.
+   * Attaching the same guest twice is a no-op rather than an error, because a
+   * double tap on a handheld is not a mistake worth a red toast.
+   */
+  async attachGuest(envelope: Envelope, checkId: string, input: { guestId: string }): Promise<CommandOutcome> {
+    const replay = await this.store.opResult(envelope.operationId);
+    if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
+    const check = await this.store.get(checkId);
+    if (!check) return { kind: "not_found" }; // not remembered: a retry may find it after sync
+    const guest = await this.store.getGuest(input.guestId);
+    if (!guest) {
+      return this.remember(envelope, { kind: "rejected", reason: "no such guest" }, "check", checkId);
+    }
+    const links = await this.store.listCheckGuests(checkId);
+    if (!links.some((l) => l.guestId === guest.id)) {
+      const actor = this.actorId(envelope);
+      await this.store.putCheckGuest({
+        checkId,
+        guestId: guest.id,
+        ...(actor ? { attachedBy: actor } : {}),
+        attachedAt: new Date().toISOString(),
+      });
+    }
+    const view = toView(check, await this.guestChips(checkId));
+    return this.remember(envelope, { kind: "applied", check: view }, "check", checkId);
+  }
+
+  /** Wrong guest, wrong table. Detaching removes the link and nothing else. */
+  async detachGuest(envelope: Envelope, checkId: string, guestId: string): Promise<CommandOutcome> {
+    const replay = await this.store.opResult(envelope.operationId);
+    if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
+    const check = await this.store.get(checkId);
+    if (!check) return { kind: "not_found" };
+    await this.store.removeCheckGuest(checkId, guestId);
+    const view = toView(check, await this.guestChips(checkId));
+    return this.remember(envelope, { kind: "applied", check: view }, "check", checkId);
+  }
+
+  /**
+   * Same person, two records: the reservation phone and the name a server
+   * typed on a Friday. Manager-gated, because it destroys a record.
+   *
+   * The absorbed guest's links repoint to the survivor (skipping a check they
+   * both already sit on, which would be a duplicate link), the absorbed
+   * notes are APPENDED rather than dropped (somebody had a reason to type
+   * them), and the record goes. No check, line, or payment is touched: the
+   * survivor's history simply spans both sets of links now, which is what
+   * "history is a join, not a copy" buys.
+   */
+  async mergeGuests(envelope: Envelope, survivorId: string, input: { absorbedId: string; managerPin?: string }): Promise<CommandOutcome> {
+    const replay = await this.store.opResult(envelope.operationId);
+    if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
+    const approver = await this.manager(input.managerPin);
+    if (!approver) {
+      return this.remember(envelope, { kind: "rejected", reason: this.managerRefusal(input.managerPin, "merging guests") }, "guest", survivorId);
+    }
+    if (!input.absorbedId || input.absorbedId === survivorId) {
+      return this.remember(envelope, { kind: "rejected", reason: "a merge needs two different guests" }, "guest", survivorId);
+    }
+    const [survivor, absorbed] = await Promise.all([this.store.getGuest(survivorId), this.store.getGuest(input.absorbedId)]);
+    if (!survivor || !absorbed) return { kind: "not_found" };
+
+    const links = await this.store.listCheckGuests();
+    const survivorChecks = new Set(links.filter((l) => l.guestId === survivor.id).map((l) => l.checkId));
+    let repointed = 0;
+    for (const link of links.filter((l) => l.guestId === absorbed.id)) {
+      if (!survivorChecks.has(link.checkId)) {
+        await this.store.putCheckGuest({ ...link, guestId: survivor.id });
+        survivorChecks.add(link.checkId);
+        repointed += 1;
+      }
+      await this.store.removeCheckGuest(link.checkId, absorbed.id);
+    }
+    const notes = [survivor.notes, absorbed.notes].map((n) => (n ?? "").trim()).filter((n) => n.length > 0);
+    if (notes.length) survivor.notes = notes.join("\n");
+    // the surviving record keeps whichever contact details it has, and takes
+    // the absorbed record's where it has none
+    for (const field of ["phone", "email"] as const) {
+      if (!survivor[field] && absorbed[field]) survivor[field] = absorbed[field];
+    }
+    survivor.marketingOptIn = survivor.marketingOptIn || absorbed.marketingOptIn;
+    await this.store.putGuest(survivor);
+    await this.store.removeGuestLinks(absorbed.id);
+    await this.store.removeGuest(absorbed.id);
+
+    return this.remember(envelope, {
+      kind: "applied",
+      guest: survivor,
+      audit: {
+        action: "merge_guests",
+        survivor: { id: survivor.id, displayName: survivor.displayName },
+        absorbed: { id: absorbed.id, displayName: absorbed.displayName },
+        checksRepointed: repointed,
+        approvedBy: approver.id,
+      },
+    }, "guest", survivor.id);
+  }
+
+  /**
+   * A deletion request (spec C7). Manager-gated. The identity goes and the
+   * links go, within the service day; the checks stay exactly as they were
+   * and simply stop pointing at a person. Money history must survive a
+   * deletion request, identity need not.
+   */
+  async deleteGuest(envelope: Envelope, id: string, input: { managerPin?: string }): Promise<CommandOutcome> {
+    const replay = await this.store.opResult(envelope.operationId);
+    if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
+    const approver = await this.manager(input.managerPin);
+    if (!approver) {
+      return this.remember(envelope, { kind: "rejected", reason: this.managerRefusal(input.managerPin, "deleting a guest") }, "guest", id);
+    }
+    const guest = await this.store.getGuest(id);
+    if (!guest) return { kind: "not_found" };
+    const dropped = (await this.store.listCheckGuests()).filter((l) => l.guestId === id).length;
+    await this.store.removeGuestLinks(id);
+    await this.store.removeGuest(id);
+    return this.remember(envelope, {
+      kind: "applied",
+      audit: {
+        action: "delete_guest",
+        guest: { id, displayName: guest.displayName },
+        linksDropped: dropped,
+        approvedBy: approver.id,
+      },
+    }, "guest", id);
+  }
+
+  /** The attach flow's search: substring over name and phone, case-blind. An
+   *  empty query lists the newest first, because the guest a server wants is
+   *  usually the one they just created. */
+  async guestSearch(q?: string): Promise<{ guests: Guest[]; total: number; limit: number }> {
+    const needle = (q ?? "").trim().toLowerCase();
+    const all = await this.store.listGuests();
+    const newestFirst = [...all].sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
+    const hits = needle
+      ? newestFirst.filter((g) =>
+          g.displayName.toLowerCase().includes(needle) || (g.phone ?? "").toLowerCase().includes(needle))
+      : newestFirst;
+    return { guests: hits.slice(0, MAX_GUEST_RESULTS), total: hits.length, limit: MAX_GUEST_RESULTS };
+  }
+
+  /**
+   * The profile (spec section 4), every figure derived on read and none of it
+   * stored. Closed checks only: an open table is not a visit yet and its
+   * money is still moving.
+   *
+   * Spend is the one place this touches money. One guest on a check owns its
+   * total. Several guests split it through the domain's own even allocator
+   * (v0 has no guest-to-seat mapping, so seats cannot be assigned yet), which
+   * is what makes the N shares of one check sum to that check to the cent no
+   * matter whose profile is being read. Those visits carry sharedCheck.
+   */
+  async guestProfile(id: string) {
+    const guest = await this.store.getGuest(id);
+    if (!guest) return undefined;
+    const [links, checks, floor] = await Promise.all([
+      this.store.listCheckGuests(),
+      this.store.list(),
+      this.store.listFloor(),
+    ]);
+    const areaOf = new Map(floor.map((t) => [t.name, t.area]));
+    const mineIds = new Set(links.filter((l) => l.guestId === id).map((l) => l.checkId));
+    const mine = checks
+      .filter((c) => mineIds.has(c.id) && c.status === "closed")
+      .sort((a, b) => (a.openedAt < b.openedAt ? -1 : 1));
+
+    const favorites = new Map<string, { name: string; count: number; lastAt: string }>();
+    const sections = new Map<string, { area: string; visits: number; lastAt: string }>();
+    const servers = new Map<string, { serverId: string; serverName: string; visits: number; lastAt: string }>();
+    const visits: {
+      checkId: string; checkNo: number; tableName: string; serviceDate: string; closedAt: string | null;
+      shareMinor: number; sharedCheck: boolean; guestsOnCheck: number; serverName: string | null;
+    }[] = [];
+    const serviceDates = new Set<string>();
+    const tipPercents: number[] = [];
+    let totalSpendMinor = 0;
+
+    for (const c of mine) {
+      const attached = [...links.filter((l) => l.checkId === c.id)].sort((a, b) =>
+        a.attachedAt === b.attachedAt ? (a.guestId < b.guestId ? -1 : 1) : (a.attachedAt < b.attachedAt ? -1 : 1));
+      const totals = toView(c).totals;
+      const sharedCheck = attached.length > 1;
+      let shareMinor = totals.totalMinor;
+      if (sharedCheck) {
+        const portions = splitCheck(toDomainLines(c), toDomainAdjustments(c), TAX_RATE, { kind: "even", ways: attached.length });
+        const seat = attached.findIndex((l) => l.guestId === id);
+        shareMinor = portions[seat]?.totalMinor ?? 0;
+      }
+      totalSpendMinor += shareMinor;
+      const at = c.closedAt ?? c.openedAt;
+      serviceDates.add(serviceDateOf(c.openedAt));
+
+      for (const l of c.lines) {
+        if (l.status === "voided") continue; // a voided line was never eaten
+        const hit = favorites.get(l.capturedName) ?? { name: l.capturedName, count: 0, lastAt: at };
+        hit.count += l.quantity;
+        if (at > hit.lastAt) hit.lastAt = at;
+        favorites.set(l.capturedName, hit);
+      }
+      const area = areaOf.get(c.tableName);
+      if (area) {
+        const hit = sections.get(area) ?? { area, visits: 0, lastAt: at };
+        hit.visits += 1;
+        if (at > hit.lastAt) hit.lastAt = at;
+        sections.set(area, hit);
+      }
+      if (c.serverId) {
+        const hit = servers.get(c.serverId) ?? { serverId: c.serverId, serverName: c.serverName ?? "", visits: 0, lastAt: at };
+        hit.visits += 1;
+        if (at > hit.lastAt) hit.lastAt = at;
+        servers.set(c.serverId, hit);
+      }
+      const net = totals.subtotalMinor - totals.discountMinor;
+      if (net > 0) {
+        const tips = c.payments.reduce((a, p) => a + p.tipMinor, 0);
+        tipPercents.push((tips / net) * 100);
+      }
+      visits.push({
+        checkId: c.id, checkNo: c.checkNo, tableName: c.tableName,
+        serviceDate: serviceDateOf(c.openedAt), closedAt: c.closedAt ?? null,
+        shareMinor, sharedCheck, guestsOnCheck: attached.length, serverName: c.serverName ?? null,
+      });
+    }
+
+    /* mode with a recency tiebreak: two sections at three visits each resolve
+       to the one they sat in last, not to whichever hashed first */
+    const topBy = <T extends { visits: number; lastAt: string }>(m: Map<string, T>): T | null =>
+      [...m.values()].sort((a, b) => b.visits - a.visits || (a.lastAt < b.lastAt ? 1 : -1))[0] ?? null;
+    const dates = [...serviceDates].sort();
+    const gaps = dates.slice(1).map((d, i) =>
+      Math.round((Date.parse(d) - Date.parse(dates[i] as string)) / 86_400_000));
+
+    return {
+      guest,
+      visitCount: mine.length,
+      serviceDates: serviceDates.size,
+      medianGapDays: median(gaps),
+      lastVisitAt: visits.length ? (visits[visits.length - 1]!.closedAt ?? null) : null,
+      totalSpendMinor,
+      avgSpendMinor: per(totalSpendMinor, mine.length),
+      tipPercentAvg: tipPercents.length
+        ? Math.round((tipPercents.reduce((a, p) => a + p, 0) / tipPercents.length) * 10) / 10
+        : null,
+      favorites: [...favorites.values()]
+        .sort((a, b) => b.count - a.count || (a.lastAt < b.lastAt ? 1 : -1))
+        .slice(0, MAX_FAVORITES),
+      // lastAt is the tiebreak's business, not the payload's
+      preferredSection: mapOrNull(topBy(sections), ({ area, visits }) => ({ area, visits })),
+      preferredServer: mapOrNull(topBy(servers), ({ serverId, serverName, visits }) => ({ serverId, serverName, visits })),
+      visits: [...visits].reverse(), // newest first, the way a profile reads
+    };
   }
 }
 

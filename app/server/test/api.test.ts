@@ -1510,3 +1510,339 @@ describe("insights: server attribution and the sales heatmap (E19)", () => {
     expect(heat.dayTotals).toEqual([0, 0, 0, 0, 0, 0, 0]);
   });
 });
+
+/* ------------------------------ guestbook (E20) ------------------------------
+ * The v0 rung: a record staff attach by hand, and a profile joined out of the
+ * ledger. The invariant these tests exist for: nothing about a guest is
+ * stored, so attaching, merging, and deleting can never move a cent.
+ */
+
+interface GuestJson {
+  id: string;
+  displayName: string;
+  phone?: string;
+  email?: string;
+  notes?: string;
+  marketingOptIn: boolean;
+}
+
+interface VisitJson {
+  checkId: string;
+  shareMinor: number;
+  sharedCheck: boolean;
+  guestsOnCheck: number;
+  serverName: string | null;
+}
+
+interface ProfileJson {
+  guest: GuestJson;
+  visitCount: number;
+  serviceDates: number;
+  medianGapDays: number | null;
+  lastVisitAt: string | null;
+  totalSpendMinor: number;
+  avgSpendMinor: number;
+  tipPercentAvg: number | null;
+  favorites: { name: string; count: number; lastAt: string }[];
+  preferredSection: { area: string; visits: number } | null;
+  preferredServer: { serverId: string; serverName: string; visits: number } | null;
+  visits: VisitJson[];
+}
+
+async function createGuest(app: ReturnType<typeof buildServer>, input: Record<string, unknown>) {
+  const res = await app.inject({ method: "POST", url: "/v1/guests",
+    payload: { ...ENV(30, { deviceId: "dev-gia" }), ...input } });
+  expect(res.statusCode).toBe(200);
+  return res.json().guest as GuestJson;
+}
+
+async function attachGuest(app: ReturnType<typeof buildServer>, checkId: string, guestId: string) {
+  const res = await app.inject({ method: "POST", url: `/v1/checks/${checkId}/guests`,
+    payload: { ...ENV(31, { deviceId: "dev-gia" }), guestId } });
+  expect(res.statusCode).toBe(200);
+  return res.json().check as { guests: { id: string; name: string }[] };
+}
+
+async function profileOf(app: ReturnType<typeof buildServer>, guestId: string) {
+  const res = await app.inject({ method: "GET", url: `/v1/guests/${guestId}` });
+  expect(res.statusCode).toBe(200);
+  return res.json() as ProfileJson;
+}
+
+async function totalsOf(app: ReturnType<typeof buildServer>, checkId: string) {
+  const res = await app.inject({ method: "GET", url: `/v1/checks/${checkId}` });
+  expect(res.statusCode).toBe(200);
+  return res.json().check.totals as { subtotalMinor: number; discountMinor: number; taxMinor: number; totalMinor: number; paidMinor: number; dueMinor: number };
+}
+
+describe("the guestbook (E20)", () => {
+  it("creates, searches, attaches, and derives the profile from the ledger", async () => {
+    const app = buildServer();
+    await signIn(app, "dev-gia", "2468");
+    const elena = await createGuest(app, { displayName: "  Elena Rossi  ", phone: "555-0100", notes: "Corner two-top" });
+    expect(elena.displayName).toBe("Elena Rossi"); // trimmed
+    expect(elena.marketingOptIn).toBe(false); // privacy default C6: never assumed
+
+    // a name needs to be a name
+    const blank = await app.inject({ method: "POST", url: "/v1/guests",
+      payload: { ...ENV(32, { deviceId: "dev-gia" }), displayName: "   " } });
+    expect(blank.statusCode).toBe(422);
+    expect(blank.json().reason).toMatch(/needs a name/);
+
+    // search is case-blind over name and phone
+    const byName = await app.inject({ method: "GET", url: "/v1/guests?q=rossi" });
+    expect((byName.json().guests as GuestJson[]).map((g) => g.id)).toEqual([elena.id]);
+    const byPhone = await app.inject({ method: "GET", url: "/v1/guests?q=0100" });
+    expect((byPhone.json().guests as GuestJson[])).toHaveLength(1);
+    const miss = await app.inject({ method: "GET", url: "/v1/guests?q=nobody" });
+    expect(miss.json().guests).toEqual([]);
+    // an empty query lists everyone, newest first
+    expect((await app.inject({ method: "GET", url: "/v1/guests" })).json().total).toBe(1);
+
+    // burrata 1600 + two acqua 1200 = 2800 net, tax 249, total 3049, tip 500
+    const checkId = await serviceCheck(app, "dev-gia", "Table 14", [BURRATA, TWO_ACQUA], 500);
+    const totals = await totalsOf(app, checkId);
+    expect(totals.totalMinor).toBe(3049);
+
+    // attaching to a CLOSED check is allowed, and attaching twice is a no-op
+    const attached = await attachGuest(app, checkId, elena.id);
+    expect(attached.guests).toEqual([{ id: elena.id, name: "Elena Rossi" }]);
+    const again = await attachGuest(app, checkId, elena.id);
+    expect(again.guests).toHaveLength(1);
+    // the chip rides the check reads too, so the header needs no second fetch
+    const listed = (await app.inject({ method: "GET", url: "/v1/checks" })).json().checks
+      .find((c: { id: string }) => c.id === checkId);
+    expect(listed.guests).toEqual([{ id: elena.id, name: "Elena Rossi" }]);
+
+    const p = await profileOf(app, elena.id);
+    expect(p.visitCount).toBe(1);
+    expect(p.serviceDates).toBe(1);
+    expect(p.medianGapDays).toBeNull(); // one visit has no cadence
+    // one guest on the check owns the whole check
+    expect(p.totalSpendMinor).toBe(3049);
+    expect(p.avgSpendMinor).toBe(3049);
+    expect(p.visits[0]).toMatchObject({ checkId, shareMinor: 3049, sharedCheck: false, guestsOnCheck: 1, serverName: "Gia R." });
+    // favorites by count, and quantity counts
+    expect(p.favorites.map((f) => [f.name, f.count])).toEqual([["Acqua Panna", 2], ["Burrata e Prosciutto", 1]]);
+    expect(p.preferredSection).toMatchObject({ area: "Sala", visits: 1 });
+    expect(p.preferredServer).toMatchObject({ serverName: "Gia R.", visits: 1 });
+    // 500 of tip on 2800 of net
+    expect(p.tipPercentAvg).toBe(17.9);
+    // notes are the only stored thing on the profile
+    expect(p.guest.notes).toBe("Corner two-top");
+
+    // an unknown guest cannot be attached, and an unknown guest has no profile
+    const bad = await app.inject({ method: "POST", url: `/v1/checks/${checkId}/guests`,
+      payload: { ...ENV(33, { deviceId: "dev-gia" }), guestId: "11111111-1111-1111-1111-111111111111" } });
+    expect(bad.statusCode).toBe(422);
+    expect((await app.inject({ method: "GET", url: "/v1/guests/11111111-1111-1111-1111-111111111111" })).statusCode).toBe(404);
+
+    // detach puts it back the way it was
+    const detached = await app.inject({ method: "POST", url: `/v1/checks/${checkId}/guests/${elena.id}/detach`,
+      payload: ENV(34, { deviceId: "dev-gia" }) });
+    expect(detached.statusCode).toBe(200);
+    expect(detached.json().check.guests).toEqual([]);
+    expect((await profileOf(app, elena.id)).visitCount).toBe(0);
+  });
+
+  it("splits a shared check through the domain allocators, so the shares sum to it", async () => {
+    const app = buildServer();
+    await signIn(app, "dev-gia", "2468");
+    const marco = await createGuest(app, { displayName: "Marco Bianchi" });
+    const lucia = await createGuest(app, { displayName: "Lucia Bianchi" });
+
+    const checkId = await serviceCheck(app, "dev-gia", "Table 5", [BURRATA, TWO_ACQUA], 0);
+    const totals = await totalsOf(app, checkId);
+    const both = await attachGuest(app, checkId, marco.id);
+    expect(both.guests).toHaveLength(1);
+    expect((await attachGuest(app, checkId, lucia.id)).guests).toHaveLength(2);
+
+    const pm = await profileOf(app, marco.id);
+    const pl = await profileOf(app, lucia.id);
+    // CONSERVATION: two shares of one check are that check, to the cent
+    expect(pm.totalSpendMinor + pl.totalSpendMinor).toBe(totals.totalMinor);
+    // the odd cent lands on exactly one of them: 1400 + 125 and 1400 + 124
+    expect([pm.totalSpendMinor, pl.totalSpendMinor].sort((a, b) => b - a)).toEqual([1525, 1524]);
+    for (const p of [pm, pl]) {
+      expect(p.visitCount).toBe(1);
+      expect(p.visits[0]).toMatchObject({ sharedCheck: true, guestsOnCheck: 2 });
+      // both ate the same food, so both profiles show it
+      expect(p.favorites.map((f) => f.name)).toEqual(["Acqua Panna", "Burrata e Prosciutto"]);
+    }
+  });
+
+  it("conserves a discounted check across three guests", async () => {
+    const app = buildServer();
+    await signIn(app, "dev-gia", "2468");
+    const env = (n: number) => ENV(n, { deviceId: "dev-gia" });
+    const guests = [];
+    for (const name of ["Aldo", "Bruna", "Carlo"]) guests.push(await createGuest(app, { displayName: name }));
+
+    // burrata 1600 + two acqua 1200, less a 400 discount: taxable 2400,
+    // tax 213, total 2613, which does not divide evenly by three
+    const open = await app.inject({ method: "POST", url: "/v1/checks",
+      payload: { ...env(80), tableName: "Table 7", covers: 3 } });
+    const checkId = open.json().check.id as string;
+    await app.inject({ method: "POST", url: `/v1/checks/${checkId}/items`, payload: { ...env(81), ...BURRATA } });
+    await app.inject({ method: "POST", url: `/v1/checks/${checkId}/items`, payload: { ...env(82), ...TWO_ACQUA } });
+    await app.inject({ method: "POST", url: `/v1/checks/${checkId}/send`, payload: env(83) });
+    const disc = await app.inject({ method: "POST", url: `/v1/checks/${checkId}/adjustments`,
+      payload: { ...env(84), amountMinor: 400, label: "Regular guest", reason: "weekly regular", managerPin: "1122" } });
+    expect(disc.statusCode).toBe(200);
+    const due = (await totalsOf(app, checkId)).dueMinor;
+    await app.inject({ method: "POST", url: `/v1/checks/${checkId}/payments`, payload: { ...env(85), method: "card", amountMinor: due } });
+    await app.inject({ method: "POST", url: `/v1/checks/${checkId}/close`, payload: env(86) });
+    const totals = await totalsOf(app, checkId);
+    expect(totals.totalMinor).toBe(2613);
+
+    for (const g of guests) await attachGuest(app, checkId, g.id);
+    const shares = [];
+    for (const g of guests) shares.push((await profileOf(app, g.id)).totalSpendMinor);
+    // CONSERVATION with a discount in play and three ways to divide it
+    expect(shares.reduce((a, s) => a + s, 0)).toBe(totals.totalMinor);
+    expect(shares).toEqual([871, 871, 871]);
+    // every profile agrees the check was shared three ways
+    for (const g of guests) {
+      expect((await profileOf(app, g.id)).visits[0]).toMatchObject({ sharedCheck: true, guestsOnCheck: 3 });
+    }
+  });
+
+  it("counts neither a voided line nor an open check", async () => {
+    const app = buildServer();
+    await signIn(app, "dev-gia", "2468");
+    const vera = await createGuest(app, { displayName: "Vera Conti" });
+    const env = (n: number) => ENV(n, { deviceId: "dev-gia" });
+
+    // a closed check whose acqua was voided after firing
+    const open = await app.inject({ method: "POST", url: "/v1/checks",
+      payload: { ...env(40), tableName: "Table 14", covers: 2 } });
+    const closedId = open.json().check.id as string;
+    await app.inject({ method: "POST", url: `/v1/checks/${closedId}/items`, payload: { ...env(41), ...BURRATA } });
+    await app.inject({ method: "POST", url: `/v1/checks/${closedId}/items`, payload: { ...env(42), itemId: "acqua", quantity: 1, seatNo: 2 } });
+    await app.inject({ method: "POST", url: `/v1/checks/${closedId}/send`, payload: env(43) });
+    const acqua = (await app.inject({ method: "GET", url: `/v1/checks/${closedId}` })).json().check.lines
+      .find((l: { capturedName: string }) => l.capturedName === "Acqua Panna");
+    const voided = await app.inject({ method: "POST", url: `/v1/checks/${closedId}/items/${acqua.id}/void`,
+      payload: { ...env(44), reason: "guest changed order", managerPin: "1122" } });
+    expect(voided.statusCode).toBe(200);
+    const due = (await totalsOf(app, closedId)).dueMinor;
+    await app.inject({ method: "POST", url: `/v1/checks/${closedId}/payments`, payload: { ...env(45), method: "card", amountMinor: due } });
+    await app.inject({ method: "POST", url: `/v1/checks/${closedId}/close`, payload: env(46) });
+    const closedTotal = (await totalsOf(app, closedId)).totalMinor;
+    await attachGuest(app, closedId, vera.id);
+
+    // and an open check she is also sitting at right now
+    const openCheck = await openTable(app, "Table 5", 2);
+    await app.inject({ method: "POST", url: `/v1/checks/${openCheck.id}/items`, payload: { ...env(47), ...TIRAMISU } });
+    await app.inject({ method: "POST", url: `/v1/checks/${openCheck.id}/send`, payload: env(48) });
+    await attachGuest(app, openCheck.id, vera.id);
+
+    const p = await profileOf(app, vera.id);
+    expect(p.visitCount).toBe(1); // the open table is not a visit yet
+    expect(p.totalSpendMinor).toBe(closedTotal);
+    // no acqua (voided, never eaten) and no tiramisu (still on an open check)
+    expect(p.favorites.map((f) => f.name)).toEqual(["Burrata e Prosciutto"]);
+  });
+
+  it("merges two records for the same person without moving a cent", async () => {
+    const app = buildServer();
+    await signIn(app, "dev-gia", "2468");
+    const survivor = await createGuest(app, { displayName: "Elena Rossi", notes: "Barolo, corner two-top" });
+    const dupe = await createGuest(app, { displayName: "E. Rossi", phone: "555-0199", notes: "No shellfish" });
+
+    const c1 = await serviceCheck(app, "dev-gia", "Table 14", [BURRATA], 0);
+    const c2 = await serviceCheck(app, "dev-gia", "Table 5", [TIRAMISU], 0);
+    await attachGuest(app, c1, survivor.id);
+    await attachGuest(app, c2, dupe.id);
+    const before1 = await totalsOf(app, c1);
+    const before2 = await totalsOf(app, c2);
+
+    // a server's PIN cannot destroy a record
+    const refused = await app.inject({ method: "POST", url: `/v1/guests/${survivor.id}/merge`,
+      payload: { ...ENV(50, { deviceId: "dev-gia" }), absorbedId: dupe.id, managerPin: "2468" } });
+    expect(refused.statusCode).toBe(422);
+    expect(refused.json().reason).toMatch(/not recognized as a manager/);
+    // and nobody can absorb themselves
+    const self = await app.inject({ method: "POST", url: `/v1/guests/${survivor.id}/merge`,
+      payload: { ...ENV(51, { deviceId: "dev-gia" }), absorbedId: survivor.id, managerPin: "1122" } });
+    expect(self.statusCode).toBe(422);
+
+    const merged = await app.inject({ method: "POST", url: `/v1/guests/${survivor.id}/merge`,
+      payload: { ...ENV(52, { deviceId: "dev-gia" }), absorbedId: dupe.id, managerPin: "1122" } });
+    expect(merged.statusCode).toBe(200);
+    // the audit carries the actor's approval and both names
+    expect(merged.json().audit).toMatchObject({
+      action: "merge_guests",
+      survivor: { displayName: "Elena Rossi" },
+      absorbed: { displayName: "E. Rossi" },
+      checksRepointed: 1,
+      approvedBy: "66666666-6666-4666-8666-666666666666", // Marco B.
+    });
+
+    // the survivor's history now spans both visits, and the absorbed record is gone
+    const p = await profileOf(app, survivor.id);
+    expect(p.visitCount).toBe(2);
+    expect(p.totalSpendMinor).toBe(before1.totalMinor + before2.totalMinor);
+    expect(p.favorites.map((f) => f.name).sort()).toEqual(["Burrata e Prosciutto", "Tiramisu della Casa"]);
+    expect((await app.inject({ method: "GET", url: `/v1/guests/${dupe.id}` })).statusCode).toBe(404);
+    // notes append rather than vanish, and the survivor takes the phone it lacked
+    expect(p.guest.notes).toBe("Barolo, corner two-top\nNo shellfish");
+    expect(p.guest.phone).toBe("555-0199");
+    // the repointed check now shows the survivor on its header
+    const c2After = await app.inject({ method: "GET", url: `/v1/checks/${c2}` });
+    expect(c2After.json().check.guests).toEqual([{ id: survivor.id, name: "Elena Rossi" }]);
+    // and no check moved: history is a join, not a copy
+    expect(await totalsOf(app, c1)).toEqual(before1);
+    expect(await totalsOf(app, c2)).toEqual(before2);
+  });
+
+  it("honors a deletion request: identity and links go, the checks stay", async () => {
+    const app = buildServer();
+    await signIn(app, "dev-gia", "2468");
+    const guest = await createGuest(app, { displayName: "Delete Me", phone: "555-0000" });
+    const checkId = await serviceCheck(app, "dev-gia", "Table 14", [BURRATA], 0);
+    await attachGuest(app, checkId, guest.id);
+    const before = await totalsOf(app, checkId);
+
+    // a server's PIN is refused
+    const refused = await app.inject({ method: "POST", url: `/v1/guests/${guest.id}/delete`,
+      payload: { ...ENV(60, { deviceId: "dev-gia" }), managerPin: "2468" } });
+    expect(refused.statusCode).toBe(422);
+    expect(refused.json().reason).toMatch(/not recognized as a manager/);
+
+    const deleted = await app.inject({ method: "POST", url: `/v1/guests/${guest.id}/delete`,
+      payload: { ...ENV(61, { deviceId: "dev-gia" }), managerPin: "1122" } });
+    expect(deleted.statusCode).toBe(200);
+    expect(deleted.json().audit).toMatchObject({ action: "delete_guest", linksDropped: 1 });
+
+    // identity gone, links gone
+    expect((await app.inject({ method: "GET", url: `/v1/guests/${guest.id}` })).statusCode).toBe(404);
+    expect((await app.inject({ method: "GET", url: "/v1/guests?q=Delete" })).json().guests).toEqual([]);
+    // check intact, to the cent, and simply no longer pointing at a person
+    const after = await app.inject({ method: "GET", url: `/v1/checks/${checkId}` });
+    expect(after.statusCode).toBe(200);
+    expect(after.json().check.totals).toEqual(before);
+    expect(after.json().check.guests).toEqual([]);
+    // and the day still reports the same money
+    const day = (await app.inject({ method: "GET", url: "/v1/day" })).json();
+    expect(day.summary.grossMinor).toBe(before.subtotalMinor);
+  });
+
+  it("edits a record, clearing a field with an empty string", async () => {
+    const app = buildServer();
+    await signIn(app, "dev-gia", "2468");
+    const guest = await createGuest(app, { displayName: "Ada Ferrari", phone: "555-0111", notes: "window" });
+    const updated = await app.inject({ method: "POST", url: `/v1/guests/${guest.id}/update`,
+      payload: { ...ENV(70, { deviceId: "dev-gia" }), notes: "window, still water", phone: "", marketingOptIn: true } });
+    expect(updated.statusCode).toBe(200);
+    const after = updated.json().guest as GuestJson;
+    expect(after.notes).toBe("window, still water");
+    expect(after.phone).toBeUndefined(); // cleared on request
+    expect(after.marketingOptIn).toBe(true);
+    expect(after.displayName).toBe("Ada Ferrari"); // untouched fields stay
+    // and a rename still refuses a blank name
+    const blank = await app.inject({ method: "POST", url: `/v1/guests/${guest.id}/update`,
+      payload: { ...ENV(71, { deviceId: "dev-gia" }), displayName: " " } });
+    expect(blank.statusCode).toBe(422);
+  });
+});

@@ -225,6 +225,43 @@ export interface Store {
 
   listShifts(): Promise<Shift[]>;
   putShift(shift: Shift): Promise<void>;
+
+  /** guests and their check links (E20). Deleting a guest purges identity and
+   *  drops the links; it never touches a check. */
+  listGuests(): Promise<Guest[]>;
+  getGuest(id: string): Promise<Guest | undefined>;
+  putGuest(guest: Guest): Promise<void>;
+  removeGuest(id: string): Promise<void>;
+  /** every link, or just one check's when checkId is given */
+  listCheckGuests(checkId?: string): Promise<CheckGuestLink[]>;
+  putCheckGuest(link: CheckGuestLink): Promise<void>;
+  removeCheckGuest(checkId: string, guestId: string): Promise<void>;
+  removeGuestLinks(guestId: string): Promise<void>;
+}
+
+/** A guest the house remembers (E20, spec section 2). Identity only: no money,
+ *  no counts, no aggregates. Everything a profile shows is a join over the
+ *  ledger, so a guest record can never drift from the money. */
+export interface Guest {
+  id: string;
+  displayName: string;
+  phone?: string;
+  email?: string;
+  /** staff-authored free text, the only stored thing on the profile */
+  notes?: string;
+  /** privacy default per spec C6: opt-in is never assumed */
+  marketingOptIn: boolean;
+  createdBy?: string;
+  createdAt: string;
+}
+
+/** One guest attached to one check (E20). A check carries zero or more guests,
+ *  a guest has many checks, and the link is the whole of the write surface. */
+export interface CheckGuestLink {
+  checkId: string;
+  guestId: string;
+  attachedBy?: string;
+  attachedAt: string;
 }
 
 /** One employee working one stretch (E14/E15). Sign-in auto-clocks-in;

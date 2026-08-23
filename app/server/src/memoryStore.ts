@@ -9,6 +9,8 @@ import {
   type FloorTable,
   type KitchenTicket,
   type MenuDraft,
+  type CheckGuestLink,
+  type Guest,
   type MenuSnapshot,
   type OpMeta,
   type Shift,
@@ -75,4 +77,24 @@ export class MemoryStore implements Store {
   private shifts = new Map<string, Shift>();
   async listShifts() { return [...this.shifts.values()]; }
   async putShift(shift: Shift) { this.shifts.set(shift.id, shift); }
+
+  /* guests (E20). Keyed by id; links keyed by "checkId:guestId" so attaching
+     twice is the same row, which is what makes attach idempotent. */
+  private guests = new Map<string, Guest>();
+  private guestLinks = new Map<string, CheckGuestLink>();
+
+  async listGuests() { return [...this.guests.values()]; }
+  async getGuest(id: string) { return this.guests.get(id); }
+  async putGuest(guest: Guest) { this.guests.set(guest.id, guest); }
+  async removeGuest(id: string) { this.guests.delete(id); }
+
+  async listCheckGuests(checkId?: string) {
+    const all = [...this.guestLinks.values()];
+    return checkId === undefined ? all : all.filter((l) => l.checkId === checkId);
+  }
+  async putCheckGuest(link: CheckGuestLink) { this.guestLinks.set(link.checkId + ":" + link.guestId, link); }
+  async removeCheckGuest(checkId: string, guestId: string) { this.guestLinks.delete(checkId + ":" + guestId); }
+  async removeGuestLinks(guestId: string) {
+    for (const [key, link] of this.guestLinks) if (link.guestId === guestId) this.guestLinks.delete(key);
+  }
 }

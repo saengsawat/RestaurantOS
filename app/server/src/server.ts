@@ -39,6 +39,18 @@ function readEnvelope(body: EnvelopeBody): Envelope | { error: string } {
   return envelope;
 }
 
+
+/** The optional guest fields, passed through only when the caller sent them,
+ *  so an omitted field keeps its value and an empty string clears it. */
+function guestFields(body: Record<string, unknown>) {
+  return {
+    ...(typeof body.phone === "string" ? { phone: body.phone } : {}),
+    ...(typeof body.email === "string" ? { email: body.email } : {}),
+    ...(typeof body.notes === "string" ? { notes: body.notes } : {}),
+    ...(typeof body.marketingOptIn === "boolean" ? { marketingOptIn: body.marketingOptIn } : {}),
+  };
+}
+
 function respond(reply: FastifyReply, outcome: CommandOutcome): unknown {
   switch (outcome.kind) {
     case "applied":
@@ -49,6 +61,8 @@ function respond(reply: FastifyReply, outcome: CommandOutcome): unknown {
         ...(outcome.session ? { session: outcome.session } : {}),
         ...(outcome.day ? { day: outcome.day } : {}),
         ...(outcome.menu !== undefined ? { menu: outcome.menu } : {}),
+        ...(outcome.guest !== undefined ? { guest: outcome.guest } : {}),
+        ...(outcome.audit !== undefined ? { audit: outcome.audit } : {}),
       });
     case "replay":
       return respond(reply, outcome.result);
@@ -373,6 +387,80 @@ export function buildServer(store: Store = new MemoryStore(), storeName = "memor
     return respond(reply, await engine.moveTable(envelope, {
       tableName: String(body.tableName ?? ""), x: Number(body.x), y: Number(body.y),
     }));
+  });
+
+
+  /* --------------------------- guestbook (E20) ---------------------------
+   * Two reads (search, profile) and the commands behind them. The profile is
+   * computed on read like every other projection here, so nothing on it can
+   * drift from the checks it is made of. */
+
+  app.get("/v1/guests", async (req) => {
+    const { q } = req.query as { q?: string };
+    return engine.guestSearch(q);
+  });
+
+  app.get("/v1/guests/:id", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const profile = await engine.guestProfile(id);
+    return profile ? profile : reply.code(404).send({ status: "NOT_FOUND" });
+  });
+
+  app.post("/v1/guests", async (req, reply) => {
+    const body = (req.body ?? {}) as EnvelopeBody & Record<string, unknown>;
+    const envelope = readEnvelope(body);
+    if ("error" in envelope) return reply.code(400).send({ status: "BAD_REQUEST", reason: envelope.error });
+    return respond(reply, await engine.createGuest(envelope, {
+      displayName: String(body.displayName ?? ""),
+      ...guestFields(body),
+    }));
+  });
+
+  app.post("/v1/guests/:id/update", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = (req.body ?? {}) as EnvelopeBody & Record<string, unknown>;
+    const envelope = readEnvelope(body);
+    if ("error" in envelope) return reply.code(400).send({ status: "BAD_REQUEST", reason: envelope.error });
+    return respond(reply, await engine.updateGuest(envelope, id, {
+      ...(typeof body.displayName === "string" ? { displayName: body.displayName } : {}),
+      ...guestFields(body),
+    }));
+  });
+
+  /** Merge is manager-gated: :id survives, absorbedId goes. */
+  app.post("/v1/guests/:id/merge", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = (req.body ?? {}) as EnvelopeBody & { absorbedId?: unknown; managerPin?: unknown };
+    const envelope = readEnvelope(body);
+    if ("error" in envelope) return reply.code(400).send({ status: "BAD_REQUEST", reason: envelope.error });
+    return respond(reply, await engine.mergeGuests(envelope, id, {
+      absorbedId: String(body.absorbedId ?? ""),
+      ...(typeof body.managerPin === "string" ? { managerPin: body.managerPin } : {}),
+    }));
+  });
+
+  /** A deletion request: identity and links go, the checks stay. */
+  app.post("/v1/guests/:id/delete", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = (req.body ?? {}) as EnvelopeBody & { managerPin?: unknown };
+    const envelope = readEnvelope(body);
+    if ("error" in envelope) return reply.code(400).send({ status: "BAD_REQUEST", reason: envelope.error });
+    return respond(reply, await engine.deleteGuest(envelope, id, typeof body.managerPin === "string" ? { managerPin: body.managerPin } : {}));
+  });
+
+  app.post("/v1/checks/:id/guests", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = (req.body ?? {}) as EnvelopeBody & { guestId?: unknown };
+    const envelope = readEnvelope(body);
+    if ("error" in envelope) return reply.code(400).send({ status: "BAD_REQUEST", reason: envelope.error });
+    return respond(reply, await engine.attachGuest(envelope, id, { guestId: String(body.guestId ?? "") }));
+  });
+
+  app.post("/v1/checks/:id/guests/:guestId/detach", async (req, reply) => {
+    const { id, guestId } = req.params as { id: string; guestId: string };
+    const envelope = readEnvelope((req.body ?? {}) as EnvelopeBody);
+    if ("error" in envelope) return reply.code(400).send({ status: "BAD_REQUEST", reason: envelope.error });
+    return respond(reply, await engine.detachGuest(envelope, id, guestId));
   });
 
   /* ------------------------------- KDS ------------------------------- */

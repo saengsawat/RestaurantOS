@@ -124,6 +124,19 @@ describe.skipIf(!PGBIN)("PostgreSQL persistence (E4)", () => {
     const close = await app.inject({ method: "POST", url: `/v1/checks/${id}/close`, payload: ENV() });
     expect(close.statusCode).toBe(200);
 
+    // E20: a guest the house remembers, attached to the check that just closed
+    // (attaching after the fact is the point: that is when a server has time)
+    const guestRes = await app.inject({ method: "POST", url: "/v1/guests",
+      payload: ENV({ displayName: "Elena Rossi", phone: "555-0100", notes: "Barolo, corner two-top" }) });
+    expect(guestRes.statusCode).toBe(200);
+    const guestId = guestRes.json().guest.id as string;
+    const attachRes = await app.inject({ method: "POST", url: `/v1/checks/${id}/guests`,
+      payload: ENV({ guestId }) });
+    expect(attachRes.statusCode).toBe(200);
+    expect(attachRes.json().check.guests).toEqual([{ id: guestId, name: "Elena Rossi" }]);
+    const profileBefore = (await app.inject({ method: "GET", url: `/v1/guests/${guestId}` })).json();
+    expect(profileBefore.visitCount).toBe(1);
+
     // relocate a table on the floor plan (E6 editor)
     const move = await app.inject({ method: "POST", url: "/v1/floor/move",
       payload: ENV({ tableName: "Table 2", x: 40, y: 56 }) });
@@ -238,5 +251,16 @@ describe.skipIf(!PGBIN)("PostgreSQL persistence (E4)", () => {
     expect(menu.availability.find((a: { itemId: string }) => a.itemId === "calamari").is86).toBe(true);
     // and the closed check still reports the v1 snapshot it was opened on
     expect(check.menuSnapshotId).toBe("snap-0001");
+
+    // E20: the guest and the attachment survived as guest + check_guest rows,
+    // and the profile is byte-identical, because it is derived from the ledger
+    // rather than stored anywhere
+    const profileAfter = (await app2.inject({ method: "GET", url: `/v1/guests/${guestId}` })).json();
+    expect(profileAfter).toEqual(profileBefore);
+    expect(profileAfter.guest.notes).toBe("Barolo, corner two-top");
+    expect(profileAfter.totalSpendMinor).toBe(check.totals.totalMinor);
+    expect(check.guests).toEqual([{ id: guestId, name: "Elena Rossi" }]);
+    // search finds her through the location-scoped index
+    expect((await app2.inject({ method: "GET", url: "/v1/guests?q=ROSSI" })).json().guests).toHaveLength(1);
   }, 60_000);
 });

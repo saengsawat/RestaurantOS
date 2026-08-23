@@ -21,8 +21,10 @@ import {
   serviceDateOf,
   type Availability,
   type CheckAggregate,
+  type CheckGuestLink,
   type DrawerSession,
   type FloorTable,
+  type Guest,
   type KitchenTicket,
   type MenuDraft,
   type MenuSnapshot,
@@ -719,6 +721,88 @@ export class PgStore implements Store {
     }));
   }
 
+
+  /* --------------------------- guests (E20) ---------------------------
+   * Identity in `guest`, attachment in `check_guest`, and nothing else:
+   * every figure on a profile is a join over the checks already stored, so
+   * removing a guest can never move money. */
+
+  async listGuests(): Promise<Guest[]> {
+    const r = await this.pool.query(
+      `SELECT id, display_name, phone, email, notes, marketing_opt_in, created_by, created_at
+       FROM guest WHERE location_id = $1 ORDER BY created_at DESC`,
+      [LOC],
+    );
+    return r.rows.map(guestFromRow);
+  }
+
+  async getGuest(id: string): Promise<Guest | undefined> {
+    const r = await this.pool.query(
+      `SELECT id, display_name, phone, email, notes, marketing_opt_in, created_by, created_at
+       FROM guest WHERE id = $1`,
+      [id],
+    );
+    return r.rowCount ? guestFromRow(r.rows[0]) : undefined;
+  }
+
+  async putGuest(guest: Guest): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO guest (id, org_id, location_id, display_name, phone, email, notes, marketing_opt_in, created_by, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+       ON CONFLICT (id) DO UPDATE SET display_name = $4, phone = $5, email = $6, notes = $7, marketing_opt_in = $8`,
+      [guest.id, ORG, LOC, guest.displayName, guest.phone ?? null, guest.email ?? null, guest.notes ?? null,
+       guest.marketingOptIn, guest.createdBy ?? EMP, guest.createdAt],
+    );
+  }
+
+  /** A deletion request (spec C7): the person goes, every check stays. */
+  async removeGuest(id: string): Promise<void> {
+    const c = await this.pool.connect();
+    try {
+      await c.query("BEGIN");
+      await c.query("DELETE FROM check_guest WHERE guest_id = $1", [id]);
+      await c.query("DELETE FROM guest WHERE id = $1", [id]);
+      await c.query("COMMIT");
+    } catch (err) {
+      await c.query("ROLLBACK");
+      throw err;
+    } finally {
+      c.release();
+    }
+  }
+
+  async listCheckGuests(checkId?: string): Promise<CheckGuestLink[]> {
+    const r = await this.pool.query(
+      `SELECT cg.check_id, cg.guest_id, cg.attached_by, cg.attached_at
+       FROM check_guest cg JOIN guest g ON g.id = cg.guest_id
+       WHERE g.location_id = $1 ${checkId ? "AND cg.check_id = $2" : ""}
+       ORDER BY cg.attached_at`,
+      checkId ? [LOC, checkId] : [LOC],
+    );
+    return r.rows.map((row) => ({
+      checkId: row.check_id as string,
+      guestId: row.guest_id as string,
+      ...(row.attached_by ? { attachedBy: row.attached_by as string } : {}),
+      attachedAt: new Date(row.attached_at as string).toISOString(),
+    }));
+  }
+
+  async putCheckGuest(link: CheckGuestLink): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO check_guest (check_id, guest_id, attached_by, attached_at)
+       VALUES ($1,$2,$3,$4) ON CONFLICT (check_id, guest_id) DO NOTHING`,
+      [link.checkId, link.guestId, link.attachedBy ?? EMP, link.attachedAt],
+    );
+  }
+
+  async removeCheckGuest(checkId: string, guestId: string): Promise<void> {
+    await this.pool.query("DELETE FROM check_guest WHERE check_id = $1 AND guest_id = $2", [checkId, guestId]);
+  }
+
+  async removeGuestLinks(guestId: string): Promise<void> {
+    await this.pool.query("DELETE FROM check_guest WHERE guest_id = $1", [guestId]);
+  }
+
   async dayStatus(serviceDate: string): Promise<"open" | "closed"> {
     const r = await this.pool.query("SELECT status FROM business_day WHERE location_id = $1 AND service_date = $2", [LOC, serviceDate]);
     return r.rowCount && r.rows[0].status === "closed" ? "closed" : "open";
@@ -751,6 +835,21 @@ function isUuid(s: string): boolean {
 function uuidFrom(s: string): string {
   const h = createHash("sha256").update(s).digest("hex");
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20, 32)}`;
+}
+
+/** One guest row as the engine reads it (E20). NULL columns stay absent
+ *  rather than becoming empty strings: the profile shows what exists. */
+function guestFromRow(row: Record<string, unknown>): Guest {
+  return {
+    id: row["id"] as string,
+    displayName: row["display_name"] as string,
+    ...(row["phone"] ? { phone: row["phone"] as string } : {}),
+    ...(row["email"] ? { email: row["email"] as string } : {}),
+    ...(row["notes"] ? { notes: row["notes"] as string } : {}),
+    marketingOptIn: row["marketing_opt_in"] === true,
+    ...(row["created_by"] ? { createdBy: row["created_by"] as string } : {}),
+    createdAt: new Date(row["created_at"] as string).toISOString(),
+  };
 }
 
 /** The seeded v1 snapshot keeps its fixed uuid; later versions derive theirs. */
