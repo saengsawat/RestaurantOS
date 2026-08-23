@@ -178,6 +178,37 @@ label.ck{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--ink-
 .pbtn:hover{background:var(--brand-hover)}
 .pbtn:disabled{opacity:.45;cursor:default}
 
+
+/* guestbook (E20-T3): the attach flow and the profile pane. Neutral pills on
+   purpose: the status triples mean order state, and a regular at table 7 is
+   not a state. */
+.guests{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.gchip{min-height:44px;border-radius:999px;padding:0 14px;background:var(--surface-2);border:1px solid var(--line);
+  color:var(--ink);font-size:13px;font-weight:600;display:inline-flex;align-items:center;gap:7px;transition:transform .1s}
+.gchip:active{transform:scale(.97)}
+.grow{display:flex;align-items:center;gap:10px;width:100%;min-height:56px;padding:8px 0;text-align:left;
+  border-bottom:1px solid var(--line-subtle);transition:transform .1s}
+.grow:last-child{border-bottom:none}
+.grow:active{transform:scale(.995);background:var(--surface-2)}
+.grow .gi{flex:1;min-width:0}
+.grow .gn{font-size:14.5px;font-weight:600;display:block}
+.grow .gm{font-size:12px;color:var(--ink-3);display:block}
+.gbtn{min-height:44px;border-radius:999px;padding:0 16px;background:var(--surface-2);color:var(--ink);
+  font-size:13.5px;font-weight:600;flex:0 0 auto;transition:transform .1s}
+.gbtn:active{transform:scale(.97)}
+.gdanger{min-height:44px;border-radius:999px;padding:0 16px;background:transparent;
+  border:1.5px solid var(--red);color:var(--red);font-size:13.5px;font-weight:600;flex:0 0 auto}
+.gstat{display:grid;grid-template-columns:repeat(auto-fit,minmax(116px,1fr));gap:8px;margin:2px 0 12px}
+.gstat > div{background:var(--surface-2);border-radius:12px;padding:9px 12px}
+.gstat .k{font-size:11px;color:var(--ink-3);font-weight:600}
+.gstat .v{font-size:17px;font-weight:800;font-variant-numeric:tabular-nums}
+.gvisit{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:13px;padding:7px 0;
+  border-bottom:1px solid var(--line-subtle)}
+.gvisit:last-child{border-bottom:none}
+.gvisit .num{font-weight:600}
+.gnote{font-size:12px;color:var(--ink-4);margin:2px 0 10px;line-height:1.5}
+textarea.fld{min-height:72px;resize:vertical;font:inherit;color:inherit;line-height:1.45}
+
 /* guest receipt (E9 slice): a paper-shaped panel; @media print isolates it */
 .paper{background:var(--panel);max-width:320px;margin:0 auto;padding:18px 16px;font-family:var(--mono);font-size:12.5px;line-height:1.5;color:var(--ink);box-shadow:var(--ring);border-radius:8px}
 .paper h4{text-align:center;font-size:15px;letter-spacing:.02em;font-family:var(--font)}
@@ -248,6 +279,7 @@ label.ck{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--ink-
           <span style="display:flex;align-items:center;gap:8px"><span class="no" id="chNo"></span>
           <button id="btnMore" title="Transfer / merge" style="min-width:36px;min-height:36px;border-radius:999px;background:var(--surface-2);font-weight:800">⋯</button></span></div>
         <div class="tags" id="chTags"></div>
+        <div class="guests" id="chGuests"></div>
       </div>
       <div class="body" id="chBody"></div>
       <div class="totals" id="chTotals"></div>
@@ -297,6 +329,12 @@ label.ck{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--ink-
   <div class="m-h"><div><h3>Check actions</h3><div class="sub" id="moreSub"></div></div><button class="m-x" data-close="ovMore">✕</button></div>
   <div class="m-b" id="moreBody"></div>
   <div class="m-f" id="moreFoot" style="display:none"><button class="btn btn-p" id="moreGo">Merge</button></div>
+</div></div>
+
+<div class="ov" id="ovGuests"><div class="modal">
+  <div class="m-h"><div><h3 id="gTitle">Guests</h3><div class="sub" id="gSub"></div></div><button class="m-x" data-close="ovGuests">✕</button></div>
+  <div class="m-b" id="gBody"></div>
+  <div class="m-f" id="gFoot"></div>
 </div></div>
 
 <div class="ov" id="ovVoid"><div class="modal">
@@ -425,7 +463,7 @@ function renderMenu(){
 
 function renderCheck(){
   const c=cur();
-  if(!c){$("#chWhere").textContent="No check";$("#chNo").textContent="";$("#chTags").innerHTML="";
+  if(!c){$("#chWhere").textContent="No check";$("#chNo").textContent="";$("#chTags").innerHTML="";$("#chGuests").innerHTML="";
     $("#chBody").innerHTML=`<div class="empty">Open or select a check,<br>then tap menu items.</div>`;
     $("#chTotals").innerHTML="";$("#btnPay").disabled=true;$("#btnSend").disabled=true;$("#btnDisc").disabled=true;return;}
   $("#chWhere").textContent=c.tableName;
@@ -439,6 +477,12 @@ function renderCheck(){
     ${offline?`<span class="chip amber">${offline} pending upload</span>`:""}
     ${sp?`<span class="chip mut">split: ${sp.mode==="even"?"even "+sp.ways:"by seat"}</span>`:""}
     <span class="chip mut">v${c.version}</span>`;
+  // who is sitting here (E20): the chips come from the check view itself, and
+  // a chip only OPENS the profile, because detaching somebody on a stray tap
+  // is not a thing a header should be able to do
+  $("#chGuests").innerHTML=(c.guests||[]).map(g=>
+    `<button class="gchip" data-gc="${g.id}">👤 ${esc(g.name)}</button>`).join("");
+  document.querySelectorAll("[data-gc]").forEach(b=>b.onclick=()=>openGuestProfile(b.dataset.gc));
   $("#chBody").innerHTML=c.lines.length?c.lines.map(l=>{
     const mods=describeMods(l.modifiers);
     const voided=l.status==="voided";
@@ -648,7 +692,8 @@ $("#btnMore").onclick=async()=>{
   const floor=(await fetch("/v1/floor").then(r=>r.json())).tables.filter(t=>!t.check);
   const others=state.checks.filter(x=>x.id!==c.id);
   $("#moreBody").innerHTML=
-    `<button class="btn btn-s" id="btnReceipt" style="width:100%;margin:4px 0 12px">Guest receipt · print</button>
+    `<button class="btn btn-s" id="btnGuests" style="width:100%;margin:4px 0 8px">Guests · attach a regular</button>
+     <button class="btn btn-s" id="btnReceipt" style="width:100%;margin:0 0 12px">Guest receipt · print</button>
      <div class="og-h">Transfer to a free table</div>
      <div class="opts">${floor.map(t=>`<button class="opt" data-tr="${esc(t.name)}">${esc(t.name)}</button>`).join("")||'<span class="md">No free tables right now</span>'}</div>
      <div class="og-h" style="margin-top:10px">Merge another check into this one (manager)</div>
@@ -658,6 +703,7 @@ $("#btnMore").onclick=async()=>{
        <input class="fld" id="mgPin" inputmode="numeric" maxlength="4" placeholder="••••">
      </div>`;
   $("#moreFoot").style.display="none";
+  $("#btnGuests").onclick=()=>openGuests();
   $("#btnReceipt").onclick=()=>{closeOv("ovMore");openReceipt();};
   document.querySelectorAll("[data-tr]").forEach(b=>b.onclick=async()=>{
     await api(`/v1/checks/${c.id}/transfer`,{tableName:b.dataset.tr,expectedVersion:c.version});
@@ -999,6 +1045,264 @@ async function closeCheck(){
   state.currentId=null;
   await refresh();
   toast("Check #"+c.checkNo+" closed","good");
+}
+
+
+/* ---------- guestbook (E20-T3): attach a regular, read their profile ----------
+   Every figure in the profile pane is printed from GET /v1/guests/:id exactly
+   as the server sent it. This page formats and never computes money: the share
+   of a split check, the averages, and the tip percent are all the server's
+   arithmetic (E20-T2), which is why a shared visit can say whose share it is
+   instead of guessing. */
+const gs={pane:"search",q:"",results:[],total:0,profile:null,merge:null,timer:null};
+
+const gDate=iso=>iso?new Date(iso).toLocaleDateString([],{month:"short",day:"numeric"}):"";
+
+function openGuests(){
+  const c=cur();if(!c){toast("Open a check first","err");return;}
+  closeOv("ovMore");
+  Object.assign(gs,{pane:"search",q:"",results:[],total:0,profile:null,merge:null});
+  $("#gBody").innerHTML="";
+  renderGuests();
+  openOv("ovGuests");
+  loadGuestSearch("");
+  setTimeout(()=>{const el=$("#gQ");if(el)el.focus();},60);
+}
+
+async function loadGuestSearch(q,into){
+  const d=await fetch("/v1/guests?q="+encodeURIComponent(q)).then(r=>r.json());
+  if(into==="merge"&&gs.merge)gs.merge.results=d.guests.filter(g=>g.id!==gs.profile.guest.id);
+  else{gs.results=d.guests;gs.total=d.total;}
+  renderGuests();
+}
+
+async function openGuestProfile(id){
+  gs.profile=await fetch("/v1/guests/"+id).then(r=>r.json());
+  gs.pane="profile";gs.merge=null;
+  renderGuests();
+  if(!$("#ovGuests").classList.contains("open"))openOv("ovGuests");
+}
+
+function renderGuests(){
+  const c=cur();
+  if(gs.pane==="search")return renderGuestSearch(c);
+  if(gs.pane==="merge")return renderGuestMerge();
+  if(gs.pane==="delete")return renderGuestDelete();
+  return renderGuestProfile(c);
+}
+
+/* ---- pane 1: find or create. The search box is built once and left alone,
+   so a poll or a fresh result set never steals the caret mid-name. ---- */
+function renderGuestSearch(c){
+  if(!$("#gQ")){
+    $("#gTitle").textContent="Guests";
+    $("#gSub").textContent=c?c.tableName+" · check #"+c.checkNo:"";
+    $("#gBody").innerHTML=
+      `<input class="fld" id="gQ" placeholder="Search a name or phone" autocomplete="off">
+       <div class="gnote">Tap a name for their profile. Nobody matching? Type the name and create them in one tap.</div>
+       <div id="gResults"></div>`;
+    const q=$("#gQ");
+    q.value=gs.q;
+    q.oninput=()=>{
+      gs.q=q.value;
+      clearTimeout(gs.timer);
+      gs.timer=setTimeout(()=>loadGuestSearch(gs.q),200);
+      renderGuestFoot(); // the create action follows what is typed, no round trip
+    };
+  }
+  const attached=new Set(((c&&c.guests)||[]).map(g=>g.id));
+  const typed=gs.q.trim();
+  $("#gResults").innerHTML=
+    `${attached.size?`<div class="og-h">On this check</div>
+       <div class="guests" style="margin:0 0 12px">${(c.guests||[]).map(g=>
+         `<button class="gchip" data-gp="${g.id}">👤 ${esc(g.name)}</button>`).join("")}</div>`:""}
+     <div class="og-h">${typed?"Matches ("+gs.total+")":"Recent guests ("+gs.total+")"}</div>
+     ${gs.results.length?gs.results.map(g=>
+       `<div class="grow">
+          <button class="gi" data-gp="${g.id}">
+            <span class="gn">${esc(g.displayName)} ▸</span>
+            <span class="gm">${esc([g.phone||"no phone on file",g.notes||""].filter(Boolean).join(" · "))}</span>
+          </button>
+          ${attached.has(g.id)
+            ? `<span class="chip mut">on this check</span>`
+            : `<button class="gbtn" data-ga="${g.id}">Attach</button>`}
+        </div>`).join("")
+       :`<div class="empty">${typed?"Nobody by that name yet.":"No guests yet.<br>Type a name to create the first one."}</div>`}`;
+  renderGuestFoot();
+  document.querySelectorAll("[data-gp]").forEach(b=>b.onclick=()=>openGuestProfile(b.dataset.gp));
+  document.querySelectorAll("[data-ga]").forEach(b=>b.onclick=()=>attachGuestToCheck(b.dataset.ga));
+}
+
+function renderGuestFoot(){
+  const typed=gs.q.trim();
+  const exact=gs.results.some(g=>g.displayName.toLowerCase()===typed.toLowerCase());
+  $("#gFoot").innerHTML=typed&&!exact
+    ? `<button class="btn btn-p" id="gCreate">Create and attach "${esc(typed)}"</button>`
+    : `<button class="btn btn-s" data-close="ovGuests">Done</button>`;
+  const btn=$("#gCreate");
+  if(btn)btn.onclick=async()=>{
+    const name=gs.q.trim();
+    if(!name)return;
+    btn.disabled=true;
+    try{
+      const r=await api("/v1/guests",{displayName:name});
+      await attachGuestToCheck(r.guest.id,name+" created and attached");
+    }catch(_){btn.disabled=false;}
+  };
+}
+
+async function attachGuestToCheck(guestId,message){
+  const c=cur();if(!c)return;
+  await api(`/v1/checks/${c.id}/guests`,{guestId});
+  await refresh();
+  gs.q="";
+  const q=$("#gQ");
+  if(q)q.value="";
+  await loadGuestSearch("");
+  toast(message||"Guest attached","good");
+}
+
+/* ---- pane 2: the profile, straight off the endpoint ---- */
+function renderGuestProfile(c){
+  const p=gs.profile;if(!p)return;
+  const g=p.guest;
+  const attachedHere=!!(c&&(c.guests||[]).some(x=>x.id===g.id));
+  $("#gTitle").textContent=g.displayName;
+  $("#gSub").textContent=p.visitCount
+    ? p.visitCount+" visit"+(p.visitCount===1?"":"s")+(p.lastVisitAt?" · last "+gDate(p.lastVisitAt):"")
+    : "no visits yet";
+  const cadence=p.medianGapDays===null
+    ? "not enough visits to tell yet"
+    : "about every "+p.medianGapDays+" day"+(p.medianGapDays===1?"":"s");
+  const history=p.visitCount
+    ? `<div class="gstat">
+         <div><div class="k">Total spend</div><div class="v">${money(p.totalSpendMinor)}</div></div>
+         <div><div class="k">Average check</div><div class="v">${money(p.avgSpendMinor)}</div></div>
+         <div><div class="k">Visits</div><div class="v">${p.visitCount}</div></div>
+         <div><div class="k">Tip</div><div class="v">${p.tipPercentAvg===null?"n/a":p.tipPercentAvg+"%"}</div></div>
+       </div>
+       <div class="og-h">Favorites</div>
+       <div class="opts" style="margin-bottom:12px">${p.favorites.map(f=>
+         `<span class="opt" style="pointer-events:none">${f.count}× ${esc(f.name)}</span>`).join("")
+         ||`<span class="gnote">Nothing ordered yet.</span>`}</div>
+       <div class="og-h">Habits</div>
+       <div class="gvisit"><span>Comes in</span><span>${esc(cadence)}</span></div>
+       <div class="gvisit"><span>Service days seen</span><span class="num">${p.serviceDates}</span></div>
+       <div class="gvisit"><span>Usual section</span><span>${p.preferredSection?esc(p.preferredSection.area)+" ("+p.preferredSection.visits+")":"n/a"}</span></div>
+       <div class="gvisit"><span>Usual server</span><span>${p.preferredServer?esc(p.preferredServer.serverName)+" ("+p.preferredServer.visits+")":"n/a"}</span></div>
+       <div class="og-h" style="margin-top:12px">Visits</div>
+       ${p.visits.map(v=>
+         `<div class="gvisit"><span>${esc(gDate(v.closedAt)||v.serviceDate)} · ${esc(v.tableName)} · #${v.checkNo}
+            ${v.sharedCheck?`<span class="chip mut">share of ${v.guestsOnCheck}</span>`:""}</span>
+          <span class="num">${money(v.shareMinor)}</span></div>`).join("")}`
+    : `<div class="empty">No visits yet.<br>Attach this guest to a check and the profile builds itself.</div>`;
+  $("#gBody").innerHTML=
+    `${history}
+     <div class="og-h" style="margin-top:14px">Notes (staff only)</div>
+     <textarea class="fld" id="gNotes" placeholder="Barolo, corner two-top, no shellfish">${esc(g.notes||"")}</textarea>
+     <div class="opts" style="margin-bottom:12px">
+       <button class="gbtn" id="gSaveNotes">Save notes</button>
+       ${g.phone?`<span class="opt" style="pointer-events:none">${esc(g.phone)}</span>`:""}
+       ${g.marketingOptIn?`<span class="chip green">marketing opt-in</span>`:`<span class="chip mut">no marketing consent</span>`}
+     </div>
+     <div class="og-h">Manager actions</div>
+     <div class="opts">
+       <button class="gbtn" id="gMerge">Merge a duplicate in</button>
+       <button class="gdanger" id="gDelete">Delete this guest</button>
+     </div>
+     <div class="gnote">Merging and deleting need a manager PIN. Neither one touches a check: the money stays exactly where it is.</div>`;
+  $("#gFoot").innerHTML=
+    `<button class="btn btn-s" id="gBack">◂ Guests</button>
+     ${c?(attachedHere
+        ? `<button class="btn btn-s" id="gDetach">Detach from #${c.checkNo}</button>`
+        : `<button class="btn btn-p" id="gAttachHere">Attach to #${c.checkNo}</button>`):""}`;
+
+  $("#gBack").onclick=()=>{gs.pane="search";gs.profile=null;$("#gBody").innerHTML="";renderGuests();};
+  $("#gSaveNotes").onclick=async()=>{
+    await api(`/v1/guests/${g.id}/update`,{notes:$("#gNotes").value});
+    await openGuestProfile(g.id);
+    toast("Notes saved","good");
+  };
+  $("#gMerge").onclick=()=>{
+    gs.pane="merge";gs.merge={q:"",results:[],absorbedId:null};
+    renderGuests();loadGuestSearch("","merge");
+  };
+  $("#gDelete").onclick=()=>{gs.pane="delete";renderGuests();};
+  const det=$("#gDetach");
+  if(det)det.onclick=async()=>{
+    await api(`/v1/checks/${c.id}/guests/${g.id}/detach`,{});
+    await refresh();
+    await openGuestProfile(g.id);
+    toast("Detached from this check");
+  };
+  const att=$("#gAttachHere");
+  if(att)att.onclick=async()=>{
+    await api(`/v1/checks/${c.id}/guests`,{guestId:g.id});
+    await refresh();
+    await openGuestProfile(g.id);
+    toast("Attached to check #"+c.checkNo,"good");
+  };
+}
+
+/* ---- pane 3: merge, which needs a manager and names both records ---- */
+function renderGuestMerge(){
+  const p=gs.profile,m=gs.merge;
+  if(!p||!m)return;
+  const picked=m.results.find(g=>g.id===m.absorbedId);
+  $("#gTitle").textContent="Merge into "+p.guest.displayName;
+  $("#gSub").textContent="Same person, two records";
+  $("#gBody").innerHTML=
+    `<div class="gnote">Pick the duplicate. Its visits move to ${esc(p.guest.displayName)}, its notes are added to theirs, and the duplicate record goes. No check, line, or payment moves: a guest's history is a join, not a copy.</div>
+     <input class="fld" id="gmQ" placeholder="Search the duplicate by name or phone" value="${esc(m.q)}" autocomplete="off">
+     ${m.results.length?m.results.map(g=>
+       `<div class="grow">
+          <span class="gi"><span class="gn">${esc(g.displayName)}</span>
+            <span class="gm">${esc(g.phone||"no phone on file")}</span></span>
+          <button class="gbtn" data-gm="${g.id}"
+            ${g.id===m.absorbedId?'style="background:var(--brand);color:var(--brand-ink)"':""}>${g.id===m.absorbedId?"Picked":"Pick"}</button>
+        </div>`).join("")
+       :`<div class="empty">No other guests to merge in.</div>`}
+     ${picked?`<div class="og-h" style="margin-top:12px">Manager PIN (demo manager: Marco B. · 1122)</div>
+       <input class="fld" id="gmPin" inputmode="numeric" maxlength="4" placeholder="••••">`:""}`;
+  $("#gFoot").innerHTML=
+    `<button class="btn btn-s" id="gmBack">◂ Back</button>
+     ${picked?`<button class="btn btn-p" id="gmGo">Merge "${esc(picked.displayName)}" in</button>`:""}`;
+  const q=$("#gmQ");
+  q.oninput=()=>{m.q=q.value;clearTimeout(gs.timer);gs.timer=setTimeout(()=>loadGuestSearch(m.q,"merge"),200);};
+  document.querySelectorAll("[data-gm]").forEach(b=>b.onclick=()=>{m.absorbedId=b.dataset.gm;renderGuests();});
+  $("#gmBack").onclick=()=>{gs.pane="profile";gs.merge=null;renderGuests();};
+  const go=$("#gmGo");
+  if(go)go.onclick=async()=>{
+    const pin=$("#gmPin")?$("#gmPin").value:"";
+    const r=await api(`/v1/guests/${p.guest.id}/merge`,{absorbedId:m.absorbedId,managerPin:pin});
+    gs.merge=null;
+    await refresh();
+    await openGuestProfile(p.guest.id);
+    toast(r.audit.absorbed.displayName+" merged into "+r.audit.survivor.displayName,"good");
+  };
+}
+
+/* ---- pane 4: deletion, in the words of the privacy default (spec C7) ---- */
+function renderGuestDelete(){
+  const g=gs.profile.guest;
+  $("#gTitle").textContent="Delete "+g.displayName;
+  $("#gSub").textContent="A deletion request";
+  $("#gBody").innerHTML=
+    `<div class="gnote">The record and its links to checks are removed. Every check stays exactly as it is, same lines, same money; it simply stops pointing at a person. This cannot be undone from here.</div>
+     <div class="og-h">Manager PIN (demo manager: Marco B. · 1122)</div>
+     <input class="fld" id="gdPin" inputmode="numeric" maxlength="4" placeholder="••••">`;
+  $("#gFoot").innerHTML=
+    `<button class="btn btn-s" id="gdBack">◂ Back</button>
+     <button class="gdanger" id="gdGo" style="flex:1">Delete ${esc(g.displayName)}</button>`;
+  $("#gdBack").onclick=()=>{gs.pane="profile";renderGuests();};
+  $("#gdGo").onclick=async()=>{
+    await api(`/v1/guests/${g.id}/delete`,{managerPin:$("#gdPin").value});
+    Object.assign(gs,{pane:"search",profile:null,q:""});
+    $("#gBody").innerHTML="";
+    await refresh();
+    await loadGuestSearch("");
+    toast(g.displayName+" deleted; the checks are untouched");
+  };
 }
 
 /* ---------- mobile tabs + boot ---------- */

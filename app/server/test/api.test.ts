@@ -819,6 +819,12 @@ describe("reads", () => {
     expect(pos.body).toContain("Whole check");
     expect(pos.body).toContain("By seat");
     expect(pos.body).toContain("/split?");
+    // E20-T3: the guests flow, its modal, the header chips, and the API it reads
+    expect(pos.body).toContain("Guests · attach a regular");
+    expect(pos.body).toContain('id="ovGuests"');
+    expect(pos.body).toContain('id="chGuests"');
+    expect(pos.body).toContain("/v1/guests");
+    expect(pos.body).toContain("Create and attach");
   });
 
   it("serves the Reports page at /reports, and /insights still lands (E19-T4)", async () => {
