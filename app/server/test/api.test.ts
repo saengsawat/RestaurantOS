@@ -1584,7 +1584,7 @@ async function profileOf(app: ReturnType<typeof buildServer>, guestId: string) {
 async function totalsOf(app: ReturnType<typeof buildServer>, checkId: string) {
   const res = await app.inject({ method: "GET", url: `/v1/checks/${checkId}` });
   expect(res.statusCode).toBe(200);
-  return res.json().check.totals as { subtotalMinor: number; discountMinor: number; taxMinor: number; totalMinor: number; paidMinor: number; dueMinor: number };
+  return res.json().check.totals as { subtotalMinor: number; discountMinor: number; taxMinor: number; totalMinor: number; paidMinor: number; dueMinor: number; refundDueMinor: number };
 }
 
 describe("the guestbook (E20)", () => {
@@ -1856,5 +1856,181 @@ describe("the guestbook (E20)", () => {
     const blank = await app.inject({ method: "POST", url: `/v1/guests/${guest.id}/update`,
       payload: { ...ENV(71, { deviceId: "dev-gia" }), displayName: " " } });
     expect(blank.statusCode).toBe(422);
+  });
+});
+
+/* --------------------- reopen close-out (E2-T2) ---------------------
+ * The founder's dead end: a check that paid in full, closed, and got
+ * reopened had no way back out. close wanted `paid`, `paid` wanted another
+ * payment, and a settled check has nothing left to pay, so the table stayed
+ * occupied and the day could not close. These tests are the three roads out
+ * of a reopened check: unchanged, cheaper, dearer.
+ */
+
+async function reopen(app: ReturnType<typeof buildServer>, checkId: string, pin = "1122") {
+  return app.inject({ method: "POST", url: `/v1/checks/${checkId}/reopen`,
+    payload: { ...ENV(90), managerPin: pin } });
+}
+
+async function sweepRail(app: ReturnType<typeof buildServer>, tableName: string) {
+  const tickets = (await app.inject({ method: "GET", url: "/v1/kds" })).json().tickets as
+    { id: string; tableName: string; items: { orderItemId: string; voided?: boolean }[] }[];
+  for (const t of tickets.filter((x) => x.tableName === tableName)) {
+    for (const i of t.items) {
+      if (i.voided) continue;
+      await app.inject({ method: "POST", url: "/v1/kds/toggle",
+        payload: { ...ENV(91), ticketId: t.id, orderItemId: i.orderItemId } });
+    }
+  }
+  await app.inject({ method: "POST", url: "/v1/kds/serve", payload: { ...ENV(92), tableName } });
+}
+
+describe("a reopened check can always close out (E2-T2)", () => {
+  it("closes again with no new payment, frees the table, and lets the day seal", async () => {
+    const app = buildServer(); // nobody signs in, so no shift blocks the day close
+    const checkId = await serviceCheck(app, "term-1", "Table 2", [BURRATA, TWO_ACQUA], 0);
+    const settled = await totalsOf(app, checkId);
+    expect(settled.dueMinor).toBe(0);
+    expect(settled.refundDueMinor).toBe(0);
+
+    const back = await reopen(app, checkId);
+    expect(back.statusCode).toBe(200);
+    expect(back.json().check.status).toBe("reopened");
+
+    // the old dead end: nothing is owed, so there is no payment to record,
+    // and a payment was the only road to a state close would accept
+    const chargeNothing = await app.inject({ method: "POST", url: `/v1/checks/${checkId}/payments`,
+      payload: { ...ENV(93), method: "card", amountMinor: 0 } });
+    expect(chargeNothing.statusCode).toBe(422);
+    expect(chargeNothing.json().reason).toMatch(/positive integer/);
+
+    // and the way out: the check simply closes, no PIN, no payment
+    const closed = await app.inject({ method: "POST", url: `/v1/checks/${checkId}/close`, payload: ENV(94) });
+    expect(closed.statusCode).toBe(200);
+    expect(closed.json().check.status).toBe("closed");
+    expect(closed.json().refundDueMinor).toBeUndefined();
+    // the payments list is append-only and nobody touched it
+    expect(closed.json().check.payments).toHaveLength(1);
+    expect(closed.json().check.totals).toEqual(settled);
+
+    // the table is free on the floor again
+    const floor = (await app.inject({ method: "GET", url: "/v1/floor" })).json().tables;
+    expect(floor.find((t: { name: string }) => t.name === "Table 2").check).toBeNull();
+
+    // and the day can actually seal, which is what the founder could not do
+    const day = (await app.inject({ method: "GET", url: "/v1/day" })).json();
+    expect(day.blockers.openChecks).toEqual([]);
+    await sweepRail(app, "Table 2");
+    const dayClose = await app.inject({ method: "POST", url: "/v1/day/close",
+      payload: { ...ENV(95), managerPin: "1122" } });
+    expect(dayClose.statusCode).toBe(200);
+    expect(dayClose.json().day.status).toBe("closed");
+    expect(dayClose.json().day.summary.checksClosed).toBe(1);
+  });
+
+  it("books a refund when a correction leaves the guest overpaid, manager only", async () => {
+    const app = buildServer();
+    const checkId = await serviceCheck(app, "term-1", "Table 5", [BURRATA, TWO_ACQUA], 0);
+    const paidTotals = await totalsOf(app, checkId);
+    expect(paidTotals.totalMinor).toBe(3049); // 2800 + 249 tax
+    await reopen(app, checkId);
+
+    // the acqua never arrived, so it comes off: 1600 + 142 tax = 1742 owed,
+    // against 3049 already taken
+    const acqua = (await app.inject({ method: "GET", url: `/v1/checks/${checkId}` })).json().check.lines
+      .find((l: { capturedName: string }) => l.capturedName === "Acqua Panna");
+    const voided = await app.inject({ method: "POST", url: `/v1/checks/${checkId}/items/${acqua.id}/void`,
+      payload: { ...ENV(96), reason: "never arrived", managerPin: "1122" } });
+    expect(voided.statusCode).toBe(200);
+    const after = await totalsOf(app, checkId);
+    expect(after.totalMinor).toBe(1742);
+    expect(after.paidMinor).toBe(3049);
+    expect(after.dueMinor).toBe(0); // due never goes negative
+    expect(after.refundDueMinor).toBe(1307); // the house owes this back
+
+    // closing books an obligation, so it is not a PIN-free act
+    const noPin = await app.inject({ method: "POST", url: `/v1/checks/${checkId}/close`, payload: ENV(97) });
+    expect(noPin.statusCode).toBe(422);
+    expect(noPin.json().reason).toMatch(/overpaid by 1307/);
+    const serverPin = await app.inject({ method: "POST", url: `/v1/checks/${checkId}/close`,
+      payload: { ...ENV(98), managerPin: "2468" } });
+    expect(serverPin.statusCode).toBe(422);
+    expect(serverPin.json().reason).toMatch(/not recognized as a manager/);
+
+    const closed = await app.inject({ method: "POST", url: `/v1/checks/${checkId}/close`,
+      payload: { ...ENV(99), managerPin: "1122" } });
+    expect(closed.statusCode).toBe(200);
+    expect(closed.json().check.status).toBe("closed");
+    expect(closed.json().refundDueMinor).toBe(1307);
+    expect(closed.json().audit).toMatchObject({
+      action: "refund_due",
+      refundDueMinor: 1307,
+      approvedBy: "66666666-6666-4666-8666-666666666666", // Marco B.
+    });
+    // the close moved no money: same payment, same totals, refund still stated
+    expect(closed.json().check.payments).toHaveLength(1);
+    expect(closed.json().check.payments[0].amountMinor).toBe(3049);
+    expect(closed.json().check.totals).toEqual(after);
+
+    // a closed check carrying a refund is settled paperwork, not an open item
+    const day = (await app.inject({ method: "GET", url: "/v1/day" })).json();
+    expect(day.blockers.openChecks).toEqual([]);
+    expect(day.summary.checksClosed).toBe(1);
+  });
+
+  it("collects the difference first when a correction raises the total", async () => {
+    const app = buildServer();
+    const checkId = await serviceCheck(app, "term-1", "Table 14", [BURRATA, TWO_ACQUA], 0);
+    await reopen(app, checkId);
+
+    // the table orders a dessert after the check was settled
+    await app.inject({ method: "POST", url: `/v1/checks/${checkId}/items`,
+      payload: { ...ENV(100), ...TIRAMISU } });
+    const owing = await totalsOf(app, checkId);
+    expect(owing.totalMinor).toBe(4355);
+    expect(owing.dueMinor).toBe(1306);
+
+    // no free lunch: the close refuses and names the number
+    const refused = await app.inject({ method: "POST", url: `/v1/checks/${checkId}/close`, payload: ENV(101) });
+    expect(refused.statusCode).toBe(422);
+    expect(refused.json().reason).toMatch(/no longer cover the total/);
+    expect(refused.json().reason).toMatch(/1306 still due/);
+    // and a manager PIN is not a way around it either
+    const withPin = await app.inject({ method: "POST", url: `/v1/checks/${checkId}/close`,
+      payload: { ...ENV(102), managerPin: "1122" } });
+    expect(withPin.statusCode).toBe(422);
+
+    // the ordinary path: fire it, take the difference, close
+    await app.inject({ method: "POST", url: `/v1/checks/${checkId}/send`, payload: ENV(103) });
+    const pay = await app.inject({ method: "POST", url: `/v1/checks/${checkId}/payments`,
+      payload: { ...ENV(104), method: "card", amountMinor: 1306 } });
+    expect(pay.statusCode).toBe(200);
+    expect(pay.json().check.status).toBe("paid");
+    const closed = await app.inject({ method: "POST", url: `/v1/checks/${checkId}/close`, payload: ENV(105) });
+    expect(closed.statusCode).toBe(200);
+    expect(closed.json().check.status).toBe("closed");
+    expect(closed.json().check.payments).toHaveLength(2);
+    expect(closed.json().check.totals.paidMinor).toBe(4355);
+    expect(closed.json().refundDueMinor).toBeUndefined();
+  });
+
+  it("still refuses to close what was never paid at all", async () => {
+    const app = buildServer();
+    const check = await openTable(app, "Table 9", 2);
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items`,
+      payload: { ...ENV(106), ...BURRATA } });
+    const refused = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/close`, payload: ENV(107) });
+    expect(refused.statusCode).toBe(422);
+    expect(refused.json().reason).toMatch(/only a paid or reopened check can close/);
+  });
+
+  it("serves the POS with the close-out controls (E2-T2)", async () => {
+    const app = buildServer();
+    const pos = await app.inject({ method: "GET", url: "/pos" });
+    expect(pos.body).toContain("Close check ✓");
+    expect(pos.body).toContain("Close + refund due");
+    expect(pos.body).toContain('id="ovClose"');
+    expect(pos.body).toContain("Refund due to guest");
+    expect(pos.body).toContain("closableNow");
   });
 });

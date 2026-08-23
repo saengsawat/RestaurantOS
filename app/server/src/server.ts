@@ -63,6 +63,7 @@ function respond(reply: FastifyReply, outcome: CommandOutcome): unknown {
         ...(outcome.menu !== undefined ? { menu: outcome.menu } : {}),
         ...(outcome.guest !== undefined ? { guest: outcome.guest } : {}),
         ...(outcome.audit !== undefined ? { audit: outcome.audit } : {}),
+        ...(outcome.refundDueMinor !== undefined ? { refundDueMinor: outcome.refundDueMinor } : {}),
       });
     case "replay":
       return respond(reply, outcome.result);
@@ -259,9 +260,11 @@ export function buildServer(store: Store = new MemoryStore(), storeName = "memor
 
   app.post("/v1/checks/:id/close", async (req, reply) => {
     const { id } = req.params as { id: string };
-    const envelope = readEnvelope((req.body ?? {}) as EnvelopeBody);
+    const body = (req.body ?? {}) as EnvelopeBody & { managerPin?: unknown };
+    const envelope = readEnvelope(body);
     if ("error" in envelope) return reply.code(400).send({ status: "BAD_REQUEST", reason: envelope.error });
-    return respond(reply, await engine.close(envelope, id));
+    // a close that owes the guest a refund needs a manager (E2-T2)
+    return respond(reply, await engine.close(envelope, id, typeof body.managerPin === "string" ? { managerPin: body.managerPin } : {}));
   });
 
   app.post("/v1/checks/:id/reopen", async (req, reply) => {

@@ -36,7 +36,7 @@ export const RECALL_WINDOW_MS = 10 * 60_000;
 // an employee who holds the manager role. See Engine.manager().
 
 export type CommandOutcome =
-  | { kind: "applied"; check?: CheckView; tickets?: KitchenTicket[]; session?: DrawerSession; day?: unknown; menu?: unknown; guest?: unknown; audit?: unknown }
+  | { kind: "applied"; check?: CheckView; tickets?: KitchenTicket[]; session?: DrawerSession; day?: unknown; menu?: unknown; guest?: unknown; audit?: unknown; refundDueMinor?: number }
   | { kind: "replay"; result: CommandOutcome }
   | { kind: "conflict"; expectedVersion: number | undefined; currentVersion: number }
   | { kind: "rejected"; reason: string; modifierErrors?: readonly ModifierError[] }
@@ -50,6 +50,12 @@ export interface CheckView extends CheckAggregate {
     totalMinor: number;
     paidMinor: number;
     dueMinor: number;
+    /** what the HOUSE owes the guest (E2-T2): money already taken beyond the
+     *  total, which happens when a void or a discount lands on a reopened
+     *  check. dueMinor stays clamped at zero, because every screen prints it
+     *  as "collect this"; the obligation gets its own honest field. Computed
+     *  on read like every other total, never stored. */
+    refundDueMinor: number;
   };
   /** guests attached to this check (E20), joined at read time, empty when
    *  nobody is: the link lives in check_guest, never on the aggregate */
@@ -90,6 +96,7 @@ export function toView(check: CheckAggregate, guests: readonly GuestChip[] = [])
       totalMinor: t.totalMinor,
       paidMinor: paid,
       dueMinor: Math.max(0, t.totalMinor - paid),
+      refundDueMinor: Math.max(0, paid - t.totalMinor),
     },
   };
 }
@@ -832,16 +839,65 @@ export class Engine {
     });
   }
 
-  async close(envelope: Envelope, checkId: string): Promise<CommandOutcome> {
-    return this.run(envelope, checkId, (check) => {
+  /**
+   * Close the check out. A settled check closes with no PIN, whether it got
+   * here the ordinary way or through a reopen (E2-T2: a reopened check that
+   * needs no correction used to have no exit at all, which stranded the table
+   * and blocked the day).
+   *
+   * Two edited-while-reopened cases, and neither one touches the payments
+   * list, which is append-only:
+   *   raised the total  -> the check still owes; the difference is collected
+   *                        the ordinary way before it can close
+   *   lowered the total -> the guest is overpaid, so closing BOOKS what the
+   *                        house owes back (an audited refund_due, manager
+   *                        approved). Moving the money is the provider's job
+   *                        (E13); this records the obligation and never
+   *                        quietly resets the due.
+   */
+  async close(envelope: Envelope, checkId: string, input: { managerPin?: string } = {}): Promise<CommandOutcome> {
+    return this.run(envelope, checkId, async (check) => {
       if (check.payments.some((p) => p.status === "accepted_offline")) {
         return { kind: "rejected", reason: "offline card payments pending upload; check cannot close until they authorize" };
       }
-      const r = checkTransition(check.status, { type: "close" });
-      if (!r.ok) return { kind: "rejected", reason: r.reason };
+      const totals = toView(check).totals;
+      const r = checkTransition(check.status, { type: "close", coversTotal: totals.dueMinor === 0 });
+      if (!r.ok) {
+        // the machine knows the rule, this layer knows the number
+        return { kind: "rejected", reason: totals.dueMinor > 0 ? `${r.reason} (${totals.dueMinor} still due)` : r.reason };
+      }
+      const refundDueMinor = totals.refundDueMinor;
+      let approver: Employee | undefined;
+      if (refundDueMinor > 0) {
+        approver = await this.manager(input.managerPin);
+        if (!approver) {
+          return {
+            kind: "rejected",
+            reason: typeof input.managerPin === "string" && input.managerPin
+              ? "PIN not recognized as a manager"
+              : `this check is overpaid by ${refundDueMinor}; closing it owes the guest a refund and needs a manager's PIN`,
+          };
+        }
+      }
       check.status = r.next;
       check.closedAt = new Date().toISOString();
-      return { kind: "applied", check: toView(check) };
+      return {
+        kind: "applied",
+        check: toView(check),
+        ...(refundDueMinor > 0
+          ? {
+              refundDueMinor,
+              audit: {
+                action: "refund_due",
+                checkId: check.id,
+                checkNo: check.checkNo,
+                refundDueMinor,
+                closedBy: this.actorId(envelope) ?? null,
+                approvedBy: approver!.id,
+              },
+            }
+          : {}),
+      };
     });
   }
 
