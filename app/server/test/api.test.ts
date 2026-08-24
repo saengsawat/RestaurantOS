@@ -834,6 +834,33 @@ describe("reads", () => {
     expect(pos.body).toContain('BEVERAGE:{name:"Beverage",note:"fires immediately"}');
     expect(pos.body).toContain('PRIMI:{name:"Primi",note:"course 2"}');
     expect(pos.body).toContain("When E5-full lands real menu categories");
+    // UI-T3: corrections live on an explicit action bar, not on a bare tap
+    expect(pos.body).toContain('<div class="actbar">');
+    expect(pos.body).toContain('<button class="act" id="btnDisc">Discount</button>');
+    expect(pos.body).toContain('<button class="act danger" id="btnVoid">Void</button>');
+    expect(pos.body).toContain('<button class="act" id="btnHist">History</button>');
+    expect(pos.body).toContain('<button class="act" id="btnMore">More ⋯</button>');
+    // the history modal, and the E8-T3 read it renders
+    expect(pos.body).toContain('id="ovHist"');
+    expect(pos.body).toContain("/history");
+    expect(pos.body).toContain('class="tl-item"');
+    // course sections with their own hold and fire controls (E8-T3's commands)
+    expect(pos.body).toContain('class="course-head"');
+    expect(pos.body).toContain("data-hold=");
+    expect(pos.body).toContain("data-rel=");
+    expect(pos.body).toContain("data-fire=");
+    for (const cmd of ["hold", "release", "fire"]) {
+      expect(pos.body).toContain(`courseCmd("${cmd}"`);
+    }
+    // the batch void: many lines, one reason, one PIN
+    expect(pos.body).toContain("Manager PIN, once for the batch");
+    expect(pos.body).toContain('id="voidLines"');
+    expect(pos.body).toContain("Guest changed mind");
+    // a bare tap opens the line sheet; the void landmine is gone
+    expect(pos.body).toContain('id="ovLine"');
+    expect(pos.body).toContain("Void this line");
+    expect(pos.body).toContain("openLine(b.dataset.l)");
+    expect(pos.body).not.toContain("Tap to void");
   });
 
   it("serves the Reports page at /reports, and /insights still lands (E19-T4)", async () => {

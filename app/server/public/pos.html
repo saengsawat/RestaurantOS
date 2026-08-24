@@ -128,6 +128,49 @@ button.li:active{background:var(--surface-2)}
 .totals{padding:10px 16px;border-top:1px solid var(--line);font-size:13px;color:var(--ink-2)}
 .trow{display:flex;justify-content:space-between;padding:2px 0}
 .trow.g{font-size:20px;font-weight:800;color:var(--ink);padding-top:6px}
+/* course sections (UI-T3). Lines group under their course, and the course's
+   own firing controls live on its header, because "hold the secondi" is a
+   thing a table says about a course and not about a check. Buttons are 44px
+   like every other target on this page: the mockup draws these chips at 26px,
+   and the design system's touch layer wins over the mockup's density. */
+.course-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:12px 0 2px}
+.course-head .cname{font-size:11.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
+.course-head .cline{flex:1;min-width:12px;height:1px;background:var(--line-subtle)}
+.cbtn{min-height:var(--tap);flex-shrink:0;border-radius:999px;padding:0 14px;font-size:12.5px;font-weight:700;
+  transition:transform .1s,background-color .12s}
+.cbtn:active{transform:scale(.96)}
+.cbtn.hold,.cbtn.fire{background:var(--surface-2);color:var(--ink-2)}
+.cbtn.rel{background:var(--amber-wash);color:var(--amber);border:1px solid var(--amber-line)}
+/* lime is for the forward action, and at most one or two per screen: a held
+   course's Fire now IS that action (it is the only way that course goes to the
+   kitchen), so it wears the brand fill. On the other courses firing is just
+   the early version of Send, so those stay secondary. Five lime buttons down
+   one panel would make none of them mean anything. */
+.cbtn.fire.now{background:var(--brand);color:var(--brand-ink)}
+.cbtn.fire.now:hover{background:var(--brand-hover)}
+.cwhen{flex-shrink:0;font-family:var(--mono);font-size:11px;color:var(--ink-4)}
+
+/* the action bar: corrections are explicit, never a side effect of a tap */
+.actbar{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:10px 16px 0}
+.act{min-height:var(--tap);border-radius:12px;background:var(--surface-2);color:var(--ink-2);
+  font-size:12.5px;font-weight:600;transition:transform .1s,background-color .12s}
+.act:active{transform:scale(.96)}
+.act.danger{color:var(--red)}
+.act:disabled{opacity:.45;cursor:default}
+
+/* the check's own story, the mockup's timeline rows */
+.tl-item{display:flex;gap:12px;padding:10px 0;border-bottom:1px solid var(--line-subtle);font-size:13px}
+.tl-item:last-child{border-bottom:none}
+.tl-when{font-family:var(--mono);font-size:11.5px;color:var(--ink-4);min-width:64px;padding-top:1px;flex-shrink:0}
+.tl-what{font-weight:600;color:var(--ink-2)}
+
+/* the line sheet: what a bare tap on a line does now */
+.lsheet{font-size:13.5px;color:var(--ink-2)}
+.lsheet .lrow{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid var(--line-subtle)}
+.lsheet .lrow:last-child{border-bottom:none}
+.lsheet .lk{color:var(--ink-3)}
+.lsheet .lv{font-weight:600;text-align:right}
+
 .acts{display:flex;gap:8px;padding:10px 16px 14px}
 .btn{min-height:46px;border-radius:999px;font-size:15px;font-weight:600;padding:0 20px;transition:transform .1s;
   display:inline-flex;align-items:center;justify-content:center;flex:1}
@@ -135,7 +178,23 @@ button.li:active{background:var(--surface-2)}
 .btn-p{background:var(--brand);color:var(--brand-ink)}
 .btn-p:hover{background:var(--brand-hover)}
 .btn-s{background:var(--surface-2)}
+/* destructive actions are outlined, never filled: red fills are for nothing */
+.btn-d{background:transparent;border:1.5px solid var(--red);color:var(--red)}
 .btn:disabled{opacity:.45;cursor:default}
+.acts .btn-p{flex:1.4}
+
+/* void picker rows: the KDS bump row's checkbox pattern, because "tap to
+   select, tap again to unselect" is a gesture this product already teaches */
+.vrow{display:flex;gap:10px;align-items:flex-start;width:100%;text-align:left;min-height:var(--tap);
+  padding:9px 2px;border-bottom:1px solid var(--line-subtle);transition:background-color .12s}
+.vrow:last-child{border-bottom:none}
+.vrow:active{background:var(--surface-2)}
+.vbox{width:24px;height:24px;flex-shrink:0;border-radius:8px;border:2px solid var(--line);color:transparent;
+  display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;margin-top:1px}
+.vrow.on .vbox{background:var(--red-wash);border-color:var(--red-line);color:var(--red)}
+.vrow .vi{flex:1;min-width:0}
+.vrow .vn{display:block;font-size:13.5px;font-weight:600}
+.vrow .vm{display:block;font-size:12px;color:var(--ink-3)}
 
 /* modal */
 .ov{position:fixed;inset:0;background:var(--overlay);display:none;align-items:center;justify-content:center;z-index:100;padding:16px}
@@ -266,6 +325,9 @@ textarea.fld{min-height:72px;resize:vertical;font:inherit;color:inherit;line-hei
   .cat-btn{white-space:nowrap;flex-shrink:0;display:flex;align-items:center}
   .cat-btn small{display:none}
   .cat-btn.on{box-shadow:inset 0 -2.5px 0 var(--brand)}
+  /* four labels do not fit a phone's panel at a readable size, so the bar
+     wraps to two rows instead of squeezing them */
+  .actbar{grid-template-columns:repeat(2,1fr)}
 }
 .mobile-tabs button{flex:1;min-height:52px;font-size:12px;font-weight:600;color:var(--ink-3)}
 .mobile-tabs button.on{color:var(--ink);box-shadow:inset 0 2.5px 0 var(--brand)}
@@ -387,16 +449,20 @@ textarea.fld{min-height:72px;resize:vertical;font:inherit;color:inherit;line-hei
     </section>
     <aside class="check">
       <div class="check-h">
-        <div class="row"><b id="chWhere">No check</b>
-          <span style="display:flex;align-items:center;gap:8px"><span class="no" id="chNo"></span>
-          <button id="btnMore" title="Transfer / merge" style="min-width:36px;min-height:36px;border-radius:999px;background:var(--surface-2);font-weight:800">⋯</button></span></div>
+        <div class="row"><b id="chWhere">No check</b><span class="no" id="chNo"></span></div>
         <div class="tags" id="chTags"></div>
         <div class="guests" id="chGuests"></div>
       </div>
       <div class="body" id="chBody"></div>
       <div class="totals" id="chTotals"></div>
+      <!-- corrections live here, in the open, above Send and Pay (UI-T3) -->
+      <div class="actbar">
+        <button class="act" id="btnDisc">Discount</button>
+        <button class="act danger" id="btnVoid">Void</button>
+        <button class="act" id="btnHist">History</button>
+        <button class="act" id="btnMore">More ⋯</button>
+      </div>
       <div class="acts">
-        <button class="btn btn-s" id="btnDisc" style="flex:0 0 auto;padding:0 16px" title="Discount / comp">%</button>
         <button class="btn btn-s" id="btnSend">Send ▸</button>
         <button class="btn btn-p" id="btnPay">Pay</button>
       </div>
@@ -457,14 +523,28 @@ textarea.fld{min-height:72px;resize:vertical;font:inherit;color:inherit;line-hei
 </div></div>
 
 <div class="ov" id="ovVoid"><div class="modal">
-  <div class="m-h"><div><h3>Void item</h3><div class="sub" id="voidSub"></div></div><button class="m-x" data-close="ovVoid">✕</button></div>
+  <div class="m-h"><div><h3>Void lines</h3><div class="sub" id="voidSub"></div></div><button class="m-x" data-close="ovVoid">✕</button></div>
   <div class="m-b">
-    <div class="og-h">Reason (required, audited)</div>
-    <input class="fld" id="voidReason" placeholder="e.g. guest changed mind">
-    <div class="og-h" style="margin-top:10px">Manager PIN (demo manager: Marco B. · 1122)</div>
+    <div class="og-h">Lines to void (tap to select)</div>
+    <div id="voidLines"></div>
+    <div class="og-h" style="margin-top:12px">Reason (required, audited)</div>
+    <div class="opts" id="voidReasons"></div>
+    <input class="fld" id="voidReason" placeholder="Type the reason" style="display:none;margin-top:8px">
+    <div class="og-h" style="margin-top:10px">Manager PIN, once for the batch (demo manager: Marco B. · 1122)</div>
     <input class="fld" id="voidPin" inputmode="numeric" maxlength="4" placeholder="••••">
   </div>
-  <div class="m-f"><button class="btn btn-p" id="voidGo">Void item</button></div>
+  <div class="m-f"><button class="btn btn-d" id="voidGo">Void</button></div>
+</div></div>
+
+<div class="ov" id="ovLine"><div class="modal" style="width:min(400px,100%)">
+  <div class="m-h"><div><h3 id="lnName">Line</h3><div class="sub" id="lnSub"></div></div><button class="m-x" data-close="ovLine">✕</button></div>
+  <div class="m-b" id="lnBody"></div>
+  <div class="m-f" id="lnFoot"></div>
+</div></div>
+
+<div class="ov" id="ovHist"><div class="modal">
+  <div class="m-h"><div><h3>Check history</h3><div class="sub" id="histSub"></div></div><button class="m-x" data-close="ovHist">✕</button></div>
+  <div class="m-b" id="histBody"></div>
 </div></div>
 
 <div class="ov" id="ovAdj"><div class="modal">
@@ -503,7 +583,7 @@ const DEVICE=(()=>{try{let d=localStorage.getItem("ros.device");if(!d){d="web-"+
    the server stays stateless about how a party decided to divide the check
    (E11 D18). It remembers {checkId, mode, ways} so the header chip and the
    receipt picker survive closing the pay modal. */
-const state={menu:null,checks:[],currentId:null,category:null,draft:null,pay:null,split:null,receipt:null};
+const state={menu:null,checks:[],tickets:[],currentId:null,category:null,draft:null,pay:null,split:null,receipt:null};
 
 function toast(msg,kind){const el=document.createElement("div");el.className="toast"+(kind?" "+kind:"");
   el.textContent=msg;$("#toasts").appendChild(el);setTimeout(()=>el.remove(),3400);}
@@ -532,12 +612,19 @@ function setConn(ok){$("#conn").classList.toggle("down",!ok);$("#connTxt").textC
 function cur(){return state.checks.find(c=>c.id===state.currentId)||null;}
 
 async function refresh(){
-  // menu refetches every poll: publishes and the 86 board must land live
-  const [menu,checks]=await Promise.all([
+  // menu refetches every poll: publishes and the 86 board must land live.
+  // The kitchen rail comes with it because a course header prints the time
+  // its ticket fired, and that has to be as fresh as the check beside it.
+  // (The shell's rail badge reads /v1/kds on its own timer; that block is
+  // byte-identical on all six pages by UI-T1's invariant, so the check panel
+  // takes its own copy of the read rather than diverging it.)
+  const [menu,checks,tickets]=await Promise.all([
     fetch("/v1/menu").then(r=>r.json()),
     fetch("/v1/checks").then(r=>r.json()).then(d=>d.checks),
+    fetch("/v1/kds").then(r=>r.json()).then(d=>d.tickets).catch(()=>state.tickets),
   ]);
   state.menu=menu;
+  state.tickets=tickets||[];
   state.checks=checks.filter(c=>c.status!=="closed"&&c.status!=="voided");
   const wanted=new URLSearchParams(location.search).get("check");
   if(wanted&&state.checks.some(c=>c.id===wanted)){state.currentId=wanted;history.replaceState(null,"","/pos");}
@@ -628,7 +715,8 @@ function renderCheck(){
   const c=cur();
   if(!c){$("#chWhere").textContent="No check";$("#chNo").textContent="";$("#chTags").innerHTML="";$("#chGuests").innerHTML="";
     $("#chBody").innerHTML=`<div class="empty">Open or select a check,<br>then tap menu items.</div>`;
-    $("#chTotals").innerHTML="";$("#btnPay").disabled=true;$("#btnSend").disabled=true;$("#btnDisc").disabled=true;return;}
+    $("#chTotals").innerHTML="";$("#btnPay").disabled=true;$("#btnSend").disabled=true;$("#btnDisc").disabled=true;
+    $("#btnVoid").disabled=true;$("#btnHist").disabled=true;$("#btnMore").disabled=true;return;}
   $("#chWhere").textContent=c.tableName;
   $("#chNo").textContent="#"+c.checkNo;
   const unsent=c.lines.filter(l=>l.status==="unsent").length;
@@ -646,20 +734,31 @@ function renderCheck(){
   $("#chGuests").innerHTML=(c.guests||[]).map(g=>
     `<button class="gchip" data-gc="${g.id}">👤 ${esc(g.name)}</button>`).join("");
   document.querySelectorAll("[data-gc]").forEach(b=>b.onclick=()=>openGuestProfile(b.dataset.gc));
-  $("#chBody").innerHTML=c.lines.length?c.lines.map(l=>{
-    const mods=describeMods(l.modifiers);
-    const voided=l.status==="voided";
-    const inner=`<span class="q num">${l.quantity}</span>
-      <span class="mm"><span class="nm">${esc(l.capturedName)} <span class="seat">S${l.seatNo}</span>
-        ${l.status==="unsent"?'<span class="chip info">unsent</span>':""}
-        ${voided?'<span class="chip red">void</span>':""}</span>
-        ${mods?`<span class="md">${esc(mods)}</span>`:""}
-        ${voided&&l.voidReason?`<span class="md">${esc(l.voidReason)}</span>`:""}</span>
-      <span class="pr num">${money((l.unitPriceMinor+l.modifierPriceMinor)*l.quantity)}</span>`;
-    return voided?`<div class="li voided">${inner}</div>`
-      :`<button class="li" data-l="${l.id}" title="Tap to void (manager)">${inner}</button>`;
+  // lines group under their course, in the order the kitchen fires them, and
+  // each course header carries its own state and its own controls (UI-T3)
+  const keys=courseKeysOf(c);
+  $("#chBody").innerHTML=keys.length?keys.map(course=>{
+    const lines=c.lines.filter(l=>l.course===course);
+    return courseHead(c,course,lines)+lines.map(l=>{
+      const mods=describeMods(l.modifiers);
+      const voided=l.status==="voided";
+      const inner=`<span class="q num">${l.quantity}</span>
+        <span class="mm"><span class="nm">${esc(l.capturedName)} <span class="seat">S${l.seatNo}</span>
+          ${l.status==="unsent"?'<span class="chip info">unsent</span>':""}
+          ${voided?'<span class="chip red">void</span>':""}</span>
+          ${mods?`<span class="md">${esc(mods)}</span>`:""}
+          ${voided&&l.voidReason?`<span class="md">${esc(l.voidReason)}</span>`:""}</span>
+        <span class="pr num">${money(lineExtension(l))}</span>`;
+      // a bare tap opens the line, it does not void it: nothing destructive
+      // happens without going through the void modal on purpose
+      return voided?`<div class="li voided">${inner}</div>`
+        :`<button class="li" data-l="${l.id}" title="Line details">${inner}</button>`;
+    }).join("");
   }).join(""):`<div class="empty">Tap menu items to add them.</div>`;
-  document.querySelectorAll("[data-l]").forEach(b=>b.onclick=()=>openVoid(b.dataset.l));
+  document.querySelectorAll("[data-l]").forEach(b=>b.onclick=()=>openLine(b.dataset.l));
+  document.querySelectorAll("[data-hold]").forEach(b=>b.onclick=()=>courseCmd("hold",b.dataset.hold));
+  document.querySelectorAll("[data-rel]").forEach(b=>b.onclick=()=>courseCmd("release",b.dataset.rel));
+  document.querySelectorAll("[data-fire]").forEach(b=>b.onclick=()=>courseCmd("fire",b.dataset.fire));
   $("#chTotals").innerHTML=
     `<div class="trow"><span>Subtotal</span><span class="num">${money(c.totals.subtotalMinor)}</span></div>
      ${c.totals.discountMinor?`<div class="trow"><span>${esc(c.adjustments.map(a=>a.label).join(", ")||"Discount")}</span><span class="num">−${money(c.totals.discountMinor)}</span></div>`:""}
@@ -669,6 +768,9 @@ function renderCheck(){
      <div class="trow g"><span>Due</span><span class="num">${money(c.totals.dueMinor)}</span></div>`;
   $("#btnSend").disabled=!unsent;
   $("#btnDisc").disabled=!(c.status==="open"||c.status==="reopened")||!c.lines.length;
+  $("#btnVoid").disabled=!voidableLines(c).length;
+  $("#btnHist").disabled=false;
+  $("#btnMore").disabled=false;
   $("#btnPay").disabled=!c.lines.length;
   // nothing left to collect: the footer closes the check instead of opening a
   // payment modal that could only have offered "Charge $0.00" (E2-T2)
@@ -684,6 +786,63 @@ function renderCheck(){
  *  will, so the button can say the truth before it is pressed. */
 function closableNow(c){
   return !!c.lines.length&&c.totals.dueMinor===0&&(c.status==="paid"||c.status==="reopened");
+}
+
+/* ---------- courses on the check (UI-T3 over E8-T3) ---------- */
+
+/** The same figure this panel has printed since E7: the server's own unit
+ *  price plus its own modifier price, times the quantity it recorded. The page
+ *  formats money and never decides it; if a line total ever arrives on the
+ *  view, this is the single place that changes. */
+function lineExtension(l){return (l.unitPriceMinor+l.modifierPriceMinor)*l.quantity;}
+
+const hhmm=iso=>new Date(iso).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"});
+
+/** Courses to show, in firing order: every course with a line, plus any course
+ *  held with nothing in it yet (the engine allows that, because "hold the
+ *  secondi" comes before the secondi exist, and a hold nobody can see is a
+ *  hold nobody can lift). COURSE_ORDER is the menu rail's, so the check reads
+ *  in the same order the menu is built. */
+function courseKeysOf(c){
+  const present=[...new Set([...c.lines.map(l=>l.course),...(c.heldCourses||[])])];
+  return COURSE_ORDER.filter(x=>present.includes(x))
+    .concat(present.filter(x=>!COURSE_ORDER.includes(x)).sort());
+}
+
+/** When this course last went to the kitchen, from the check's own tickets on
+ *  the rail. A ticket that has been served and purged takes its time with it,
+ *  so the header says "sent" rather than inventing a clock reading. */
+function firedAtOf(checkId,course){
+  const times=(state.tickets||[]).filter(t=>t.checkId===checkId&&t.course===course).map(t=>t.firedAt).sort();
+  return times.length?times[times.length-1]:null;
+}
+
+function courseHead(c,course,lines){
+  const held=(c.heldCourses||[]).includes(course);
+  const unsent=lines.filter(l=>l.status==="unsent").length;
+  const sent=lines.some(l=>l.status==="sent");
+  const firedAt=firedAtOf(c.id,course);
+  const live=c.status!=="closed"&&c.status!=="voided";
+  // the three facts are independent: a course can be held, already fired, and
+  // holding a newly added line all at once, and the header says all of it
+  let ctl=held?'<span class="chip amber">held</span>':"";
+  if(firedAt)ctl+=`<span class="cwhen">fired ${hhmm(firedAt)}</span>`;
+  else if(!unsent&&sent)ctl+='<span class="chip green">sent</span>';
+  if(live&&unsent)ctl+=`<button class="cbtn fire${held?" now":""}" data-fire="${esc(course)}">Fire now</button>`;
+  if(live&&held)ctl+=`<button class="cbtn rel" data-rel="${esc(course)}">Release</button>`;
+  else if(live&&unsent)ctl+=`<button class="cbtn hold" data-hold="${esc(course)}">Hold</button>`;
+  return `<div class="course-head"><span class="cname">${esc(courseLabel(course).name)}</span><span class="cline"></span>${ctl}</div>`;
+}
+
+/* Hold, release, fire: E8-T3's commands, straight through. The engine's own
+   note is the toast, because it is the one sentence that says what happened
+   and what is still waiting, and paraphrasing it here could only make it
+   less true. */
+async function courseCmd(path,course){
+  const c=cur();if(!c)return;
+  const r=await api(`/v1/checks/${c.id}/${path}`,{course,expectedVersion:c.version});
+  await refresh();
+  if(r.note)toast(r.note,"good");
 }
 
 function describeMods(sels){
@@ -984,23 +1143,145 @@ function renderReceipt(){
   });
 }
 
-/* ---------- void a line (E12): reason + manager approval ---------- */
-let voidLineId=null;
-function openVoid(lineId){
+/* ---------- void lines (E12, batched by UI-T3) ----------
+   Multi-select any voidable line, one reason, one manager PIN for the batch.
+   The engine has no batch command and this page does not invent one: it issues
+   the existing per-line void in sequence, threading the version each response
+   returns, and reports exactly which line refused. */
+const VOID_REASONS=["Guest changed mind","Kitchen error","Long wait","Wrong item rung in","Quality issue","Manager comp","Other"];
+const vsel=new Set();
+let voidReason=VOID_REASONS[0];
+
+/** A line the engine will accept a void for: anything not already voided, on a
+ *  check that is not closed or voided. Asking for more than that would only
+ *  earn a refusal the server has to spell out. */
+function voidableLines(c){
+  if(!c||c.status==="closed"||c.status==="voided")return [];
+  return c.lines.filter(l=>l.status!=="voided");
+}
+
+function openVoid(preselectId){
   const c=cur();if(!c)return;
-  const l=c.lines.find(x=>x.id===lineId);if(!l)return;
-  voidLineId=lineId;
-  $("#voidSub").textContent=l.quantity+"× "+l.capturedName+" · "+money((l.unitPriceMinor+l.modifierPriceMinor)*l.quantity);
+  const lines=voidableLines(c);
+  if(!lines.length){toast("Nothing on this check can be voided","err");return;}
+  vsel.clear();
+  if(preselectId&&lines.some(l=>l.id===preselectId))vsel.add(preselectId);
+  voidReason=VOID_REASONS[0];
+  $("#voidSub").textContent=c.tableName+" · check #"+c.checkNo;
   $("#voidReason").value="";$("#voidPin").value="";
+  renderVoid();
   openOv("ovVoid");
 }
+
+function renderVoid(){
+  const c=cur();if(!c)return;
+  $("#voidLines").innerHTML=voidableLines(c).map(l=>{
+    const mods=describeMods(l.modifiers);
+    return `<button class="vrow ${vsel.has(l.id)?"on":""}" data-vl="${l.id}">
+      <span class="vbox">✓</span>
+      <span class="vi"><span class="vn">${l.quantity}× ${esc(l.capturedName)} <span class="seat">S${l.seatNo}</span>
+        ${l.status==="unsent"?'<span class="chip info">unsent</span>':""}</span>
+        <span class="vm">${esc(l.course)}${mods?" · "+esc(mods):""}</span></span>
+      <span class="pr num">${money(lineExtension(l))}</span></button>`;
+  }).join("");
+  document.querySelectorAll("[data-vl]").forEach(b=>b.onclick=()=>{
+    vsel.has(b.dataset.vl)?vsel.delete(b.dataset.vl):vsel.add(b.dataset.vl);renderVoid();});
+  $("#voidReasons").innerHTML=VOID_REASONS.map(r=>
+    `<button class="opt tall ${r===voidReason?"on":""}" data-vr="${esc(r)}">${esc(r)}</button>`).join("");
+  document.querySelectorAll("[data-vr]").forEach(b=>b.onclick=()=>{voidReason=b.dataset.vr;renderVoid();});
+  // "Other" reveals the free-text field, the same way the discount modal's
+  // custom preset reveals its amount
+  $("#voidReason").style.display=voidReason==="Other"?"block":"none";
+  $("#voidGo").disabled=!vsel.size;
+  $("#voidGo").textContent=vsel.size>1?"Void "+vsel.size+" lines":"Void line";
+}
+
 $("#voidGo").onclick=async()=>{
-  const c=cur();if(!c||!voidLineId)return;
-  await api(`/v1/checks/${c.id}/items/${voidLineId}/void`,
-    {reason:$("#voidReason").value,managerPin:$("#voidPin").value,expectedVersion:c.version});
+  const c=cur();if(!c||!vsel.size)return;
+  const reason=voidReason==="Other"?$("#voidReason").value:voidReason;
+  const pin=$("#voidPin").value;
+  // check order, not tap order: the toast should read the way the panel does
+  const ids=voidableLines(c).filter(l=>vsel.has(l.id)).map(l=>l.id);
+  const nameOf=id=>{const l=c.lines.find(x=>x.id===id);return l?l.quantity+"× "+l.capturedName:"a line";};
+  const done=[],refused=[];
+  let version=c.version,stop=false;
+  for(const id of ids){
+    if(stop){refused.push(nameOf(id));continue;}
+    try{
+      const r=await api(`/v1/checks/${c.id}/items/${id}/void`,{reason,managerPin:pin,expectedVersion:version});
+      version=(r.check&&r.check.version!==undefined)?r.check.version:version+1;
+      done.push(nameOf(id));
+    }catch(e){
+      refused.push(nameOf(id));
+      // an approval the server will not take refuses every line the same way,
+      // so stop asking: one bad PIN should not raise N identical refusals
+      if(/manager|pin/i.test(e.message||"")){stop=true;continue;}
+      // anything else was about that line. Re-read the version the server
+      // actually holds before judging the next one, so a single refusal does
+      // not turn the rest of the batch into version conflicts
+      try{version=(await fetch(`/v1/checks/${c.id}`).then(r=>r.json())).check.version;}catch(_){}
+    }
+  }
   closeOv("ovVoid");
-  toast("Item voided, kitchen notified","good");
   await refresh();
+  if(done.length&&!refused.length)
+    toast(done.length===1?"Voided "+done[0]+", kitchen notified":done.length+" lines voided, kitchen notified","good");
+  else if(done.length)toast("Voided "+done.length+", refused: "+refused.join(", "),"err");
+  else toast("Nothing voided, refused: "+refused.join(", "),"err");
+};
+$("#btnVoid").onclick=()=>openVoid(null);
+
+/* ---------- the line sheet (UI-T3) ----------
+   Tapping a line used to open the void dialog, which put a destructive action
+   one mis-tap from a busy thumb. A tap now opens this: what the line is, and
+   an explicit way into the void modal with the line already picked. */
+function openLine(lineId){
+  const c=cur();if(!c)return;
+  const l=c.lines.find(x=>x.id===lineId);if(!l)return;
+  const mods=describeMods(l.modifiers);
+  $("#lnName").textContent=l.quantity+"× "+l.capturedName;
+  $("#lnSub").textContent=c.tableName+" · check #"+c.checkNo;
+  $("#lnBody").innerHTML=`<div class="lsheet">
+    <div class="lrow"><span class="lk">Seat</span><span class="lv">${l.seatNo}</span></div>
+    <div class="lrow"><span class="lk">Course</span><span class="lv">${esc(courseLabel(l.course).name)}</span></div>
+    <div class="lrow"><span class="lk">Status</span><span class="lv">${esc(l.status)}</span></div>
+    <div class="lrow"><span class="lk">Modifiers</span><span class="lv">${mods?esc(mods):"none"}</span></div>
+    <div class="lrow"><span class="lk">Price</span><span class="lv num">${money(lineExtension(l))}</span></div>
+    ${l.voidReason?`<div class="lrow"><span class="lk">Void reason</span><span class="lv">${esc(l.voidReason)}</span></div>`:""}
+  </div>`;
+  const canVoid=voidableLines(c).some(x=>x.id===l.id);
+  $("#lnFoot").innerHTML=canVoid
+    ?'<button class="btn btn-d" id="lnVoid">Void this line</button>'
+    :'<button class="btn btn-s" data-close="ovLine">Close</button>';
+  if(canVoid)$("#lnVoid").onclick=()=>{closeOv("ovLine");openVoid(l.id);};
+  openOv("ovLine");
+}
+
+/* ---------- the check's own story (E8-T3's read) ----------
+   Newest first, and verbatim: the server assembles the timeline and writes
+   each sentence from what it actually recorded. This page formats the clock
+   and adds nothing else. */
+$("#btnHist").onclick=async()=>{
+  const c=cur();if(!c)return;
+  $("#histSub").textContent="Reading the ledger…";
+  $("#histBody").innerHTML="";
+  openOv("ovHist");
+  let h;
+  try{
+    const res=await fetch(`/v1/checks/${c.id}/history`);
+    if(!res.ok)throw new Error("no history");
+    h=await res.json();
+  }catch(_){
+    $("#histSub").textContent="";
+    $("#histBody").innerHTML='<div class="empty">Cannot read this check\'s history right now.</div>';
+    return;
+  }
+  $("#histSub").textContent=h.tableName+" · check #"+h.checkNo+" · "+String(h.status).replace(/_/g," ")
+    +((h.heldCourses||[]).length?" · held: "+h.heldCourses.join(", "):"");
+  $("#histBody").innerHTML=(h.entries||[]).length
+    ?h.entries.slice().reverse().map(e=>
+      `<div class="tl-item"><span class="tl-when num">${hhmm(e.at)}</span><span class="tl-what">${esc(e.summary)}</span></div>`).join("")
+    :'<div class="empty">Nothing recorded on this check yet.</div>';
 };
 
 /* ---------- discount / comp (E12) ---------- */
@@ -1037,9 +1318,11 @@ $("#adjGo").onclick=async()=>{
 /* ---------- send / pay / close ---------- */
 $("#btnSend").onclick=async()=>{
   const c=cur();if(!c)return;
-  await api(`/v1/checks/${c.id}/send`,{expectedVersion:c.version});
+  const r=await api(`/v1/checks/${c.id}/send`,{expectedVersion:c.version});
   await refresh();
-  toast("Fired to kitchen","good");
+  // the engine says what stayed behind ("SECONDI held, 1 item(s) waiting");
+  // that is the answer to "did it all go?", so it is the toast
+  toast(r.note?"Fired to kitchen · "+r.note:"Fired to kitchen","good");
 };
 /* ---------- split (E11) ----------
    Portions are a server read: GET /v1/checks/:id/split. Nothing here adds up
