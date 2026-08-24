@@ -100,6 +100,16 @@ describe.skipIf(!PGBIN)("PostgreSQL persistence (E4)", () => {
     expect(disc.statusCode).toBe(200);
     expect(disc.json().check.totals.discountMinor).toBe(400);
 
+    // E8-T3: hold a course that has nothing ordered in it yet. The hold is
+    // check state, so it has to survive a restart on its own; a hold on an
+    // empty course is the case that proves it, since no line carries it.
+    const heldRes = await app.inject({ method: "POST", url: `/v1/checks/${id}/hold`,
+      payload: ENV({ course: "DOLCI" }) });
+    expect(heldRes.statusCode).toBe(200);
+    expect(heldRes.json().check.heldCourses).toEqual(["DOLCI"]);
+    const historyBefore = (await app.inject({ method: "GET", url: `/v1/checks/${id}/history` })).json();
+    expect(historyBefore.entries.map((e: { kind: string }) => e.kind)).toContain("course_held");
+
     const kds = (await app.inject({ method: "GET", url: "/v1/kds" })).json().tickets;
     for (const t of kds) for (const i of t.items) {
       if (i.voided) continue;
@@ -262,5 +272,21 @@ describe.skipIf(!PGBIN)("PostgreSQL persistence (E4)", () => {
     expect(check.guests).toEqual([{ id: guestId, name: "Elena Rossi" }]);
     // search finds her through the location-scoped index
     expect((await app2.inject({ method: "GET", url: "/v1/guests?q=ROSSI" })).json().guests).toHaveLength(1);
+
+    // E8-T3: the hold, its log, and the timestamps a history is made of all
+    // came back off the row (checks.course_state, order_item.created_at and
+    // voided_at, payment.taken_at)
+    expect(check.heldCourses).toEqual(["DOLCI"]);
+    expect(check.lines.every((l: { addedAt?: string }) => typeof l.addedAt === "string")).toBe(true);
+    expect(acqua2.voidedAt).toEqual(expect.any(String));
+    expect(check.payments.every((p: { takenAt?: string }) => typeof p.takenAt === "string")).toBe(true);
+    const historyAfter = (await app2.inject({ method: "GET", url: `/v1/checks/${id}/history` })).json();
+    expect(historyAfter.heldCourses).toEqual(["DOLCI"]);
+    for (const entry of historyBefore.entries) expect(historyAfter.entries).toContainEqual(entry);
+    for (const kind of ["opened", "item_added", "course_held", "fired", "voided", "adjustment", "payment", "closed"]) {
+      expect(historyAfter.entries.map((e: { kind: string }) => e.kind), `missing ${kind} after the restart`).toContain(kind);
+    }
+    const times = historyAfter.entries.map((e: { at: string }) => Date.parse(e.at));
+    expect(times).toEqual([...times].sort((a: number, b: number) => a - b));
   }, 60_000);
 });

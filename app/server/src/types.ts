@@ -27,6 +27,11 @@ export interface OrderLine {
   modifiers: readonly SelectedModifier[];
   modifierPriceMinor: number;
   status: OrderItemStatus;
+  /** when the line was added, and when it was voided (E8-T3, for the check's
+   *  own history). Optional because a line written before E8-T3 never recorded
+   *  one, and inventing a timestamp is worse than admitting the gap. */
+  addedAt?: string;
+  voidedAt?: string;
   voidReason?: string;
   voidedBy?: string;
   voidApprovedBy?: string;
@@ -45,6 +50,8 @@ export interface AdjustmentRecord {
   reason: string;
   appliedBy?: string;
   approvedBy?: string;
+  /** when it was applied (E8-T3 history) */
+  appliedAt?: string;
 }
 
 export interface PaymentRecord {
@@ -55,6 +62,8 @@ export interface PaymentRecord {
   tipMinor: number;
   status: "authorized" | "accepted_offline";
   takenBy?: string;
+  /** when the money came in (E8-T3 history) */
+  takenAt?: string;
 }
 
 export interface CheckAggregate {
@@ -76,6 +85,27 @@ export interface CheckAggregate {
   payments: PaymentRecord[];
   openedAt: string;
   closedAt?: string;
+  /** the LAST reopen, if this check was ever reopened (E8-T3 history). The
+   *  first close's time is overwritten by the second close, which is the
+   *  honest limit of storing one closedAt. */
+  reopenedAt?: string;
+  /** courses the kitchen must not start yet (E8-T3). Absent means nothing is
+   *  held. A hold survives on a course with no lines: it applies to whatever
+   *  gets added next, which is how a table that says "hold the secondi" is
+   *  meant to work. */
+  heldCourses?: string[];
+  /** when each hold went on and came off, so the history can tell the story.
+   *  The hold STATE is heldCourses; this is only its log. */
+  courseEvents?: CourseEvent[];
+}
+
+/** One hold going on or coming off a course (E8-T3). A fire is not logged here:
+ *  the kitchen ticket's firedAt already records it, and one fact deserves one
+ *  home. */
+export interface CourseEvent {
+  at: string;
+  course: string;
+  action: "held" | "released";
 }
 
 /** One fired course on the kitchen rail (E8). */

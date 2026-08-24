@@ -22,6 +22,7 @@ import {
   type Availability,
   type CheckAggregate,
   type CheckGuestLink,
+  type CourseEvent,
   type DrawerSession,
   type FloorTable,
   type Guest,
@@ -205,17 +206,23 @@ export class PgStore implements Store {
         "UPDATE party SET table_id = $1, covers = $2, cleared_at = $3 WHERE id = $4",
         [tableIdNow, check.covers, check.status === "closed" ? (check.closedAt ?? null) : null, partyId],
       );
+      // course_state carries the holds and their log together (E8-T3)
+      const courseState = JSON.stringify({
+        held: check.heldCourses ?? [],
+        events: check.courseEvents ?? [],
+      });
       await c.query(
-        `INSERT INTO checks (id, org_id, location_id, business_day_id, party_id, check_no, server_id, menu_snapshot_id, status, covers, version, opened_at, closed_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-         ON CONFLICT (id) DO UPDATE SET status = $9, covers = $10, version = $11, closed_at = $13`,
-        [check.id, ORG, LOC, dayId, partyId, check.checkNo, check.serverId ?? EMP, snapUuidFor(check.menuSnapshotId), check.status, check.covers, check.version, check.openedAt, check.closedAt ?? null],
+        `INSERT INTO checks (id, org_id, location_id, business_day_id, party_id, check_no, server_id, menu_snapshot_id, status, covers, version, opened_at, closed_at, course_state, reopened_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+         ON CONFLICT (id) DO UPDATE SET status = $9, covers = $10, version = $11, closed_at = $13, course_state = $14, reopened_at = $15`,
+        [check.id, ORG, LOC, dayId, partyId, check.checkNo, check.serverId ?? EMP, snapUuidFor(check.menuSnapshotId), check.status, check.covers, check.version, check.openedAt, check.closedAt ?? null,
+         courseState, check.reopenedAt ?? null],
       );
       for (const l of check.lines) {
         await c.query(
-          `INSERT INTO order_item (id, check_id, menu_snapshot_id, item_id, captured_name, unit_price_minor, tax_class, course, station_key, quantity, seat_no, status, void_reason, voided_by, void_approved_by, created_by, selections)
-           VALUES ($1,$2,$3,$4,$5,$6,'standard',$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
-           ON CONFLICT (id) DO UPDATE SET check_id = $2, status = $11, void_reason = $12, voided_by = $13, void_approved_by = $14, seat_no = $10`,
+          `INSERT INTO order_item (id, check_id, menu_snapshot_id, item_id, captured_name, unit_price_minor, tax_class, course, station_key, quantity, seat_no, status, void_reason, voided_by, void_approved_by, created_by, selections, created_at, voided_at)
+           VALUES ($1,$2,$3,$4,$5,$6,'standard',$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,COALESCE($17, now()),$18)
+           ON CONFLICT (id) DO UPDATE SET check_id = $2, status = $11, void_reason = $12, voided_by = $13, void_approved_by = $14, seat_no = $10, voided_at = $18`,
           [
             l.id, check.id, snapUuidFor(l.menuSnapshotId ?? check.menuSnapshotId), uuidFrom(l.itemId), l.capturedName, l.unitPriceMinor, l.course, l.station,
             l.quantity, l.seatNo, l.status,
@@ -223,14 +230,15 @@ export class PgStore implements Store {
             l.status === "voided" ? (l.voidedBy ?? EMP) : null,
             l.status === "voided" ? (l.voidApprovedBy ?? EMP) : null,
             EMP, JSON.stringify({ modifiers: l.modifiers, modifierPriceMinor: l.modifierPriceMinor }),
+            l.addedAt ?? null, l.voidedAt ?? null,
           ],
         );
       }
       for (const a of check.adjustments) {
         await c.query(
-          `INSERT INTO check_adjustment (id, check_id, kind, captured_name, amount_minor, percent_bp, reason, applied_by, approved_by)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (id) DO UPDATE SET check_id = $2`,
-          [a.id, check.id, a.kind, a.label, a.amountMinor ?? null, a.percentBp ?? null, a.reason, a.appliedBy ?? EMP, a.approvedBy ?? EMP],
+          `INSERT INTO check_adjustment (id, check_id, kind, captured_name, amount_minor, percent_bp, reason, applied_by, approved_by, applied_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,COALESCE($10, now())) ON CONFLICT (id) DO UPDATE SET check_id = $2`,
+          [a.id, check.id, a.kind, a.label, a.amountMinor ?? null, a.percentBp ?? null, a.reason, a.appliedBy ?? EMP, a.approvedBy ?? EMP, a.appliedAt ?? null],
         );
       }
       for (const p of check.payments) {
@@ -248,9 +256,9 @@ export class PgStore implements Store {
            p.status === "accepted_offline" ? "offline_pending" : "authorized", p.amountMinor],
         );
         await c.query(
-          `INSERT INTO payment (id, intent_id, attempt_id, method, amount_minor, tip_minor, status, taken_by)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (id) DO NOTHING`,
-          [p.id, intentId, attemptId, p.method, p.amountMinor, p.tipMinor, p.status, p.takenBy ?? EMP],
+          `INSERT INTO payment (id, intent_id, attempt_id, method, amount_minor, tip_minor, status, taken_by, taken_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,COALESCE($9, now())) ON CONFLICT (id) DO NOTHING`,
+          [p.id, intentId, attemptId, p.method, p.amountMinor, p.tipMinor, p.status, p.takenBy ?? EMP, p.takenAt ?? null],
         );
       }
       await c.query("COMMIT");
@@ -274,7 +282,7 @@ export class PgStore implements Store {
   private async hydrate(where: string, params: unknown[]): Promise<CheckAggregate[]> {
     const checks = await this.pool.query(
       `SELECT ch.id, ch.check_no, ch.status, ch.covers, ch.version, ch.opened_at, ch.closed_at, dt.name AS table_name,
-              ch.server_id, e.display_name AS server_name,
+              ch.server_id, e.display_name AS server_name, ch.course_state, ch.reopened_at,
               ms.document->>'snapshotId' AS snap_id
        FROM checks ch
        JOIN party p ON p.id = ch.party_id
@@ -287,17 +295,17 @@ export class PgStore implements Store {
     if (!checks.rowCount) return [];
     const ids = checks.rows.map((r) => r.id as string);
     const lines = await this.pool.query(
-      `SELECT id, check_id, item_id, captured_name, unit_price_minor, course, station_key, quantity, seat_no, status, void_reason, selections
+      `SELECT id, check_id, item_id, captured_name, unit_price_minor, course, station_key, quantity, seat_no, status, void_reason, selections, created_at, voided_at
        FROM order_item WHERE check_id = ANY($1) ORDER BY created_at`,
       [ids],
     );
     const adjustments = await this.pool.query(
-      `SELECT id, check_id, kind, captured_name, amount_minor, percent_bp, reason
+      `SELECT id, check_id, kind, captured_name, amount_minor, percent_bp, reason, applied_at
        FROM check_adjustment WHERE check_id = ANY($1) ORDER BY applied_at`,
       [ids],
     );
     const payments = await this.pool.query(
-      `SELECT pay.id, pay.method, pay.amount_minor, pay.tip_minor, pay.status, pi.split_label, pay.intent_id, pi.check_id
+      `SELECT pay.id, pay.method, pay.amount_minor, pay.tip_minor, pay.status, pi.split_label, pay.intent_id, pi.check_id, pay.taken_at
        FROM payment pay JOIN payment_intent pi ON pi.id = pay.intent_id
        WHERE pi.check_id = ANY($1) ORDER BY pay.taken_at`,
       [ids],
@@ -316,6 +324,8 @@ export class PgStore implements Store {
       menuSnapshotId: (r.snap_id as string | null) ?? SNAPSHOT_ID,
       openedAt: new Date(r.opened_at as string).toISOString(),
       ...(r.closed_at ? { closedAt: new Date(r.closed_at as string).toISOString() } : {}),
+      ...(r.reopened_at ? { reopenedAt: new Date(r.reopened_at as string).toISOString() } : {}),
+      ...courseStateFromRow(r.course_state),
       lines: lines.rows
         .filter((l) => l.check_id === r.id)
         .map((l) => {
@@ -332,6 +342,8 @@ export class PgStore implements Store {
             modifiers: (sel.modifiers as never[]) ?? [],
             modifierPriceMinor: sel.modifierPriceMinor ?? 0,
             status: l.status,
+            ...(l.created_at ? { addedAt: new Date(l.created_at as string).toISOString() } : {}),
+            ...(l.voided_at ? { voidedAt: new Date(l.voided_at as string).toISOString() } : {}),
             ...(l.void_reason ? { voidReason: l.void_reason as string } : {}),
           };
         }),
@@ -344,6 +356,7 @@ export class PgStore implements Store {
           ...(a.amount_minor !== null ? { amountMinor: Number(a.amount_minor) } : {}),
           ...(a.percent_bp !== null ? { percentBp: Number(a.percent_bp) } : {}),
           reason: (a.reason as string | null) ?? "",
+          ...(a.applied_at ? { appliedAt: new Date(a.applied_at as string).toISOString() } : {}),
         })),
       payments: payments.rows
         .filter((p) => p.check_id === r.id)
@@ -354,6 +367,7 @@ export class PgStore implements Store {
           amountMinor: Number(p.amount_minor),
           tipMinor: Number(p.tip_minor),
           status: p.status,
+          ...(p.taken_at ? { takenAt: new Date(p.taken_at as string).toISOString() } : {}),
         })),
     }));
   }
@@ -849,6 +863,19 @@ function guestFromRow(row: Record<string, unknown>): Guest {
     marketingOptIn: row["marketing_opt_in"] === true,
     ...(row["created_by"] ? { createdBy: row["created_by"] as string } : {}),
     createdAt: new Date(row["created_at"] as string).toISOString(),
+  };
+}
+
+/** checks.course_state back into the two aggregate fields (E8-T3). A row from
+ *  before the column existed reads as an empty document, which is exactly
+ *  "nothing held, no story recorded". */
+function courseStateFromRow(value: unknown): { heldCourses?: string[]; courseEvents?: CourseEvent[] } {
+  const doc = (value ?? {}) as { held?: unknown; events?: unknown };
+  const held = Array.isArray(doc.held) ? (doc.held as string[]) : [];
+  const events = Array.isArray(doc.events) ? (doc.events as CourseEvent[]) : [];
+  return {
+    ...(held.length ? { heldCourses: held } : {}),
+    ...(events.length ? { courseEvents: events } : {}),
   };
 }
 

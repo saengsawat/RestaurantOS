@@ -64,6 +64,7 @@ function respond(reply: FastifyReply, outcome: CommandOutcome): unknown {
         ...(outcome.guest !== undefined ? { guest: outcome.guest } : {}),
         ...(outcome.audit !== undefined ? { audit: outcome.audit } : {}),
         ...(outcome.refundDueMinor !== undefined ? { refundDueMinor: outcome.refundDueMinor } : {}),
+        ...(outcome.note !== undefined ? { note: outcome.note } : {}),
       });
     case "replay":
       return respond(reply, outcome.result);
@@ -191,6 +192,42 @@ export function buildServer(store: Store = new MemoryStore(), storeName = "memor
     const envelope = readEnvelope(body);
     if ("error" in envelope) return reply.code(400).send({ status: "BAD_REQUEST", reason: envelope.error });
     return respond(reply, await engine.send(envelope, id, typeof body.course === "string" ? { course: body.course } : {}));
+  });
+
+
+  /* --------------------- courses: hold and fire (E8-T3) ---------------------
+   * A hold is check state, not kitchen state: nothing is dispatched, so these
+   * are ordinary check commands, version-checked like the rest. */
+
+  app.post("/v1/checks/:id/hold", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = (req.body ?? {}) as EnvelopeBody & { course?: unknown };
+    const envelope = readEnvelope(body);
+    if ("error" in envelope) return reply.code(400).send({ status: "BAD_REQUEST", reason: envelope.error });
+    return respond(reply, await engine.holdCourse(envelope, id, { course: String(body.course ?? "") }));
+  });
+
+  app.post("/v1/checks/:id/release", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = (req.body ?? {}) as EnvelopeBody & { course?: unknown };
+    const envelope = readEnvelope(body);
+    if ("error" in envelope) return reply.code(400).send({ status: "BAD_REQUEST", reason: envelope.error });
+    return respond(reply, await engine.releaseCourse(envelope, id, { course: String(body.course ?? "") }));
+  });
+
+  app.post("/v1/checks/:id/fire", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = (req.body ?? {}) as EnvelopeBody & { course?: unknown };
+    const envelope = readEnvelope(body);
+    if ("error" in envelope) return reply.code(400).send({ status: "BAD_REQUEST", reason: envelope.error });
+    return respond(reply, await engine.fireCourse(envelope, id, { course: String(body.course ?? "") }));
+  });
+
+  /** The check's own story (E8-T3): derived on read, nothing stored for it. */
+  app.get("/v1/checks/:id/history", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const history = await engine.checkHistory(id);
+    return history ? history : reply.code(404).send({ status: "NOT_FOUND" });
   });
 
   app.post("/v1/checks/:id/payments", async (req, reply) => {

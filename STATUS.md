@@ -11,7 +11,7 @@ Phase 0  Discovery        ████████░░  waiting on Matt sessio
 Phase 1  POS PRD          ██████░░░░  draft v0.1 done, Matt review pending
 Phase 2  Domain + arch    ██████░░░░  schema + domain model done; ADRs frozen on D6
 Phase 3  V1 backlog       ██░░░░░░░░  epic table exists; ticket contracts not yet written
-Phase 4  Build            █████████░  14 epics done (E20 guestbook v0 closed), E5/E17 in progress: lock screen + six screens + PostgreSQL + guestbook (133 tests)
+Phase 4  Build            █████████░  14 epics done (E20 guestbook v0 closed), E5/E17 in progress: lock screen + six screens + PostgreSQL + guestbook (138 tests)
 Phase 5  Pilot            ░░░░░░░░░░  venue not selected
 Phase 6  Intelligence     ░░░░░░░░░░  by design, after pilot
 ```
@@ -35,6 +35,7 @@ Phases overlap deliberately (decision D13): everything Matt-independent moves; e
 | **Insights read APIs (E19-T1)**: every check records the server who opened it; `/v1/insights/servers` (server scorecard: net, tips, covers, avg check, per cover, turn minutes, voids, per-course value, Average row) and `/v1/insights/heatmap` (day x hour net sales). Computed on read, nothing stored | 4 API tests incl. conservation against `/v1/day` (per-server net = gross - discount, per-server tips = day tips) + verified with curl against the running server |
 | **Reports screen (E19-T2, renamed by D24)** at `/reports` (`/insights` redirects): tonight-at-a-glance tiles, the server scorecard (stacked course bars per server, muted Average row, tap for rank/actual/average/variance on eleven metrics plus net by course), and the hour x day heatmap with a per-day share row | Verified in Chrome, Day and Night at 1280px and at 390px, against a seeded two-server service; tiles agree with `/close` to the cent |
 | **Guestbook API (E20-T2)**: `guest` + `check_guest` (migration 0004) with attach on any check, manager-gated merge and delete, guest search, and the derived profile (favorites, spend, cadence, preferred section and server, tip percent). Nothing aggregated is stored, so merging or deleting a guest cannot move a cent | 7 API tests incl. conservation at two and three guests (a discounted check splits 871+871+871 = 2613), merge and delete proven not to touch a check, plus a PostgreSQL round trip | 
+| **Coursed firing + check history (E8-T3)**: per-course Hold / Fire now on the check (`heldCourses` on the aggregate, Send skips holds and says so, one course fires to one ticket) and `GET /v1/checks/:id/history`, the check's story derived on read with no invented timestamps | 5 API tests (hold blocks Send and payment, fire clears the hold, all-held Send refuses by name, the timeline's order and sentences) + a PostgreSQL round trip |
 | **POS web client v0** at `/pos`: the page experience on the real engine: checks rail, menu, modifier modal (required groups, nesting), seats, send, tip/pay, close, 409 recovery, mobile tabs | Screenshot-verified against the running server with seeded live state |
 
 ## Run it
@@ -68,7 +69,7 @@ $env:DATABASE_URL = "postgres://postgres:YOURPASSWORD@localhost:5432/restauranto
 npm run dev
 ```
 
-Domain tests: `cd app\domain && npm test` (73). Server tests incl. a throwaway-PostgreSQL integration: `cd app\server && npm test` (60).
+Domain tests: `cd app\domain && npm test` (73). Server tests incl. a throwaway-PostgreSQL integration: `cd app\server && npm test` (65).
 
 ## How work runs now (D21)
 

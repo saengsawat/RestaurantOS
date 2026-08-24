@@ -2034,3 +2034,190 @@ describe("a reopened check can always close out (E2-T2)", () => {
     expect(pos.body).toContain("closableNow");
   });
 });
+
+/* ------------------- courses: hold and fire (E8-T3) -------------------
+ * Real service is coursed. Send used to fire the whole order at once, so a
+ * table that wanted its secondi held had no way to say so. The mockup's Hold
+ * and Fire now chips are the spec; these are their commands.
+ */
+
+const CHIANTI = { itemId: "chianti", quantity: 1, seatNo: 1, modifiers: [{ groupId: "size", modifierId: "glass" }] };
+const RAGU = { itemId: "ragu", quantity: 1, seatNo: 2, modifiers: [{ groupId: "pasta", modifierId: "spag" }] };
+const BISTECCA = { itemId: "bistecca", quantity: 1, seatNo: 2, modifiers: [{ groupId: "temp", modifierId: "mr" }] };
+
+async function addLine(app: ReturnType<typeof buildServer>, checkId: string, item: Record<string, unknown>, n = 1) {
+  const res = await app.inject({ method: "POST", url: `/v1/checks/${checkId}/items`, payload: { ...ENV(120 + n), ...item } });
+  expect(res.statusCode).toBe(200);
+  return res;
+}
+
+async function courseCmd(app: ReturnType<typeof buildServer>, checkId: string, action: string, course: string) {
+  return app.inject({ method: "POST", url: `/v1/checks/${checkId}/${action}`, payload: { ...ENV(130), course } });
+}
+
+/** A four-course check: beverage, antipasti, primi, secondi, nothing fired. */
+async function coursedCheck(app: ReturnType<typeof buildServer>, tableName = "Table 7") {
+  const check = await openTable(app, tableName, 4);
+  await addLine(app, check.id, CHIANTI, 1);
+  await addLine(app, check.id, BURRATA, 2);
+  await addLine(app, check.id, RAGU, 3);
+  await addLine(app, check.id, BISTECCA, 4);
+  return check.id;
+}
+
+const kindsOf = (entries: { kind: string }[]) => entries.map((e) => e.kind);
+
+describe("per-course hold and fire (E8-T3)", () => {
+  it("holds a course back from Send, and a held line still blocks payment", async () => {
+    const app = buildServer();
+    const checkId = await coursedCheck(app);
+
+    const held = await courseCmd(app, checkId, "hold", "SECONDI");
+    expect(held.statusCode).toBe(200);
+    expect(held.json().check.heldCourses).toEqual(["SECONDI"]);
+    expect(held.json().note).toBe("SECONDI held, 1 item(s) waiting");
+
+    const sent = await app.inject({ method: "POST", url: `/v1/checks/${checkId}/send`, payload: ENV(131) });
+    expect(sent.statusCode).toBe(200);
+    // three courses went, and the response says what stayed behind
+    expect((sent.json().tickets as { course: string }[]).map((t) => t.course).sort())
+      .toEqual(["ANTIPASTI", "BEVERAGE", "PRIMI"]);
+    expect(sent.json().note).toBe("SECONDI held, 1 item(s) waiting");
+
+    // the kitchen never heard about the secondi
+    const rail = (await app.inject({ method: "GET", url: "/v1/kds" })).json().tickets as { course: string }[];
+    expect(rail.map((t) => t.course).sort()).toEqual(["ANTIPASTI", "BEVERAGE", "PRIMI"]);
+
+    const lines = sent.json().check.lines as { capturedName: string; status: string }[];
+    expect(lines.find((l) => l.capturedName === "Bistecca Fiorentina")!.status).toBe("unsent");
+    expect(lines.filter((l) => l.status === "sent")).toHaveLength(3);
+
+    // a held line is an unsent line, so FR-26 still bites
+    const pay = await app.inject({ method: "POST", url: `/v1/checks/${checkId}/payments`,
+      payload: { ...ENV(132), method: "card", amountMinor: 1000 } });
+    expect(pay.statusCode).toBe(422);
+    expect(pay.json().reason).toMatch(/unsent/);
+
+    // and Send again refuses rather than quietly doing nothing
+    const again = await app.inject({ method: "POST", url: `/v1/checks/${checkId}/send`, payload: ENV(133) });
+    expect(again.statusCode).toBe(422);
+    expect(again.json().reason).toMatch(/everything unsent is held: SECONDI/);
+  });
+
+  it("fires exactly one course, clears its hold, and refuses a second fire", async () => {
+    const app = buildServer();
+    const checkId = await coursedCheck(app, "Table 12");
+    await courseCmd(app, checkId, "hold", "SECONDI");
+    await app.inject({ method: "POST", url: `/v1/checks/${checkId}/send`, payload: ENV(134) });
+
+    const fired = await courseCmd(app, checkId, "fire", "SECONDI");
+    expect(fired.statusCode).toBe(200);
+    expect(fired.json().note).toBe("SECONDI fired to kitchen, 1 item(s)");
+    // one ticket, that course only, and the hold is gone
+    expect(fired.json().tickets).toHaveLength(1);
+    expect(fired.json().tickets[0].course).toBe("SECONDI");
+    expect(fired.json().tickets[0].items).toHaveLength(1);
+    expect(fired.json().check.heldCourses).toEqual([]);
+    expect((fired.json().check.lines as { status: string }[]).every((l) => l.status === "sent")).toBe(true);
+
+    const twice = await courseCmd(app, checkId, "fire", "SECONDI");
+    expect(twice.statusCode).toBe(422);
+    expect(twice.json().reason).toBe("nothing unsent in SECONDI to fire");
+
+    // lowercase from a client still finds the course, so no ghost holds
+    const lower = await courseCmd(app, checkId, "hold", "dolci");
+    expect(lower.statusCode).toBe(200);
+    expect(lower.json().check.heldCourses).toEqual(["DOLCI"]);
+    const nonsense = await courseCmd(app, checkId, "hold", "PUDDING");
+    expect(nonsense.statusCode).toBe(422);
+    expect(nonsense.json().reason).toMatch(/unknown course PUDDING/);
+  });
+
+  it("refuses a Send with every course held, naming them", async () => {
+    const app = buildServer();
+    const check = await openTable(app, "Table 14", 2);
+    await addLine(app, check.id, { itemId: "acqua", quantity: 2, seatNo: 1 }, 1);
+    await addLine(app, check.id, TIRAMISU, 2);
+    await courseCmd(app, check.id, "hold", "BEVERAGE");
+    await courseCmd(app, check.id, "hold", "DOLCI");
+
+    const blocked = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/send`, payload: ENV(135) });
+    expect(blocked.statusCode).toBe(422);
+    expect(blocked.json().reason).toMatch(/everything unsent is held: BEVERAGE, DOLCI/);
+
+    // releasing without firing puts it back in the next Send
+    const released = await courseCmd(app, check.id, "release", "BEVERAGE");
+    expect(released.statusCode).toBe(200);
+    expect(released.json().check.heldCourses).toEqual(["DOLCI"]);
+    expect(released.json().note).toMatch(/BEVERAGE released/);
+    const sent = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/send`, payload: ENV(136) });
+    expect(sent.statusCode).toBe(200);
+    expect((sent.json().tickets as { course: string }[]).map((t) => t.course)).toEqual(["BEVERAGE"]);
+    expect(sent.json().note).toBe("DOLCI held, 1 item(s) waiting");
+    // releasing a course that was not held says so instead of pretending
+    const idle = await courseCmd(app, check.id, "release", "PRIMI");
+    expect(idle.statusCode).toBe(200);
+    expect(idle.json().note).toBe("PRIMI was not held");
+  });
+
+  it("tells the check's story back, in order, with nothing invented", async () => {
+    const app = buildServer();
+    await signIn(app, "dev-gia", "2468");
+    const check = await openTable(app, "Table 3", 2);
+    const env = (n: number) => ENV(140 + n);
+
+    await addLine(app, check.id, BURRATA, 1);
+    await addLine(app, check.id, TIRAMISU, 2);
+    await courseCmd(app, check.id, "hold", "DOLCI");
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/send`, payload: env(1) });
+    const dolci = (await app.inject({ method: "GET", url: `/v1/checks/${check.id}` })).json().check.lines
+      .find((l: { capturedName: string }) => l.capturedName === "Tiramisu della Casa");
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items/${dolci.id}/void`,
+      payload: { ...env(2), reason: "guest skipped dessert", managerPin: "1122" } });
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/adjustments`,
+      payload: { ...env(3), amountMinor: 200, label: "Regular guest", reason: "weekly regular", managerPin: "1122" } });
+    const due = (await app.inject({ method: "GET", url: `/v1/checks/${check.id}` })).json().check.totals.dueMinor;
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/payments`,
+      payload: { ...env(4), method: "card", amountMinor: due, tipMinor: 300 } });
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/close`, payload: env(5) });
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/reopen`, payload: { ...env(6), managerPin: "1122" } });
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/close`, payload: env(7) });
+
+    const res = await app.inject({ method: "GET", url: `/v1/checks/${check.id}/history` });
+    expect(res.statusCode).toBe(200);
+    const story = res.json() as { checkNo: number; heldCourses: string[]; entries: { at: string; kind: string; summary: string }[] };
+    const kinds = kindsOf(story.entries);
+
+    expect(kinds[0]).toBe("opened");
+    expect(story.entries[0]!.summary).toMatch(/opened on Table 3, 2 cover\(s\) by Gia R\./);
+    for (const kind of ["item_added", "course_held", "fired", "voided", "adjustment", "payment", "reopened", "closed"]) {
+      expect(kinds, `history is missing ${kind}`).toContain(kind);
+    }
+    // a hold is not a dispatch, so the held course never shows a fire
+    expect(story.entries.filter((e) => e.kind === "fired").map((e) => e.summary))
+      .toEqual(["ANTIPASTI fired to kitchen, 1 item(s)"]);
+    expect(story.entries.find((e) => e.kind === "voided")!.summary)
+      .toMatch(/Tiramisu della Casa voided: guest skipped dessert/);
+    expect(story.entries.find((e) => e.kind === "payment")!.summary).toMatch(/paid \$\d+\.\d\d by card plus \$3\.00 tip/);
+    // in order, and every timestamp inside the life of the check
+    const times = story.entries.map((e) => Date.parse(e.at));
+    expect(times).toEqual([...times].sort((a, b) => a - b));
+    expect(times[0]).toBeLessThanOrEqual(times[times.length - 1]!);
+    expect(times[times.length - 1]).toBeLessThanOrEqual(Date.now() + 1000);
+    // the reopen sits before the close it caused
+    expect(kinds.lastIndexOf("reopened")).toBeLessThan(kinds.lastIndexOf("closed"));
+    // the still-held course rides along, and an unknown check has no story
+    expect(story.heldCourses).toEqual(["DOLCI"]);
+    expect((await app.inject({ method: "GET", url: "/v1/checks/11111111-1111-1111-1111-111111111111/history" })).statusCode).toBe(404);
+  });
+
+  it("keeps its hands off closed checks", async () => {
+    const app = buildServer();
+    const checkId = await serviceCheck(app, "term-1", "Table 2", [BURRATA], 0);
+    for (const action of ["hold", "release", "fire"]) {
+      const res = await courseCmd(app, checkId, action, "DOLCI");
+      expect(res.statusCode).toBe(422);
+      expect(res.json().reason).toMatch(/on a closed check/);
+    }
+  });
+});

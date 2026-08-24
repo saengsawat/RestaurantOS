@@ -26,17 +26,27 @@ import {
 import type { MenuEntry } from "./menu.js";
 import { STAFF, type Employee } from "./staff.js";
 import { randomUUID } from "node:crypto";
-import { serviceDateOf, type CashEvent, type CheckAggregate, type DrawerSession, type Envelope, type Guest, type KitchenTicket, type MenuSnapshot, type Store } from "./types.js";
+import { serviceDateOf, type CashEvent, type CheckAggregate, type DrawerSession, type Envelope, type Guest, type KitchenTicket, type MenuSnapshot, type OrderLine, type Store } from "./types.js";
 import type { GroupIndex } from "@restaurantos/domain";
 
 export const TAX_RATE = { num: 8_875, den: 100_000 };
 export const RECALL_WINDOW_MS = 10 * 60_000;
+/** How many hold/release events one check keeps for its history (E8-T3). The
+ *  sync journal holds every operation forever; this is the readable story. */
+export const COURSE_LOG_LIMIT = 200;
+
+/** Minor units as a sentence reads them. Only the history uses this: every
+ *  other number this server sends is minor units for the client to format,
+ *  and the pilot's real currency handling belongs there too. */
+function usd(minor: number): string {
+  return "$" + (minor / 100).toFixed(2);
+}
 
 // Manager approval is now a real identity check (E15): the PIN must hash to
 // an employee who holds the manager role. See Engine.manager().
 
 export type CommandOutcome =
-  | { kind: "applied"; check?: CheckView; tickets?: KitchenTicket[]; session?: DrawerSession; day?: unknown; menu?: unknown; guest?: unknown; audit?: unknown; refundDueMinor?: number }
+  | { kind: "applied"; check?: CheckView; tickets?: KitchenTicket[]; session?: DrawerSession; day?: unknown; menu?: unknown; guest?: unknown; audit?: unknown; refundDueMinor?: number; note?: string }
   | { kind: "replay"; result: CommandOutcome }
   | { kind: "conflict"; expectedVersion: number | undefined; currentVersion: number }
   | { kind: "rejected"; reason: string; modifierErrors?: readonly ModifierError[] }
@@ -532,6 +542,7 @@ export class Engine {
         modifiers: selections,
         modifierPriceMinor,
         status: "unsent",
+        addedAt: new Date().toISOString(),
         menuSnapshotId: snapshot.id,
       });
       if (avail?.remaining !== undefined) {
@@ -542,49 +553,37 @@ export class Engine {
     });
   }
 
-  /** Fire unsent lines: one dispatch ticket per course (E8). */
+  /**
+   * Fire unsent lines: one dispatch ticket per course (E8).
+   *
+   * The big Send fires everything unsent EXCEPT the courses on hold (E8-T3),
+   * and says which ones stayed behind. Naming an explicit course means "fire
+   * this one now", hold and all, which is what the course's own Fire chip does.
+   */
   async send(envelope: Envelope, checkId: string, input: { course?: string }): Promise<CommandOutcome> {
+    if (input.course !== undefined) return this.fireCourse(envelope, checkId, { course: input.course });
     return this.run(envelope, checkId, async (check) => {
-      const groups = (await this.store.getActiveSnapshot()).groups;
-      const targets = check.lines.filter(
-        (l) => l.status === "unsent" && (input.course === undefined || l.course === input.course),
-      );
-      if (targets.length === 0) return { kind: "rejected", reason: "nothing unsent to fire" };
-
-      for (const line of targets) {
-        const r = orderItemTransition(line.status, { type: "dispatch" });
-        if (!r.ok) return { kind: "rejected", reason: r.reason };
-        line.status = r.next;
-      }
-      const byCourse = new Map<string, typeof targets>();
-      for (const line of targets) {
-        const list = byCourse.get(line.course) ?? [];
-        list.push(line);
-        byCourse.set(line.course, list);
-      }
-      const tickets: KitchenTicket[] = [];
-      for (const [course, lines] of byCourse) {
-        const ticket: KitchenTicket = {
-          id: randomUUID(),
-          checkId: check.id,
-          tableName: check.tableName,
-          course,
-          firedAt: new Date().toISOString(),
-          status: "open",
-          items: lines.map((l) => ({
-            orderItemId: l.id,
-            name: l.capturedName,
-            quantity: l.quantity,
-            station: l.station,
-            mods: describeSelections(groups, l.modifiers),
-            allergy: hasAllergy(groups, l.modifiers),
-            done: false,
-          })),
+      const unsent = check.lines.filter((l) => l.status === "unsent");
+      if (unsent.length === 0) return { kind: "rejected", reason: "nothing unsent to fire" };
+      const held = new Set(check.heldCourses ?? []);
+      const targets = unsent.filter((l) => !held.has(l.course));
+      if (targets.length === 0) {
+        // never a silent no-op: somebody pressed Send and the kitchen got
+        // nothing, so say which courses are sitting on hold
+        const names = [...new Set(unsent.map((l) => l.course))];
+        return {
+          kind: "rejected",
+          reason: `everything unsent is held: ${names.join(", ")}. Fire a course from its own chip when the table is ready.`,
         };
-        await this.store.putTicket(ticket);
-        tickets.push(ticket);
       }
-      return { kind: "applied", check: toView(check), tickets };
+      const fired = await this.fireLines(check, targets);
+      if (!fired.ok) return { kind: "rejected", reason: fired.reason };
+      const waiting = new Map<string, number>();
+      for (const l of unsent) {
+        if (held.has(l.course)) waiting.set(l.course, (waiting.get(l.course) ?? 0) + 1);
+      }
+      const note = [...waiting].map(([course, n]) => `${course} held, ${n} item(s) waiting`).join("; ");
+      return { kind: "applied", check: toView(check), tickets: fired.tickets, ...(note ? { note } : {}) };
     });
   }
 
@@ -608,6 +607,7 @@ export class Engine {
       const r = orderItemTransition(line.status, { type: "void_item", approved: approver !== undefined });
       if (!r.ok) return { kind: "rejected", reason: approver ? r.reason : this.managerRefusal(input.managerPin, "voiding an item") };
       line.status = r.next;
+      line.voidedAt = new Date().toISOString();
       line.voidReason = input.reason.trim();
       line.voidedBy = this.actorId(envelope) ?? approver!.id;
       line.voidApprovedBy = approver!.id;
@@ -663,6 +663,7 @@ export class Engine {
         reason: input.reason.trim(),
         appliedBy: this.actorId(envelope) ?? approver.id,
         approvedBy: approver.id,
+        appliedAt: new Date().toISOString(),
       });
       return { kind: "applied", check: toView(check) };
     });
@@ -806,6 +807,7 @@ export class Engine {
         tipMinor: input.tipMinor ?? 0,
         status: input.method === "card" && input.offline ? "accepted_offline" : "authorized",
         ...(this.actorId(envelope) ? { takenBy: this.actorId(envelope) } : {}),
+        takenAt: new Date().toISOString(),
       });
       check.status = r.next;
       if (drawer) {
@@ -834,6 +836,7 @@ export class Engine {
       const r = checkTransition(check.status, { type: "reopen", approved: true });
       if (!r.ok) return { kind: "rejected", reason: r.reason };
       check.status = r.next;
+      check.reopenedAt = new Date().toISOString();
       delete check.closedAt;
       return { kind: "applied", check: toView(check) };
     });
@@ -1502,6 +1505,215 @@ export class Engine {
     const cellList = [...cells.values()].sort((a, b) => a.day - b.day || a.hour - b.hour);
     return { cells: cellList, dayTotals, grandNetMinor, daysCovered: dates.size };
   }
+
+  /* ----------------------- courses: hold and fire (E8-T3) -----------------------
+   * Real service is coursed: beverages go now, primi when the antipasti clear,
+   * secondi when the table is ready. The engine already made one kitchen ticket
+   * per course; what was missing was the control on the check, so Send fired
+   * the whole order at once. These three commands are that control, and the
+   * flagship mockup's Hold / Fire now chips are their spec.
+   *
+   * Holds are not a kitchen state: nothing is dispatched, so the KDS never
+   * hears about a held course, and a held line is still an unsent line, which
+   * means it still blocks payment (FR-26). Nothing about the state machines
+   * changes.
+   */
+
+  /** The canonical spelling of a course, from the live menu or from this
+   *  check's own lines. Keyed this way so "primi" from some client cannot
+   *  create a hold that the POS, which speaks in PRIMI, can never see. */
+  private async resolveCourse(check: CheckAggregate, input: string): Promise<string | undefined> {
+    const wanted = (input ?? "").trim().toLowerCase();
+    if (!wanted) return undefined;
+    const snapshot = await this.store.getActiveSnapshot();
+    const known = [
+      ...snapshot.items.map((i) => i.course as string),
+      ...check.lines.map((l) => l.course),
+      ...(check.heldCourses ?? []),
+    ];
+    return known.find((c) => c.toLowerCase() === wanted);
+  }
+
+  /** A hold going on or coming off, for the history. Capped: the sync journal
+   *  keeps every operation forever, this is the readable story. */
+  private logCourse(check: CheckAggregate, course: string, action: "held" | "released"): void {
+    const log = [...(check.courseEvents ?? []), { at: new Date().toISOString(), course, action }];
+    check.courseEvents = log.slice(-COURSE_LOG_LIMIT);
+  }
+
+  /**
+   * Dispatch a set of unsent lines: one ticket per course, the shape the KDS
+   * reads. Shared by Send and by a single course's Fire.
+   *
+   * Every transition is checked BEFORE any line is mutated, because the memory
+   * store hands out the live aggregate: a refusal halfway through would leave
+   * half the order dispatched with nothing persisted to say so.
+   */
+  private async fireLines(
+    check: CheckAggregate,
+    targets: readonly OrderLine[],
+  ): Promise<{ ok: true; tickets: KitchenTicket[] } | { ok: false; reason: string }> {
+    const groups = (await this.store.getActiveSnapshot()).groups;
+    for (const line of targets) {
+      const r = orderItemTransition(line.status, { type: "dispatch" });
+      if (!r.ok) return { ok: false, reason: r.reason };
+    }
+    for (const line of targets) {
+      const r = orderItemTransition(line.status, { type: "dispatch" });
+      if (r.ok) line.status = r.next;
+    }
+    const byCourse = new Map<string, OrderLine[]>();
+    for (const line of targets) {
+      const list = byCourse.get(line.course) ?? [];
+      list.push(line);
+      byCourse.set(line.course, list);
+    }
+    const tickets: KitchenTicket[] = [];
+    for (const [course, lines] of byCourse) {
+      const ticket: KitchenTicket = {
+        id: randomUUID(),
+        checkId: check.id,
+        tableName: check.tableName,
+        course,
+        firedAt: new Date().toISOString(),
+        status: "open",
+        items: lines.map((l) => ({
+          orderItemId: l.id,
+          name: l.capturedName,
+          quantity: l.quantity,
+          station: l.station,
+          mods: describeSelections(groups, l.modifiers),
+          allergy: hasAllergy(groups, l.modifiers),
+          done: false,
+        })),
+      };
+      await this.store.putTicket(ticket);
+      tickets.push(ticket);
+    }
+    return { ok: true, tickets };
+  }
+
+  /** Hold a course back. Allowed with nothing ordered in it yet: the table
+   *  says "hold the secondi" before the secondi exist. No PIN: this is service,
+   *  not an approval. */
+  async holdCourse(envelope: Envelope, checkId: string, input: { course: string }): Promise<CommandOutcome> {
+    return this.run(envelope, checkId, async (check) => {
+      if (check.status === "closed" || check.status === "voided") {
+        return { kind: "rejected", reason: `cannot hold a course on a ${check.status} check` };
+      }
+      const course = await this.resolveCourse(check, input.course);
+      if (!course) return { kind: "rejected", reason: `unknown course ${input.course}` };
+      const held = check.heldCourses ?? [];
+      if (!held.includes(course)) {
+        check.heldCourses = [...held, course];
+        this.logCourse(check, course, "held");
+      }
+      const waiting = check.lines.filter((l) => l.status === "unsent" && l.course === course).length;
+      return {
+        kind: "applied",
+        check: toView(check),
+        note: `${course} held${waiting ? `, ${waiting} item(s) waiting` : ""}`,
+      };
+    });
+  }
+
+  /** Take the hold off without firing: the next Send will include it. */
+  async releaseCourse(envelope: Envelope, checkId: string, input: { course: string }): Promise<CommandOutcome> {
+    return this.run(envelope, checkId, async (check) => {
+      if (check.status === "closed" || check.status === "voided") {
+        return { kind: "rejected", reason: `cannot release a course on a ${check.status} check` };
+      }
+      const course = await this.resolveCourse(check, input.course);
+      if (!course) return { kind: "rejected", reason: `unknown course ${input.course}` };
+      const held = check.heldCourses ?? [];
+      if (held.includes(course)) {
+        check.heldCourses = held.filter((c) => c !== course);
+        this.logCourse(check, course, "released");
+        return { kind: "applied", check: toView(check), note: `${course} released, it fires with the next Send` };
+      }
+      return { kind: "applied", check: toView(check), note: `${course} was not held` };
+    });
+  }
+
+  /** Fire one course now: its unsent lines become one kitchen ticket and the
+   *  hold comes off, because the guests are ready. */
+  async fireCourse(envelope: Envelope, checkId: string, input: { course: string }): Promise<CommandOutcome> {
+    return this.run(envelope, checkId, async (check) => {
+      if (check.status === "closed" || check.status === "voided") {
+        return { kind: "rejected", reason: `cannot fire a course on a ${check.status} check` };
+      }
+      const course = await this.resolveCourse(check, input.course);
+      if (!course) return { kind: "rejected", reason: `unknown course ${input.course}` };
+      const targets = check.lines.filter((l) => l.status === "unsent" && l.course === course);
+      if (!targets.length) return { kind: "rejected", reason: `nothing unsent in ${course} to fire` };
+      const fired = await this.fireLines(check, targets);
+      if (!fired.ok) return { kind: "rejected", reason: fired.reason };
+      // firing releases the hold, and the ticket's firedAt is the record of it,
+      // so this is deliberately not logged as a release too
+      check.heldCourses = (check.heldCourses ?? []).filter((c) => c !== course);
+      return {
+        kind: "applied",
+        check: toView(check),
+        tickets: fired.tickets,
+        note: `${course} fired to kitchen, ${targets.length} item(s)`,
+      };
+    });
+  }
+
+  /**
+   * The check's own story (E8-T3), assembled from what is already stored.
+   * Nothing here is persisted and no timestamp is invented: a check written
+   * before this ticket has fewer entries, which is the honest answer rather
+   * than a plausible one. Money is spelled out because this is a sentence a
+   * human reads, not a figure anything computes from.
+   */
+  async checkHistory(id: string) {
+    const check = await this.store.get(id);
+    if (!check) return undefined;
+    const tickets = (await this.store.listTickets()).filter((t) => t.checkId === id);
+    const entries: { at: string; kind: string; summary: string }[] = [];
+    const add = (at: string | undefined, kind: string, summary: string) => {
+      if (at) entries.push({ at, kind, summary });
+    };
+
+    add(check.openedAt, "opened",
+      `Check #${check.checkNo} opened on ${check.tableName}, ${check.covers} cover(s)`
+      + (check.serverName ? ` by ${check.serverName}` : ""));
+    for (const l of check.lines) {
+      add(l.addedAt, "item_added", `${l.quantity}x ${l.capturedName} added to ${l.course}, seat ${l.seatNo}`);
+      if (l.status === "voided") {
+        add(l.voidedAt, "voided",
+          `${l.quantity}x ${l.capturedName} voided` + (l.voidReason ? `: ${l.voidReason}` : ""));
+      }
+    }
+    for (const e of check.courseEvents ?? []) add(e.at, `course_${e.action}`, `${e.course} ${e.action}`);
+    for (const t of tickets) {
+      add(t.firedAt, "fired", `${t.course} fired to kitchen, ${t.items.length} item(s)`);
+      add(t.servedAt, "served", `${t.course} served`);
+    }
+    for (const a of check.adjustments) {
+      add(a.appliedAt, "adjustment", `${a.label} applied: ${a.reason}`);
+    }
+    for (const p of check.payments) {
+      add(p.takenAt, "payment",
+        `${p.label} paid ${usd(p.amountMinor)} by ${p.method}`
+        + (p.tipMinor ? ` plus ${usd(p.tipMinor)} tip` : "")
+        + (p.status === "accepted_offline" ? ", pending upload" : ""));
+    }
+    add(check.reopenedAt, "reopened", "Reopened by a manager");
+    add(check.closedAt, "closed", "Check closed");
+
+    entries.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
+    return {
+      checkId: check.id,
+      checkNo: check.checkNo,
+      tableName: check.tableName,
+      status: check.status,
+      heldCourses: check.heldCourses ?? [],
+      entries,
+    };
+  }
+
 
   /* --------------------------- guestbook (E20) ---------------------------
    * The v0 rung of the D20 ladder: a guest record staff attach by hand, and a
