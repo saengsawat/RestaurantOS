@@ -845,10 +845,44 @@ describe("reads", () => {
     // and the Tips tile takes declared cash from the server's own total
     // rather than summing the scorecard rows (E19-T3)
     expect(page.body).toContain("declaredTipsTotalMinor");
-    // and every other page can reach it
+    // and every other page can reach it, now through its rail entry (UI-T1)
     for (const url of ["/pos", "/tables", "/kds", "/menu", "/close"]) {
-      expect((await app.inject({ method: "GET", url })).body).toContain('href="/reports"');
+      expect((await app.inject({ method: "GET", url })).body).toContain('class="nav-btn" href="/reports"');
     }
+  });
+
+  /* UI-T1: the shell DESIGN.md section 5 prescribes. Navigation is a place you
+   * go, so it is the left icon rail with its badge counts; the topbar is where
+   * you are. The markup is duplicated per page (each page is a self-contained
+   * zero-dependency file), so the assertion runs over all six to keep the six
+   * copies from drifting apart. */
+  it("gives all six navigable pages the app shell: rail navigates, topbar identifies", async () => {
+    const app = buildServer();
+    const screens = ["/pos", "/tables", "/kds", "/menu", "/close", "/reports"];
+    for (const url of screens) {
+      const body = (await app.inject({ method: "GET", url })).body;
+      expect(body).toContain('<nav class="navrail" aria-label="Screens">');
+      expect(body).toContain('class="shellbody"');
+      // every screen is reachable from every screen, and exactly one entry is
+      // marked current: the one you are on
+      for (const dest of screens) expect(body).toContain(`href="${dest}"`);
+      expect(body.match(/class="nav-btn on" aria-current="page"/g)).toHaveLength(1);
+      expect(body).toContain(`class="nav-btn on" aria-current="page" href="${url}"`);
+      // six icons, inline SVG in one stroke style, never emoji
+      expect(body.match(/<svg viewBox="0 0 24 24" aria-hidden="true">/g)).toHaveLength(6);
+      // the rail carries the two live counts the data already supports
+      expect(body).toContain('id="navTables"');
+      expect(body).toContain('id="navKds"');
+      // the topbar keeps identity, screen, and session state, and nothing to
+      // navigate with: the old row of nav pills is gone
+      expect(body).toContain('<header class="topbar">');
+      expect(body).toContain('class="screen-title"');
+      expect(body).not.toContain('<nav class="nav">');
+      // and the shell is still sized with --vph, never a percentage height
+      expect(body).toContain("height:var(--vph)");
+    }
+    // the lock screen stays a fullscreen PIN pad: no rail, nowhere to go yet
+    expect((await app.inject({ method: "GET", url: "/" })).body).not.toContain("navrail");
   });
 
   it("serves the KDS, Tables, and Close pages and the floor", async () => {

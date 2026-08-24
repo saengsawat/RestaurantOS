@@ -17,6 +17,7 @@
   --line:rgba(242,241,236,.10);--line-subtle:rgba(242,241,236,.05);
   --ring:0 0 0 1px rgba(242,241,236,.10);
   --font:"Inter",ui-sans-serif,system-ui,sans-serif;--mono:ui-monospace,Consolas,monospace;
+  --rail:86px;--topbar:56px;--tap:44px;--safe-b:env(safe-area-inset-bottom,0px);
   --vph:100vh;
 }
 @supports (height:100dvh){:root{--vph:100dvh}}
@@ -29,15 +30,6 @@ button:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
 .num{font-variant-numeric:tabular-nums}
 @keyframes latePulse{0%,100%{box-shadow:var(--ring),0 0 0 0 var(--red-line)}50%{box-shadow:var(--ring),0 0 0 6px transparent}}
 
-.topbar{display:flex;align-items:center;gap:12px;background:var(--panel);border-bottom:1px solid var(--line);
-  padding:0 16px;min-height:54px}
-.logo{width:32px;height:32px;border-radius:999px;background:var(--brand);color:var(--brand-ink);
-  display:flex;align-items:center;justify-content:center;font-weight:800}
-.t b{font-size:15px}
-.t small{display:block;font-size:10px;color:var(--ink-4);letter-spacing:.05em;text-transform:uppercase}
-.nav{margin-left:auto;display:flex;gap:6px}
-.nav a{color:var(--ink-3);text-decoration:none;font-size:13px;font-weight:600;padding:8px 14px;border-radius:999px}
-.nav a.on{background:var(--brand-wash);color:var(--ink)}
 
 .wrap{flex:1;display:flex;gap:14px;min-height:0;padding:14px 16px}
 .side{width:230px;flex-shrink:0;overflow-y:auto}
@@ -105,17 +97,113 @@ button:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
   .flow{flex-wrap:wrap;overflow:visible}
   .ticket{max-width:none;width:100%}
 }
+/* ============================================================
+   APP SHELL (UI-T1, DESIGN.md section 5 "App shell")
+   Navigation is a place you go, so it lives in the left icon rail with
+   its badge counts. The topbar is where you are: venue, screen, and
+   session state, nothing you navigate with. Icons are inline SVG in one
+   stroke style, never emoji.
+
+   This block is duplicated verbatim on all six navigable pages. Each
+   page is a self-contained zero-dependency file, so duplication is the
+   accepted cost; keep the block identical everywhere so extracting it
+   later is mechanical rather than a merge.
+   ============================================================ */
+/* minmax(0,1fr), not 1fr: a grid item's automatic minimum is its
+   min-content width, so one unshrinkable chip in the topbar would push
+   the whole shell wider than the phone and the page would scroll
+   sideways. The content column is allowed to be narrower than its
+   contents; the contents clip or ellipsis instead. */
+.shell{display:grid;grid-template-columns:var(--rail) minmax(0,1fr);grid-template-rows:var(--topbar) 1fr;
+  height:var(--vph);overflow:hidden}
+.navrail{grid-row:1/3;background:var(--panel);border-right:1px solid var(--line);overflow-y:auto;
+  display:flex;flex-direction:column;align-items:center;gap:4px;padding:12px 0 14px;
+  transition:background-color .25s ease,border-color .25s ease}
+.rail-logo{width:38px;height:38px;flex-shrink:0;border-radius:999px;background:var(--brand);color:var(--brand-ink);
+  display:flex;align-items:center;justify-content:center;font-weight:800;font-size:17px;margin-bottom:12px}
+.nav-btn{width:66px;min-height:var(--tap);flex-shrink:0;padding:7px 0 6px;border-radius:12px;text-decoration:none;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;position:relative;
+  color:var(--ink-3);font-size:11px;font-weight:600;transition:background-color .15s ease,color .15s ease}
+.nav-btn svg{width:23px;height:23px;fill:none;stroke:currentColor;stroke-width:1.8;
+  stroke-linecap:round;stroke-linejoin:round}
+.nav-btn:active{transform:scale(.96)}
+.nav-btn.on{background:var(--brand-wash);color:var(--ink)}
+.nav-btn:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+/* the badge sits over the icon, never over the label: text that wraps and a
+   badge that floats collide the moment the rail narrows */
+.nav-badge{position:absolute;top:2px;right:8px;min-width:18px;height:18px;padding:0 5px;border-radius:999px;
+  background:var(--red);color:#fff;font-size:11px;font-weight:700;line-height:18px;text-align:center;
+  font-variant-numeric:tabular-nums}
+.nav-badge:empty{display:none}
+.rail-spacer{flex:1}
+.rail-foot{font-size:10px;color:var(--ink-4);text-align:center;padding:0 8px;line-height:1.35}
+.topbar{display:flex;align-items:center;gap:12px;min-width:0;overflow:hidden;padding:0 16px;
+  background:var(--panel);border-bottom:1px solid var(--line);
+  transition:background-color .25s ease,border-color .25s ease}
+.venue{min-width:0}
+.venue b{display:block;font-size:15px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.venue small{display:block;font-size:10px;color:var(--ink-4);letter-spacing:.05em;text-transform:uppercase;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.screen-title{flex-shrink:0;font-size:13px;font-weight:700;color:var(--ink-2);
+  background:var(--surface-2);border-radius:999px;padding:5px 12px;white-space:nowrap}
+.top-meta{margin-left:auto;display:flex;align-items:center;gap:10px;flex-shrink:0}
+.shellbody{min-width:0;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+@media (hover:hover){
+  .nav-btn:hover{background:var(--surface-2);color:var(--ink)}
+  .nav-btn.on:hover{background:var(--brand-wash)}
+}
+@media (hover:none){.nav-btn:hover{background:none;color:var(--ink-3)}.nav-btn.on:hover{background:var(--brand-wash);color:var(--ink)}}
+@media (max-width:980px) and (min-width:821px){
+  :root{--rail:64px}
+  .nav-btn{width:52px;font-size:0;gap:0}
+  .nav-btn svg{width:25px;height:25px}
+  .rail-foot{display:none}
+}
+/* Phones: the rail becomes the bottom tab bar (DESIGN.md section 8), safe
+   area included, and the topbar stays one row. The screen title goes with
+   the rail: the active tab already says which screen you are on, and the
+   row is worth more to the session chrome than to a second label. */
+@media (max-width:820px){
+  .shell{grid-template-columns:minmax(0,1fr)}
+  .navrail{position:fixed;left:0;right:0;bottom:0;top:auto;grid-row:auto;z-index:150;overflow:visible;
+    flex-direction:row;justify-content:space-around;align-items:center;gap:2px;
+    height:calc(58px + var(--safe-b));padding:4px 4px calc(4px + var(--safe-b));
+    border-right:none;border-top:1px solid var(--line)}
+  .rail-logo,.rail-spacer,.rail-foot,.screen-title{display:none}
+  .nav-btn{width:auto;flex:1;min-height:48px;font-size:10px;gap:1px;padding:4px 0}
+  .nav-btn svg{width:21px;height:21px}
+  .shellbody{padding-bottom:calc(58px + var(--safe-b))}
+  .topbar{padding:0 12px;gap:8px}
+  .venue small{display:none}
+}
 </style>
 </head>
 <body>
-<header class="topbar">
-  <div class="logo">R</div>
-  <div class="t"><b>Kitchen · Osteria Nove</b><small>RestaurantOS KDS · live from the server</small></div>
-  <nav class="nav"><a href="/pos">Service</a><a href="/tables">Tables</a><a href="/kds" class="on">Kitchen</a><a href="/menu">Menu</a><a href="/close">Close</a><a href="/reports">Reports</a></nav>
-</header>
+<div class="shell">
+  <!-- ===== APP SHELL: navigation rail (UI-T1). Identical markup on all six
+       navigable pages; only which entry carries "on" differs. ===== -->
+  <nav class="navrail" aria-label="Screens">
+    <div class="rail-logo" aria-hidden="true">R</div>
+    <a class="nav-btn" href="/pos"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3.5h12v17l-3-1.8-3 1.8-3-1.8-3 1.8z"/><path d="M9.2 8.6h5.6M9.2 12.6h5.6"/></svg>Service</a>
+    <a class="nav-btn" href="/tables"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="5"/><path d="M12 3.6v2.2M12 18.2v2.2M3.6 12h2.2M18.2 12h2.2"/></svg>Tables<span class="nav-badge" id="navTables"></span></a>
+    <a class="nav-btn on" aria-current="page" href="/kds"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 18.6h17"/><path d="M5.5 18.6a6.5 6.5 0 0 1 13 0"/><path d="M12 12.1V9.9"/></svg>Kitchen<span class="nav-badge" id="navKds"></span></a>
+    <a class="nav-btn" href="/menu"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5.6" cy="7" r="1.1"/><circle cx="5.6" cy="12" r="1.1"/><circle cx="5.6" cy="17" r="1.1"/><path d="M9.6 7h8.8M9.6 12h8.8M9.6 17h8.8"/></svg>Menu</a>
+    <a class="nav-btn" href="/close"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="7.5" width="17" height="11" rx="2.5"/><path d="M3.5 12.6h17M10 15.8h4"/></svg>Close</a>
+    <a class="nav-btn" href="/reports"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.6 19.6h16.8"/><path d="M6.6 19.6v-6.4M12 19.6V5.4M17.4 19.6v-9"/></svg>Reports</a>
+    <div class="rail-spacer"></div>
+    <div class="rail-foot">Concept build.<br>Demo data only.</div>
+  </nav>
+  <header class="topbar">
+    <div class="venue"><b>Osteria Nove</b><small>RestaurantOS KDS · live from the server</small></div>
+    <div class="screen-title">Kitchen</div>
+    <div class="top-meta"></div>
+  </header>
+  <div class="shellbody">
 <div class="wrap">
   <aside class="side"><div class="side-t">Cook together</div><div id="agg"></div></aside>
   <div class="flow" id="flow"></div>
+</div>
+  </div>
 </div>
 <div class="toasts" id="toasts"></div>
 
@@ -225,6 +313,21 @@ function setViewportH(){document.documentElement.style.setProperty("--vph",windo
 addEventListener("resize",setViewportH);setViewportH();
 refresh().catch(()=>toast("Cannot reach the server","err"));
 setInterval(()=>refresh().catch(()=>{}),3000);
+/* ---------- APP SHELL: rail badge counts (UI-T1) ----------
+   Two cheap reads on the rail's own timer, so no page's existing poll
+   changes shape. Identical on all six pages. Failure is silent: a badge
+   that cannot be read must never be louder than the screen behind it. */
+async function railBadges(){
+  const [checks,kds]=await Promise.all([
+    fetch("/v1/checks").then(r=>r.json()),
+    fetch("/v1/kds").then(r=>r.json()),
+  ]);
+  railBadge("navTables",(checks.checks||[]).filter(c=>c.status!=="closed"&&c.status!=="voided").length);
+  railBadge("navKds",(kds.tickets||[]).filter(t=>t.status==="open").length);
+}
+function railBadge(id,n){const el=document.getElementById(id);if(el)el.textContent=n>0?String(n):"";}
+railBadges().catch(()=>{});
+setInterval(()=>railBadges().catch(()=>{}),10000);
 </script>
 </body>
 </html>
