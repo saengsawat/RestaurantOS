@@ -825,6 +825,15 @@ describe("reads", () => {
     expect(pos.body).toContain('id="chGuests"');
     expect(pos.body).toContain("/v1/guests");
     expect(pos.body).toContain("Create and attach");
+    // UI-T2: the menu is navigated by category, one category of tiles at a
+    // time, rather than one scroll of the whole menu
+    expect(pos.body).toContain('<div class="catrail" id="catRail"></div>');
+    expect(pos.body).toContain('<div class="tiles" id="tiles"></div>');
+    expect(pos.body).toContain('class="cat-btn" data-cat=');
+    // the rail reads COURSES until E5-full lands real categories, and says so
+    expect(pos.body).toContain('BEVERAGE:{name:"Beverage",note:"fires immediately"}');
+    expect(pos.body).toContain('PRIMI:{name:"Primi",note:"course 2"}');
+    expect(pos.body).toContain("When E5-full lands real menu categories");
   });
 
   it("serves the Reports page at /reports, and /insights still lands (E19-T4)", async () => {
