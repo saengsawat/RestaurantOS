@@ -217,7 +217,25 @@ button.li:active{background:var(--surface-2)}
 .opt{min-height:38px;border-radius:999px;padding:6px 14px;font-size:13px;font-weight:600;
   background:var(--surface-2);color:var(--ink-2);border:1.5px solid transparent}
 .opt:active{transform:scale(.95)}
+/* a table smaller than the party: muted, never disabled. Pulling up a chair
+   is normal service, so this is a nudge and the pill stays tappable (UI-T4) */
+.opt.tight{color:var(--ink-4)}
+.opt.tight .cap{color:var(--amber)}
 .opt.on{background:var(--brand-wash);color:var(--ink);border-color:var(--brand)}
+/* armed: tapped once while muted, waiting for the tap that means "yes, squeeze
+   them in". Amber because this is attention, not a refusal. */
+.opt.armed{background:var(--amber-wash);color:var(--amber);border-color:var(--amber)}
+.opt.armed .cap{color:var(--amber)}
+.cap{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12.5px;color:var(--ink-3)}
+.arealbl{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);
+  margin:10px 2px 5px}
+.arealbl:first-child{margin-top:0}
+/* the walk-in row is not part of the last section of the room, and a hairline
+   is enough to say so without inventing a label for "no table" */
+.walkrow{margin-top:10px;padding-top:10px;border-top:1px solid var(--line-subtle)}
+.capnote{display:none;margin:2px 0 6px;padding:9px 12px;border-radius:10px;line-height:1.45;
+  font-size:12.5px;font-weight:600;color:var(--amber);background:var(--amber-wash);border:1px solid var(--amber-line)}
+.capnote.on{display:block}
 .childwrap{margin:8px 0 2px 14px;padding-left:10px;border-left:2px solid var(--line)}
 .qty{display:flex;align-items:center;gap:12px;margin:2px 0 12px}
 .qty button{width:42px;height:42px;border-radius:999px;background:var(--surface-2);font-size:19px}
@@ -474,7 +492,8 @@ textarea.fld{min-height:72px;resize:vertical;font:inherit;color:inherit;line-hei
 <div class="ov" id="ovNew"><div class="modal">
   <div class="m-h"><div><h3>New check</h3><div class="sub">Pick a free table (live from the floor)</div></div><button class="m-x" data-close="ovNew">✕</button></div>
   <div class="m-b">
-    <div class="og"><div class="og-h">Table</div><div class="opts" id="newTables"></div></div>
+    <div class="og"><div class="og-h">Table</div><div id="newTables"></div></div>
+    <p class="capnote" id="newNote"></p>
     <div class="og"><div class="og-h">Covers</div><div class="opts" id="newCovers"></div></div>
   </div>
   <div class="m-f"><button class="btn btn-p" id="newGo">Open check</button></div>
@@ -857,24 +876,74 @@ function describeMods(sels){
   return names.join(" · ");
 }
 
-/* ---------- new check: pick a free table from the live floor ---------- */
+/* ---------- new check: pick a free table from the live floor ----------
+   The floor read this modal already makes carries every table's seats and
+   area, so the modal shows the room instead of a list of names (UI-T4): the
+   count on each pill, the pills grouped the way the room is, and a soft guard
+   when the party is bigger than the table. Soft on purpose. Squeezing six
+   around a four-top is ordinary service, so the guard costs one extra tap and
+   never refuses; the engine is not asked to enforce anything new. */
+const WALKIN="Walk-in";
+const newSel={tables:[],table:WALKIN,covers:2,armed:null};
+
+/** The table under `name` when it seats fewer than the party, else null.
+ *  Walk-in has no seats and is never tight: it is the absence of a table. */
+function tightTable(name,covers){
+  const t=newSel.tables.find(x=>x.name===name);
+  return t&&t.seats<covers?t:null;
+}
+
+function renderNew(){
+  // areas in the floor's own order, which is the order the room was drawn in
+  const areas=[...new Set(newSel.tables.map(t=>t.area))];
+  $("#newTables").innerHTML=areas.map(a=>
+    `<div class="arealbl">${esc(a)}</div><div class="opts">`+newSel.tables.filter(t=>t.area===a).map(t=>{
+      const cls=[t.name===newSel.table?"on":"",t.seats<newSel.covers?"tight":"",t.name===newSel.armed?"armed":""]
+        .filter(Boolean).join(" ");
+      return `<button class="opt tall ${cls}" data-tn="${esc(t.name)}">${esc(t.name)} · <span class="cap">${t.seats}</span></button>`;
+    }).join("")+`</div>`).join("")
+    // a walk-in belongs to no section of the room, so it sits on its own line
+    +`<div class="opts walkrow"><button class="opt tall ${newSel.table===WALKIN?"on":""}" data-tn="${WALKIN}">${WALKIN}</button></div>`;
+  document.querySelectorAll("#newTables .opt").forEach(b=>b.onclick=()=>pickTable(b.dataset.tn));
+  $("#newCovers").innerHTML=[1,2,3,4,5,6,7,8].map(n=>
+    `<button class="opt ${n===newSel.covers?"on":""}" data-n="${n}">${n}</button>`).join("");
+  document.querySelectorAll("#newCovers .opt").forEach(b=>b.onclick=()=>pickCovers(+b.dataset.n));
+  renderNewNote();
+}
+
+/* The note, both directions: armed by tapping a muted table (and then it asks
+   for the second tap), or simply stated when the party outgrew the table that
+   was already picked. Changing either the table or the covers re-derives it,
+   which is what clears it. */
+function renderNewNote(){
+  const armed=newSel.armed?tightTable(newSel.armed,newSel.covers):null;
+  const picked=!armed&&newSel.table?tightTable(newSel.table,newSel.covers):null;
+  const t=armed||picked;
+  $("#newNote").textContent=t
+    ?`Party of ${newSel.covers} on ${t.name}, which seats ${t.seats}.${armed?" Tap again to squeeze them in.":""}`
+    :"";
+  $("#newNote").classList.toggle("on",!!t);
+}
+
+function pickTable(name){
+  // first tap on a muted table arms it, second tap takes it
+  if(tightTable(name,newSel.covers)&&newSel.armed!==name&&newSel.table!==name){newSel.armed=name;renderNew();return;}
+  newSel.table=name;newSel.armed=null;renderNew();
+}
+function pickCovers(n){newSel.covers=n;newSel.armed=null;renderNew();}
+
 $("#btnNew").onclick=async()=>{
   const floor=(await fetch("/v1/floor").then(r=>r.json())).tables;
-  const free=floor.filter(t=>!t.check);
-  $("#newTables").innerHTML=(free.length?free.map((t,i)=>
-    `<button class="opt ${i===0?"on":""}" data-tn="${esc(t.name)}">${esc(t.name)}</button>`).join(""):"")+
-    `<button class="opt ${free.length?"":"on"}" data-tn="Walk-in">Walk-in</button>`;
-  document.querySelectorAll("#newTables .opt").forEach(b=>b.onclick=()=>{
-    document.querySelectorAll("#newTables .opt").forEach(x=>x.classList.toggle("on",x===b));});
-  $("#newCovers").innerHTML=[1,2,3,4,5,6,7,8].map(n=>
-    `<button class="opt ${n===2?"on":""}" data-n="${n}">${n}</button>`).join("");
-  document.querySelectorAll("#newCovers .opt").forEach(b=>b.onclick=()=>{
-    document.querySelectorAll("#newCovers .opt").forEach(x=>x.classList.toggle("on",x===b));});
+  newSel.tables=floor.filter(t=>!t.check);
+  newSel.table=newSel.tables.length?newSel.tables[0].name:WALKIN;
+  newSel.covers=2;
+  newSel.armed=null;
+  renderNew();
   openOv("ovNew");
 };
 $("#newGo").onclick=async()=>{
-  const tableName=(document.querySelector("#newTables .opt.on")||{dataset:{tn:"Walk-in"}}).dataset.tn;
-  const covers=+((document.querySelector("#newCovers .opt.on")||{}).dataset||{n:2}).n||2;
+  const tableName=newSel.table||WALKIN;
+  const covers=newSel.covers||2;
   const r=await api("/v1/checks",{tableName,covers});
   closeOv("ovNew");
   state.currentId=r.check.id;

@@ -861,6 +861,16 @@ describe("reads", () => {
     expect(pos.body).toContain("Void this line");
     expect(pos.body).toContain("openLine(b.dataset.l)");
     expect(pos.body).not.toContain("Tap to void");
+    // UI-T4: the New check modal reads the room off the floor it already
+    // fetches, and guards capacity softly
+    expect(pos.body).toContain('class="arealbl"');
+    expect(pos.body).toContain('<span class="cap">${t.seats}</span>');
+    expect(pos.body).toContain("t.seats<newSel.covers?\"tight\"");
+    expect(pos.body).toContain('id="newNote"');
+    expect(pos.body).toContain("Tap again to squeeze them in.");
+    expect(pos.body).toContain("function tightTable(");
+    // soft means soft: no browser confirm anywhere on the page
+    expect(pos.body).not.toContain("confirm(");
   });
 
   it("serves the Reports page at /reports, and /insights still lands (E19-T4)", async () => {
