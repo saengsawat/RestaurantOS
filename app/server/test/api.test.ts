@@ -344,6 +344,272 @@ describe("the floor layout editor (E6)", () => {
   });
 });
 
+/* --------------------------- the floor EDITOR (E6-T2) ---------------------------
+ * Moving a table was always allowed. Drawing the room is new, and every
+ * structural command is a manager act with history hanging off it. */
+
+describe("drawing the room (E6-T2)", () => {
+  const MGR = "1122"; // Marco B.
+  const SRV = "2468"; // Gia R., a server: never enough to reshape the room
+
+  const tables = async (app: ReturnType<typeof buildServer>) =>
+    (await app.inject({ method: "GET", url: "/v1/floor" })).json().tables as
+      { name: string; area: string; seats: number; shape: string; x: number; y: number; w: number; h: number }[];
+  const named = async (app: ReturnType<typeof buildServer>, name: string) =>
+    (await tables(app)).find((t) => t.name === name);
+
+  const add = (app: ReturnType<typeof buildServer>, n: number, body: Record<string, unknown>) =>
+    app.inject({ method: "POST", url: "/v1/floor/add",
+      payload: { ...ENV(n), managerPin: MGR, area: "Dehors", seats: 4, shape: "rect", x: 10, y: 10, w: 14, h: 20, ...body } });
+
+  /** Take an open check all the way out: ordered, fired, paid, closed, and the
+   *  kitchen card bumped and served, so nothing is left holding the name.
+   *  A check cannot close from 'open', which is exactly why retiring a table
+   *  takes real work rather than a keystroke. */
+  async function runOut(app: ReturnType<typeof buildServer>, id: string, tableName: string) {
+    await app.inject({ method: "POST", url: `/v1/checks/${id}/items`,
+      payload: { ...ENV(0), itemId: "acqua", quantity: 1, seatNo: 1 } });
+    await app.inject({ method: "POST", url: `/v1/checks/${id}/send`, payload: ENV(0) });
+    const due = (await app.inject({ method: "GET", url: `/v1/checks/${id}` })).json().check.totals.dueMinor as number;
+    await app.inject({ method: "POST", url: `/v1/checks/${id}/payments`,
+      payload: { ...ENV(0), method: "card", amountMinor: due } });
+    const closed = await app.inject({ method: "POST", url: `/v1/checks/${id}/close`, payload: ENV(0) });
+    expect(closed.statusCode).toBe(200);
+    for (const t of (await app.inject({ method: "GET", url: "/v1/kds" })).json().tickets) {
+      for (const i of t.items) {
+        await app.inject({ method: "POST", url: "/v1/kds/toggle",
+          payload: { ...ENV(0), ticketId: t.id, orderItemId: i.orderItemId } });
+      }
+    }
+    await app.inject({ method: "POST", url: "/v1/kds/serve", payload: { ...ENV(0), tableName } });
+  }
+
+  it("adds a table into a brand-new area, and replays the operation once", async () => {
+    const app = buildServer();
+    const before = await tables(app);
+
+    const res = await add(app, 1, { name: "Dehors 1", shape: "booth", seats: 6 });
+    expect(res.statusCode).toBe(200);
+
+    const after = await tables(app);
+    expect(after).toHaveLength(before.length + 1);
+    const t = after.find((x) => x.name === "Dehors 1")!;
+    expect(t).toMatchObject({ area: "Dehors", seats: 6, shape: "booth", x: 10, y: 10, w: 14, h: 20 });
+
+    // a new area lands at the END of the room, so the areas a restaurant
+    // already had keep the order the staff know them in
+    const areas = [...new Set(after.map((x) => x.area))];
+    expect(areas[areas.length - 1]).toBe("Dehors");
+    expect(areas.slice(0, -1)).toEqual([...new Set(before.map((x) => x.area))]);
+
+    // the retry of a dropped response adds nothing: same operationId, one table
+    const dup = { operationId: "dup-add-0001", deviceId: "test-terminal", managerPin: MGR,
+      name: "Dehors 2", area: "Dehors", seats: 2, shape: "round", x: 40, y: 10, w: 10, h: 16 };
+    const first = await app.inject({ method: "POST", url: "/v1/floor/add", payload: dup });
+    const retry = await app.inject({ method: "POST", url: "/v1/floor/add", payload: dup });
+    expect(first.statusCode).toBe(200);
+    expect(retry.json()).toEqual(first.json());
+    expect((await tables(app)).filter((x) => x.name === "Dehors 2")).toHaveLength(1);
+  });
+
+  it("refuses a structural edit without a manager PIN, and a server's PIN is not one", async () => {
+    const app = buildServer();
+    const bare = await app.inject({ method: "POST", url: "/v1/floor/add",
+      payload: { ...ENV(1), name: "Dehors 1", area: "Dehors", seats: 4, shape: "rect", x: 10, y: 10, w: 14, h: 20 } });
+    expect(bare.statusCode).toBe(422);
+    expect(bare.json().reason).toBe("adding a table requires a manager's PIN");
+
+    const server = await add(app, 2, { name: "Dehors 1", managerPin: SRV });
+    expect(server.statusCode).toBe(422);
+    expect(server.json().reason).toBe("PIN not recognized as a manager");
+
+    for (const [url, payload, what] of [
+      ["/v1/floor/update", { tableName: "Table 9", seats: 8 }, "editing a table"],
+      ["/v1/floor/resize", { tableName: "Table 9", w: 20, h: 20 }, "resizing a table"],
+      ["/v1/floor/retire", { tableName: "Table 9" }, "retiring a table"],
+    ] as const) {
+      const res = await app.inject({ method: "POST", url, payload: { ...ENV(3), ...payload } });
+      expect(res.statusCode).toBe(422);
+      expect(res.json().reason).toBe(`${what} requires a manager's PIN`);
+    }
+    // and nothing on the seeded floor moved
+    expect(await named(app, "Table 9")).toMatchObject({ seats: 2, w: 12, h: 22 });
+  });
+
+  it("refuses a name the room already answers to, whatever the casing", async () => {
+    const app = buildServer();
+    const dup = await add(app, 1, { name: "table 9" });
+    expect(dup.statusCode).toBe(422);
+    expect(dup.json().reason).toBe("table 9 is already a table on the floor");
+    expect((await tables(app)).filter((t) => t.area === "Dehors")).toHaveLength(0);
+  });
+
+  it("refuses nonsense: blank name, blank area, bad seats, unknown shape, impossible size", async () => {
+    const app = buildServer();
+    const cases: [Record<string, unknown>, string][] = [
+      [{ name: "   " }, "a table needs a name"],
+      [{ name: "Dehors 1", area: "  " }, "a table needs an area"],
+      [{ name: "Dehors 1", seats: 0 }, "seats must be a positive integer"],
+      [{ name: "Dehors 1", seats: 2.5 }, "seats must be a positive integer"],
+      [{ name: "Dehors 1", shape: "hexagon" }, "unknown shape hexagon; expected one of rect, round, stool, booth"],
+      [{ name: "Dehors 1", w: 2 }, "w and h must be between 3 and 40 (percent of the room)"],
+      [{ name: "Dehors 1", h: 41 }, "w and h must be between 3 and 40 (percent of the room)"],
+    ];
+    let n = 1;
+    for (const [patch, reason] of cases) {
+      const res = await add(app, n++, patch);
+      expect(res.statusCode, reason).toBe(422);
+      expect(res.json().reason).toBe(reason);
+    }
+    expect((await tables(app)).filter((t) => t.area === "Dehors")).toHaveLength(0);
+  });
+
+  it("renames only when the table is quiet, and a closed check keeps the old name", async () => {
+    const app = buildServer();
+    const check = await openCheck(app); // Table 14
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items`,
+      payload: { ...ENV(1), itemId: "acqua", quantity: 1, seatNo: 1 } });
+
+    const live = await app.inject({ method: "POST", url: "/v1/floor/update",
+      payload: { ...ENV(2), managerPin: MGR, tableName: "Table 14", newName: "Table 14A" } });
+    expect(live.statusCode).toBe(422);
+    expect(live.json().reason).toContain("cannot rename while Table 14 has an open check");
+
+    // seats and shape are ordinary corrections and stay allowed mid-service
+    const reseat = await app.inject({ method: "POST", url: "/v1/floor/update",
+      payload: { ...ENV(3), managerPin: MGR, tableName: "Table 14", seats: 6, shape: "booth" } });
+    expect(reseat.statusCode).toBe(200);
+    expect(await named(app, "Table 14")).toMatchObject({ seats: 6, shape: "booth" });
+
+    // fire it, and the kitchen card blocks the rename on its own
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/send`, payload: ENV(4) });
+    const due = (await app.inject({ method: "GET", url: `/v1/checks/${check.id}` })).json().check.totals.dueMinor;
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/payments`,
+      payload: { ...ENV(5), method: "card", amountMinor: due } });
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/close`, payload: ENV(6) });
+
+    const cooking = await app.inject({ method: "POST", url: "/v1/floor/update",
+      payload: { ...ENV(7), managerPin: MGR, tableName: "Table 14", newName: "Table 14A" } });
+    expect(cooking.statusCode).toBe(422);
+    expect(cooking.json().reason).toContain("still has an open kitchen ticket");
+
+    const kds = (await app.inject({ method: "GET", url: "/v1/kds" })).json().tickets;
+    for (const t of kds) for (const i of t.items) {
+      await app.inject({ method: "POST", url: "/v1/kds/toggle", payload: { ...ENV(8), ticketId: t.id, orderItemId: i.orderItemId } });
+    }
+    await app.inject({ method: "POST", url: "/v1/kds/serve", payload: { ...ENV(9), tableName: "Table 14" } });
+
+    const ok = await app.inject({ method: "POST", url: "/v1/floor/update",
+      payload: { ...ENV(10), managerPin: MGR, tableName: "Table 14", newName: "Table 14A" } });
+    expect(ok.statusCode).toBe(200);
+    expect(await named(app, "Table 14")).toBeUndefined();
+    expect(await named(app, "Table 14A")).toMatchObject({ seats: 6, shape: "booth" });
+
+    // the closed check was served at Table 14 and says so forever
+    const closed = (await app.inject({ method: "GET", url: `/v1/checks/${check.id}` })).json().check;
+    expect(closed.status).toBe("closed");
+    expect(closed.tableName).toBe("Table 14");
+  });
+
+  it("refuses a rename onto a taken name, allows a case-only self-rename, refuses an empty patch", async () => {
+    const app = buildServer();
+    const taken = await app.inject({ method: "POST", url: "/v1/floor/update",
+      payload: { ...ENV(1), managerPin: MGR, tableName: "Table 9", newName: "table 12" } });
+    expect(taken.statusCode).toBe(422);
+    expect(taken.json().reason).toBe("table 12 is already a table on the floor");
+
+    const self = await app.inject({ method: "POST", url: "/v1/floor/update",
+      payload: { ...ENV(2), managerPin: MGR, tableName: "Table 9", newName: "TABLE 9" } });
+    expect(self.statusCode).toBe(200);
+    expect(await named(app, "TABLE 9")).toBeDefined();
+
+    const empty = await app.inject({ method: "POST", url: "/v1/floor/update",
+      payload: { ...ENV(3), managerPin: MGR, tableName: "TABLE 9" } });
+    expect(empty.statusCode).toBe(422);
+    expect(empty.json().reason).toBe("nothing to change: send a newName, seats, or shape");
+
+    const gone = await app.inject({ method: "POST", url: "/v1/floor/update",
+      payload: { ...ENV(4), managerPin: MGR, tableName: "Table 404", seats: 2 } });
+    expect(gone.statusCode).toBe(422);
+    expect(gone.json().reason).toBe("unknown table Table 404");
+  });
+
+  it("resizes in place and pulls the table back inside the room", async () => {
+    const app = buildServer();
+    // park Table 9 hard against the right and bottom edges
+    await app.inject({ method: "POST", url: "/v1/floor/move",
+      payload: { ...ENV(1), tableName: "Table 9", x: 999, y: 999 } });
+    const before = (await named(app, "Table 9"))!;
+    expect(before.x).toBe(100 - before.w);
+    expect(before.y).toBe(100 - before.h);
+
+    const grow = await app.inject({ method: "POST", url: "/v1/floor/resize",
+      payload: { ...ENV(2), managerPin: MGR, tableName: "Table 9", w: 30, h: 35 } });
+    expect(grow.statusCode).toBe(200);
+    const after = (await named(app, "Table 9"))!;
+    expect(after).toMatchObject({ w: 30, h: 35, x: 70, y: 65 });
+    expect(after.seats).toBe(before.seats); // a resize is not a re-seat
+
+    const tooBig = await app.inject({ method: "POST", url: "/v1/floor/resize",
+      payload: { ...ENV(3), managerPin: MGR, tableName: "Table 9", w: 60, h: 10 } });
+    expect(tooBig.statusCode).toBe(422);
+    expect(tooBig.json().reason).toBe("w and h must be between 3 and 40 (percent of the room)");
+  });
+
+  it("retires a table only when nobody is at it, and then the floor has never heard of it", async () => {
+    const app = buildServer();
+    const check = await openCheck(app); // Table 14
+    const busy = await app.inject({ method: "POST", url: "/v1/floor/retire",
+      payload: { ...ENV(1), managerPin: MGR, tableName: "Table 14" } });
+    expect(busy.statusCode).toBe(422);
+    expect(busy.json().reason).toContain("cannot retire while Table 14 has an open check");
+
+    await runOut(app, check.id, "Table 14");
+
+    const gone = await app.inject({ method: "POST", url: "/v1/floor/retire",
+      payload: { ...ENV(3), managerPin: MGR, tableName: "Table 14" } });
+    expect(gone.statusCode).toBe(200);
+    expect(await named(app, "Table 14")).toBeUndefined();
+
+    // a retired table is not room: you cannot move it and cannot retire it twice
+    const move = await app.inject({ method: "POST", url: "/v1/floor/move",
+      payload: { ...ENV(4), tableName: "Table 14", x: 10, y: 10 } });
+    expect(move.statusCode).toBe(422);
+    expect(move.json().reason).toBe("unknown table Table 14");
+    const twice = await app.inject({ method: "POST", url: "/v1/floor/retire",
+      payload: { ...ENV(5), managerPin: MGR, tableName: "Table 14" } });
+    expect(twice.statusCode).toBe(422);
+    expect(twice.json().reason).toBe("unknown table Table 14");
+  });
+
+  it("re-adding a retired name brings the same table back, history and all", async () => {
+    const app = buildServer();
+    const check = await openCheck(app); // Table 14
+    await runOut(app, check.id, "Table 14");
+    const retired = await app.inject({ method: "POST", url: "/v1/floor/retire",
+      payload: { ...ENV(2), managerPin: MGR, tableName: "Table 14" } });
+    expect(retired.statusCode).toBe(200);
+
+    // back for the summer, in a different corner and a different shape
+    const back = await add(app, 3, { name: "table 14", area: "Sala", seats: 8, shape: "booth", x: 30, y: 70, w: 20, h: 24 });
+    expect(back.statusCode).toBe(200);
+    const t = (await tables(app)).filter((x) => x.name.toLowerCase() === "table 14");
+    expect(t).toHaveLength(1); // revived, not forked
+    expect(t[0]).toMatchObject({ name: "table 14", area: "Sala", seats: 8, shape: "booth", x: 30, y: 70 });
+
+    // the check that sat there still sat there
+    const old = (await app.inject({ method: "GET", url: `/v1/checks/${check.id}` })).json().check;
+    expect(old.tableName).toBe("Table 14");
+  });
+
+  it("clamps a new table inside the room instead of stranding it off-canvas", async () => {
+    const app = buildServer();
+    const res = await add(app, 1, { name: "Dehors 1", x: 300, y: -50, w: 12, h: 18 });
+    expect(res.statusCode).toBe(200);
+    expect(await named(app, "Dehors 1")).toMatchObject({ x: 88, y: 0, w: 12, h: 18 });
+  });
+});
+
 describe("employees, PINs, and sessions (E15)", () => {
   it("signs staff in and out per device, and reports who is on it", async () => {
     const app = buildServer();

@@ -26,7 +26,7 @@ import {
 import type { MenuEntry } from "./menu.js";
 import { STAFF, type Employee } from "./staff.js";
 import { randomUUID } from "node:crypto";
-import { serviceDateOf, type CashEvent, type CheckAggregate, type DrawerSession, type Envelope, type Guest, type KitchenTicket, type MenuSnapshot, type OrderLine, type Store } from "./types.js";
+import { sameName, serviceDateOf, TABLE_SHAPES, type CashEvent, type CheckAggregate, type DrawerSession, type Envelope, type FloorTable, type Guest, type KitchenTicket, type MenuSnapshot, type OrderLine, type Store, type TableShape } from "./types.js";
 import type { GroupIndex } from "@restaurantos/domain";
 
 export const TAX_RATE = { num: 8_875, den: 100_000 };
@@ -1314,6 +1314,195 @@ export class Engine {
     const y = round1(Math.min(Math.max(input.y, 0), 100 - table.h));
     await this.store.moveTable(input.tableName, { x, y, w: table.w, h: table.h });
     return this.remember(envelope, { kind: "applied" }, "table", input.tableName);
+  }
+
+  /* ----------------------- floor editor (E6-T2) -----------------------
+   * Drawing the room is a manager act: incumbents treat it as rare and
+   * deliberate, so every structural command here is PIN-gated server-side
+   * (moveTable is not: nudging a table during service is ordinary work).
+   *
+   * The constraint behind all of it is history. party.table_id references a
+   * dining_table row and a closed check carries the name it was served under,
+   * so removal is SOFT (the row survives, retired) and a rename or a retire is
+   * refused while anyone is still sitting there or still cooking for them. */
+
+  /** Size limits in percent of the room. Below 3 a table is untappable at
+   *  44px; above 40 one table swallows the floor. */
+  private static readonly MIN_SIDE = 3;
+  private static readonly MAX_SIDE = 40;
+
+  private static readonly ROUND1 = (v: number) => Math.round(v * 10) / 10;
+
+  /** Everyone still attached to this table by NAME: a check that has not
+   *  closed, or a kitchen card still cooking. Either one makes a rename or a
+   *  retire a lie about work in progress. */
+  private async tableInUse(name: string): Promise<string | undefined> {
+    const [checks, tickets] = await Promise.all([this.store.list(), this.store.listTickets()]);
+    const live = checks.find((c) => sameName(c.tableName, name) && c.status !== "closed" && c.status !== "voided");
+    if (live) return `${name} has an open check (#${live.checkNo}); close it first`;
+    const cooking = tickets.find((t) => sameName(t.tableName, name) && t.status === "open");
+    if (cooking) return `${name} still has an open kitchen ticket (${cooking.course}); bump it first`;
+    return undefined;
+  }
+
+  /** A name is free when no ACTIVE table answers to it. Case-insensitive,
+   *  because a server calling out "table 9" means the one on the wall.
+   *  `self` is the table doing the asking, so a case-only self-rename passes. */
+  private nameTaken(floor: readonly FloorTable[], name: string, self?: string): boolean {
+    return floor.some((t) => sameName(t.name, name) && !(self !== undefined && sameName(t.name, self)));
+  }
+
+  /** PG raises 23505 on dining_table_active_name_uq when two devices add the
+   *  same name at once. The loser gets the refusal it would have got a
+   *  millisecond earlier, not a 500. */
+  private static isNameRace(err: unknown): boolean {
+    return (err as { code?: string })?.code === "23505";
+  }
+
+  private readShape(shape: unknown): TableShape | undefined {
+    return (TABLE_SHAPES as readonly string[]).includes(shape as string) ? (shape as TableShape) : undefined;
+  }
+
+  private sideError(w: number, h: number): string | undefined {
+    const { MIN_SIDE, MAX_SIDE } = Engine;
+    return [w, h].every((v) => Number.isFinite(v) && v >= MIN_SIDE && v <= MAX_SIDE)
+      ? undefined
+      : `w and h must be between ${MIN_SIDE} and ${MAX_SIDE} (percent of the room)`;
+  }
+
+  /** Draw a new table. A name that matches a RETIRED table revives that row,
+   *  so a table taken out for the winter comes back with its own history. */
+  async addTable(
+    envelope: Envelope,
+    input: { managerPin?: string; name: string; area: string; seats: number; shape?: string; x: number; y: number; w: number; h: number },
+  ): Promise<CommandOutcome> {
+    const replay = await this.store.opResult(envelope.operationId);
+    if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
+    const name = (input.name ?? "").trim();
+    const area = (input.area ?? "").trim();
+    const refuse = (reason: string) => this.remember(envelope, { kind: "rejected", reason }, "table", name || "new");
+
+    if (!(await this.manager(input.managerPin))) return refuse(this.managerRefusal(input.managerPin, "adding a table"));
+    if (!name) return refuse("a table needs a name");
+    if (!area) return refuse("a table needs an area");
+    if (!Number.isSafeInteger(input.seats) || input.seats < 1) return refuse("seats must be a positive integer");
+    const shape = this.readShape(input.shape ?? "rect");
+    if (!shape) return refuse(`unknown shape ${String(input.shape)}; expected one of ${TABLE_SHAPES.join(", ")}`);
+    const sides = this.sideError(input.w, input.h);
+    if (sides) return refuse(sides);
+    if (!Number.isFinite(input.x) || !Number.isFinite(input.y)) return refuse("x and y must be numbers (percent of the room)");
+
+    const floor = await this.store.listFloor();
+    if (this.nameTaken(floor, name)) return refuse(`${name} is already a table on the floor`);
+
+    const { ROUND1 } = Engine;
+    const w = ROUND1(input.w), h = ROUND1(input.h);
+    const table: FloorTable = {
+      name, area, seats: input.seats, shape,
+      x: ROUND1(Math.min(Math.max(input.x, 0), 100 - w)),
+      y: ROUND1(Math.min(Math.max(input.y, 0), 100 - h)),
+      w, h,
+    };
+    try {
+      await this.store.addTable(table);
+    } catch (err) {
+      if (Engine.isNameRace(err)) return refuse(`${name} is already a table on the floor`);
+      throw err;
+    }
+    return this.remember(envelope, { kind: "applied" }, "table", name);
+  }
+
+  /** Rename, re-seat, or reshape. Seats and shape are ordinary corrections and
+   *  stay allowed mid-service; only the NAME is gated on the table being
+   *  quiet, because the name is what a check and a kitchen card call it. */
+  async updateTable(
+    envelope: Envelope,
+    input: { managerPin?: string; tableName: string; newName?: string; seats?: number; shape?: string },
+  ): Promise<CommandOutcome> {
+    const replay = await this.store.opResult(envelope.operationId);
+    if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
+    const tableName = (input.tableName ?? "").trim();
+    const refuse = (reason: string) => this.remember(envelope, { kind: "rejected", reason }, "table", tableName);
+
+    if (!(await this.manager(input.managerPin))) return refuse(this.managerRefusal(input.managerPin, "editing a table"));
+    const floor = await this.store.listFloor();
+    const table = floor.find((t) => t.name === tableName);
+    if (!table) return refuse(`unknown table ${tableName}`);
+
+    const patch: { name?: string; seats?: number; shape?: TableShape } = {};
+    if (input.newName !== undefined) {
+      const newName = String(input.newName).trim();
+      if (!newName) return refuse("a table needs a name");
+      // a case-only self-rename is a correction to the sign on the wall, not
+      // a collision with itself
+      if (this.nameTaken(floor, newName, table.name)) return refuse(`${newName} is already a table on the floor`);
+      if (newName !== table.name) {
+        const busy = await this.tableInUse(table.name);
+        if (busy) return refuse(`cannot rename while ${busy}`);
+        patch.name = newName;
+      }
+    }
+    if (input.seats !== undefined) {
+      if (!Number.isSafeInteger(input.seats) || input.seats < 1) return refuse("seats must be a positive integer");
+      patch.seats = input.seats;
+    }
+    if (input.shape !== undefined) {
+      const shape = this.readShape(input.shape);
+      if (!shape) return refuse(`unknown shape ${String(input.shape)}; expected one of ${TABLE_SHAPES.join(", ")}`);
+      patch.shape = shape;
+    }
+    if (!Object.keys(patch).length) return refuse("nothing to change: send a newName, seats, or shape");
+
+    try {
+      await this.store.updateTable(table.name, patch);
+    } catch (err) {
+      if (Engine.isNameRace(err)) return refuse(`${patch.name} is already a table on the floor`);
+      throw err;
+    }
+    return this.remember(envelope, { kind: "applied" }, "table", patch.name ?? table.name);
+  }
+
+  /** Resize in place. The position re-clamps afterwards, because a table
+   *  grown at the right edge would otherwise hang off the room. */
+  async resizeTable(envelope: Envelope, input: { managerPin?: string; tableName: string; w: number; h: number }): Promise<CommandOutcome> {
+    const replay = await this.store.opResult(envelope.operationId);
+    if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
+    const tableName = (input.tableName ?? "").trim();
+    const refuse = (reason: string) => this.remember(envelope, { kind: "rejected", reason }, "table", tableName);
+
+    if (!(await this.manager(input.managerPin))) return refuse(this.managerRefusal(input.managerPin, "resizing a table"));
+    const table = (await this.store.listFloor()).find((t) => t.name === tableName);
+    if (!table) return refuse(`unknown table ${tableName}`);
+    const sides = this.sideError(input.w, input.h);
+    if (sides) return refuse(sides);
+
+    const { ROUND1 } = Engine;
+    const w = ROUND1(input.w), h = ROUND1(input.h);
+    await this.store.moveTable(table.name, {
+      x: ROUND1(Math.min(table.x, 100 - w)),
+      y: ROUND1(Math.min(table.y, 100 - h)),
+      w, h,
+    });
+    return this.remember(envelope, { kind: "applied" }, "table", table.name);
+  }
+
+  /** Take a table out of the room. SOFT: the row lives on so party history and
+   *  closed checks still point at something real, and re-adding the name
+   *  revives that same identity rather than forking it. */
+  async retireTable(envelope: Envelope, input: { managerPin?: string; tableName: string }): Promise<CommandOutcome> {
+    const replay = await this.store.opResult(envelope.operationId);
+    if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
+    const tableName = (input.tableName ?? "").trim();
+    const refuse = (reason: string) => this.remember(envelope, { kind: "rejected", reason }, "table", tableName);
+
+    if (!(await this.manager(input.managerPin))) return refuse(this.managerRefusal(input.managerPin, "retiring a table"));
+    const table = (await this.store.listFloor()).find((t) => t.name === tableName);
+    if (!table) return refuse(`unknown table ${tableName}`);
+    const busy = await this.tableInUse(table.name);
+    if (busy) return refuse(`cannot retire while ${busy}`);
+
+    await this.store.retireTable(table.name, new Date().toISOString());
+    return this.remember(envelope, { kind: "applied" }, "table", table.name);
   }
 
   /* ------------------------------ reads ------------------------------ */

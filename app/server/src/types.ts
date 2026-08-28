@@ -193,12 +193,24 @@ export interface DrawerSession {
   closedBy?: string;
 }
 
+/** The shapes a room can be drawn with (E6-T2). "booth" was in the
+ *  dining_table CHECK constraint from day one; the API never offered it. */
+export const TABLE_SHAPES = ["rect", "round", "stool", "booth"] as const;
+export type TableShape = (typeof TABLE_SHAPES)[number];
+
+/** Table names are compared case-insensitively everywhere (E6-T2): "table 9"
+ *  and "Table 9" are the same table to a server calling it out, so they must
+ *  be the same table to the floor. Matches PG's lower(name) unique index. */
+export function sameName(a: string, b: string): boolean {
+  return a.trim().toLowerCase() === b.trim().toLowerCase();
+}
+
 /** A positioned table on the floor plan (E6). Percent coordinates. */
 export interface FloorTable {
   name: string;
   area: string;
   seats: number;
-  shape: "rect" | "round" | "stool";
+  shape: TableShape;
   x: number;
   y: number;
   w: number;
@@ -230,8 +242,17 @@ export interface Store {
   getTicket(id: string): Promise<KitchenTicket | undefined>;
   putTicket(ticket: KitchenTicket): Promise<void>;
 
+  /** active tables only: a retired table is history, not room (E6-T2) */
   listFloor(): Promise<FloorTable[]>;
   moveTable(name: string, pos: { x: number; y: number; w: number; h: number }): Promise<void>;
+  /** Add a table, creating its area if the room has never had one. A name
+   *  that matches a RETIRED table (case-insensitively) REVIVES that row
+   *  rather than making a second identity, so party history stays whole. */
+  addTable(table: FloorTable): Promise<void>;
+  updateTable(name: string, patch: { name?: string; seats?: number; shape?: TableShape }): Promise<void>;
+  /** Soft removal: the row stays so party.table_id and closed checks keep
+   *  pointing at something real. `at` is the retirement instant. */
+  retireTable(name: string, at: string): Promise<void>;
 
   listDrawerSessions(): Promise<DrawerSession[]>;
   getDrawerSession(id: string): Promise<DrawerSession | undefined>;

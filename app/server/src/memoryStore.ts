@@ -3,6 +3,7 @@ import { GROUPS, MENU, SNAPSHOT_ID } from "./menu.js";
 import { pinHash, staffByPinHash, type Employee } from "./staff.js";
 import {
   FLOOR,
+  sameName,
   type Availability,
   type CheckAggregate,
   type DrawerSession,
@@ -15,6 +16,7 @@ import {
   type OpMeta,
   type Shift,
   type Store,
+  type TableShape,
 } from "./types.js";
 
 export class MemoryStore implements Store {
@@ -22,8 +24,12 @@ export class MemoryStore implements Store {
   private tickets = new Map<string, KitchenTicket>();
   private ops = new Map<string, unknown>();
   private checkNo = 2041;
-  // per-instance copy so a layout edit never leaks into another store
-  private floor: FloorTable[] = FLOOR.map((t) => ({ ...t }));
+  // per-instance copy so a layout edit never leaks into another store.
+  // retiredAt mirrors dining_table.retired_at: a retired table keeps its
+  // place in the array so a re-add revives the same identity (E6-T2).
+  private floor: (FloorTable & { retiredAt?: string })[] = FLOOR.map((t) => ({ ...t }));
+  // first-seen area order, the memory twin of dining_area.sort
+  private areas: string[] = [...new Set(FLOOR.map((t) => t.area)), "Altro"];
 
   async init(): Promise<void> {}
   async get(id: string) { return this.checks.get(id); }
@@ -38,11 +44,49 @@ export class MemoryStore implements Store {
   async getTicket(id: string) { return this.tickets.get(id); }
   async putTicket(ticket: KitchenTicket) { this.tickets.set(ticket.id, ticket); }
 
-  async listFloor(): Promise<FloorTable[]> { return this.floor.map((t) => ({ ...t })); }
+  /** Active tables, grouped by area in first-seen order (the memory twin of
+   *  PG's dining_area.sort). Within an area the order is insertion order, so
+   *  the seeded room comes back exactly as FLOOR spells it. */
+  async listFloor(): Promise<FloorTable[]> {
+    const rank = (a: string) => {
+      const i = this.areas.indexOf(a);
+      return i === -1 ? this.areas.length : i;
+    };
+    return this.floor
+      .filter((t) => !t.retiredAt)
+      .map(({ retiredAt: _retiredAt, ...t }) => ({ ...t }))
+      .sort((a, b) => rank(a.area) - rank(b.area));
+  }
 
   async moveTable(name: string, pos: { x: number; y: number; w: number; h: number }): Promise<void> {
-    const t = this.floor.find((x) => x.name === name);
+    const t = this.floor.find((x) => x.name === name && !x.retiredAt);
     if (t) Object.assign(t, pos);
+  }
+
+  async addTable(table: FloorTable): Promise<void> {
+    if (!this.areas.includes(table.area)) this.areas.push(table.area);
+    // a retired row with this name IS this table: revive it rather than
+    // starting a second identity the old parties do not point at
+    const revived = this.floor.find((t) => t.retiredAt && sameName(t.name, table.name));
+    if (revived) {
+      Object.assign(revived, table);
+      delete revived.retiredAt;
+      return;
+    }
+    this.floor.push({ ...table });
+  }
+
+  async updateTable(name: string, patch: { name?: string; seats?: number; shape?: TableShape }): Promise<void> {
+    const t = this.floor.find((x) => x.name === name && !x.retiredAt);
+    if (!t) return;
+    if (patch.name !== undefined) t.name = patch.name;
+    if (patch.seats !== undefined) t.seats = patch.seats;
+    if (patch.shape !== undefined) t.shape = patch.shape;
+  }
+
+  async retireTable(name: string, at: string): Promise<void> {
+    const t = this.floor.find((x) => x.name === name && !x.retiredAt);
+    if (t) t.retiredAt = at;
   }
 
   private sessions = new Map<string, DrawerSession>();

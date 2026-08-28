@@ -289,4 +289,169 @@ describe.skipIf(!PGBIN)("PostgreSQL persistence (E4)", () => {
     const times = historyAfter.entries.map((e: { at: string }) => Date.parse(e.at));
     expect(times).toEqual([...times].sort((a: number, b: number) => a - b));
   }, 60_000);
+
+  /* --------------------- the floor editor, for real (E6-T2) ---------------------
+   * The memory store proves the RULES in api.test.ts. Only Postgres can prove
+   * the things that are actually about rows: the partial unique index, the
+   * revive-in-place identity, the sort order of a new area, and a booth
+   * surviving a round trip through a CHECK-constrained column. */
+
+  const sql = (q: string) =>
+    execFileSync(path.join(PGBIN!, "psql.exe"),
+      ["-h", "127.0.0.1", "-p", String(PORT), "-U", "rostest", "-d", "ros", "-tAc", q],
+      { encoding: "utf8" }).trim();
+
+  it("draws, edits, retires, and revives a table against real rows", async () => {
+    const app = buildServer(store, "postgres");
+    const MGR = "1122";
+    const tables = async () =>
+      (await app.inject({ method: "GET", url: "/v1/floor" })).json().tables as
+        { name: string; area: string; seats: number; shape: string; x: number; y: number; w: number; h: number }[];
+    const named = async (name: string) => (await tables()).find((t) => t.name === name);
+
+    // the previous test sealed the day; the room is still editable, but the
+    // live-check cases below need a check, so reopen first
+    const reopen = await app.inject({ method: "POST", url: "/v1/day/reopen", payload: ENV({ managerPin: MGR }) });
+    expect(reopen.statusCode).toBe(200);
+
+    /* --- add: a new area lands last, and a booth stays a booth --- */
+    const areasBefore = [...new Set((await tables()).map((t) => t.area))];
+    const add = await app.inject({ method: "POST", url: "/v1/floor/add",
+      payload: ENV({ managerPin: MGR, name: "Dehors 1", area: "Dehors", seats: 6, shape: "booth", x: 12, y: 30, w: 18, h: 24 }) });
+    expect(add.statusCode).toBe(200);
+    expect(await named("Dehors 1")).toMatchObject({ area: "Dehors", seats: 6, shape: "booth", x: 12, y: 30, w: 18, h: 24 });
+    const areasAfter = [...new Set((await tables()).map((t) => t.area))];
+    expect(areasAfter[areasAfter.length - 1]).toBe("Dehors");
+    expect(areasAfter.slice(0, -1)).toEqual(areasBefore);
+    expect(sql("SELECT sort FROM dining_area WHERE name = 'Dehors'")).not.toBe("0");
+
+    // no PIN and a server's PIN are refused with the same words the memory
+    // store uses: one engine, one rule, two stores
+    const bare = await app.inject({ method: "POST", url: "/v1/floor/add",
+      payload: ENV({ name: "Dehors 2", area: "Dehors", seats: 2, shape: "round", x: 40, y: 30, w: 10, h: 16 }) });
+    expect(bare.statusCode).toBe(422);
+    expect(bare.json().reason).toBe("adding a table requires a manager's PIN");
+    const asServer = await app.inject({ method: "POST", url: "/v1/floor/add",
+      payload: ENV({ managerPin: "2468", name: "Dehors 2", area: "Dehors", seats: 2, shape: "round", x: 40, y: 30, w: 10, h: 16 }) });
+    expect(asServer.statusCode).toBe(422);
+    expect(asServer.json().reason).toBe("PIN not recognized as a manager");
+
+    // the duplicate name is refused case-insensitively, and the partial unique
+    // index is there to say so even if two devices raced
+    const dup = await app.inject({ method: "POST", url: "/v1/floor/add",
+      payload: ENV({ managerPin: MGR, name: "dehors 1", area: "Dehors", seats: 2, shape: "round", x: 40, y: 30, w: 10, h: 16 }) });
+    expect(dup.statusCode).toBe(422);
+    expect(dup.json().reason).toBe("dehors 1 is already a table on the floor");
+    expect(sql("SELECT indexdef FROM pg_indexes WHERE indexname = 'dining_table_active_name_uq'"))
+      .toContain("retired_at IS NULL");
+
+    // the idempotent replay of a dropped add
+    const op = ENV({ managerPin: MGR, name: "Dehors 2", area: "Dehors", seats: 2, shape: "round", x: 40, y: 30, w: 10, h: 16 });
+    const first = await app.inject({ method: "POST", url: "/v1/floor/add", payload: op });
+    const retry = await app.inject({ method: "POST", url: "/v1/floor/add", payload: op });
+    expect(first.statusCode).toBe(200);
+    expect(retry.json()).toEqual(first.json());
+    expect(sql("SELECT count(*) FROM dining_table WHERE lower(name) = 'dehors 2'")).toBe("1");
+
+    /* --- resize: the position re-clamps at the right and bottom edges --- */
+    await app.inject({ method: "POST", url: "/v1/floor/move", payload: ENV({ tableName: "Dehors 1", x: 999, y: 999 }) });
+    const parked = (await named("Dehors 1"))!;
+    expect(parked).toMatchObject({ x: 100 - 18, y: 100 - 24 });
+    const grow = await app.inject({ method: "POST", url: "/v1/floor/resize",
+      payload: ENV({ managerPin: MGR, tableName: "Dehors 1", w: 30, h: 36 }) });
+    expect(grow.statusCode).toBe(200);
+    expect(await named("Dehors 1")).toMatchObject({ w: 30, h: 36, x: 70, y: 64, seats: 6 });
+    const tooBig = await app.inject({ method: "POST", url: "/v1/floor/resize",
+      payload: ENV({ managerPin: MGR, tableName: "Dehors 1", w: 60, h: 10 }) });
+    expect(tooBig.json().reason).toBe("w and h must be between 3 and 40 (percent of the room)");
+
+    /* --- rename: refused while the table is working, and history keeps the
+           name the guests were served under --- */
+    const open = await app.inject({ method: "POST", url: "/v1/checks", payload: ENV({ tableName: "Dehors 1", covers: 4 }) });
+    expect(open.statusCode).toBe(200);
+    const liveId = open.json().check.id as string;
+    const blocked = await app.inject({ method: "POST", url: "/v1/floor/update",
+      payload: ENV({ managerPin: MGR, tableName: "Dehors 1", newName: "Giardino 1" }) });
+    expect(blocked.statusCode).toBe(422);
+    expect(blocked.json().reason).toContain("cannot rename while Dehors 1 has an open check");
+
+    // seats and shape are corrections, allowed even with guests sitting there
+    const reshape = await app.inject({ method: "POST", url: "/v1/floor/update",
+      payload: ENV({ managerPin: MGR, tableName: "Dehors 1", seats: 8, shape: "rect" }) });
+    expect(reshape.statusCode).toBe(200);
+    expect(await named("Dehors 1")).toMatchObject({ seats: 8, shape: "rect" });
+
+    // run the check out: ordered, fired, paid, closed, and the kitchen card
+    // bumped and served. Only then does nothing hold the name any more.
+    await app.inject({ method: "POST", url: `/v1/checks/${liveId}/items`, payload: ENV({ itemId: "acqua", quantity: 1, seatNo: 1 }) });
+    await app.inject({ method: "POST", url: `/v1/checks/${liveId}/send`, payload: ENV() });
+
+    // the fired card blocks the rename on its own, even with the guests gone
+    const owed = (await app.inject({ method: "GET", url: `/v1/checks/${liveId}` })).json().check.totals.dueMinor as number;
+    await app.inject({ method: "POST", url: `/v1/checks/${liveId}/payments`, payload: ENV({ method: "card", amountMinor: owed }) });
+    expect((await app.inject({ method: "POST", url: `/v1/checks/${liveId}/close`, payload: ENV() })).statusCode).toBe(200);
+    const cooking = await app.inject({ method: "POST", url: "/v1/floor/update",
+      payload: ENV({ managerPin: MGR, tableName: "Dehors 1", newName: "Giardino 1" }) });
+    expect(cooking.statusCode).toBe(422);
+    expect(cooking.json().reason).toContain("still has an open kitchen ticket");
+
+    for (const t of (await app.inject({ method: "GET", url: "/v1/kds" })).json().tickets) {
+      if (t.status !== "open") continue;
+      for (const i of t.items) {
+        await app.inject({ method: "POST", url: "/v1/kds/toggle", payload: ENV({ ticketId: t.id, orderItemId: i.orderItemId }) });
+      }
+      await app.inject({ method: "POST", url: "/v1/kds/serve", payload: ENV({ tableName: t.tableName }) });
+    }
+
+    const taken = await app.inject({ method: "POST", url: "/v1/floor/update",
+      payload: ENV({ managerPin: MGR, tableName: "Dehors 1", newName: "dehors 2" }) });
+    expect(taken.statusCode).toBe(422);
+    expect(taken.json().reason).toBe("dehors 2 is already a table on the floor");
+
+    const selfCase = await app.inject({ method: "POST", url: "/v1/floor/update",
+      payload: ENV({ managerPin: MGR, tableName: "Dehors 1", newName: "DEHORS 1" }) });
+    expect(selfCase.statusCode).toBe(200);
+    const renamed = await app.inject({ method: "POST", url: "/v1/floor/update",
+      payload: ENV({ managerPin: MGR, tableName: "DEHORS 1", newName: "Giardino 1" }) });
+    expect(renamed.statusCode).toBe(200);
+    expect(await named("Giardino 1")).toBeDefined();
+    expect(await named("DEHORS 1")).toBeUndefined();
+
+    // the closed check was served at Dehors 1 and still says so: the name is
+    // captured on the check, not read back off the table it happens to point at
+    const served = (await app.inject({ method: "GET", url: `/v1/checks/${liveId}` })).json().check;
+    expect(served.tableName).toBe("Dehors 1");
+
+    /* --- retire and revive: the SAME row, so the party history holds --- */
+    const rowId = sql("SELECT id FROM dining_table WHERE name = 'Giardino 1'");
+    expect(rowId).not.toBe("");
+    expect(sql(`SELECT count(*) FROM party WHERE table_id = '${rowId}'`)).toBe("1");
+
+    const retire = await app.inject({ method: "POST", url: "/v1/floor/retire",
+      payload: ENV({ managerPin: MGR, tableName: "Giardino 1" }) });
+    expect(retire.statusCode).toBe(200);
+    expect(await named("Giardino 1")).toBeUndefined();
+    expect(sql(`SELECT retired_at IS NOT NULL FROM dining_table WHERE id = '${rowId}'`)).toBe("t");
+    const stranded = await app.inject({ method: "POST", url: "/v1/floor/move", payload: ENV({ tableName: "Giardino 1", x: 5, y: 5 }) });
+    expect(stranded.statusCode).toBe(422);
+    expect(stranded.json().reason).toBe("unknown table Giardino 1");
+
+    const revive = await app.inject({ method: "POST", url: "/v1/floor/add",
+      payload: ENV({ managerPin: MGR, name: "giardino 1", area: "Sala", seats: 4, shape: "booth", x: 20, y: 60, w: 16, h: 20 }) });
+    expect(revive.statusCode).toBe(200);
+    expect(sql("SELECT count(*) FROM dining_table WHERE lower(name) = 'giardino 1'")).toBe("1");
+    expect(sql(`SELECT id FROM dining_table WHERE lower(name) = 'giardino 1'`)).toBe(rowId);
+    expect(sql(`SELECT count(*) FROM party WHERE table_id = '${rowId}'`)).toBe("1"); // history intact
+    expect(await named("giardino 1")).toMatchObject({ area: "Sala", seats: 4, shape: "booth", x: 20, y: 60 });
+
+    /* --- the booth survives a restart, which is what E6-T2 fixes --- */
+    await store.end();
+    store = new PgStore(url);
+    await store.init();
+    const app2 = buildServer(store, "postgres");
+    const back = (await app2.inject({ method: "GET", url: "/v1/floor" })).json().tables;
+    expect(back.find((t: { name: string }) => t.name === "giardino 1").shape).toBe("booth");
+    // and the closed check still names the table it was served at
+    expect((await app2.inject({ method: "GET", url: `/v1/checks/${liveId}` })).json().check.tableName).toBe("Dehors 1");
+  }, 60_000);
 });

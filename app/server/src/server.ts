@@ -40,6 +40,13 @@ function readEnvelope(body: EnvelopeBody): Envelope | { error: string } {
 }
 
 
+/** The approval PIN, forwarded only when it really is a string, so a missing
+ *  PIN and a numeric one both reach the engine as "no manager approved this"
+ *  rather than as the string "undefined". */
+function managerPin(body: Record<string, unknown>): { managerPin?: string } {
+  return typeof body.managerPin === "string" ? { managerPin: body.managerPin } : {};
+}
+
 /** The optional guest fields, passed through only when the caller sent them,
  *  so an omitted field keeps its value and an empty string clears it. */
 function guestFields(body: Record<string, unknown>) {
@@ -433,6 +440,56 @@ export function buildServer(store: Store = new MemoryStore(), storeName = "memor
     if ("error" in envelope) return reply.code(400).send({ status: "BAD_REQUEST", reason: envelope.error });
     return respond(reply, await engine.moveTable(envelope, {
       tableName: String(body.tableName ?? ""), x: Number(body.x), y: Number(body.y),
+    }));
+  });
+
+  /* --------------------- floor editor (E6-T2) ---------------------
+   * Structural edits to the room. managerPin is coerced the way /v1/day/close
+   * coerces it: passed through only when it really is a string, so a missing
+   * PIN and a numeric one both land on the same refusal. */
+
+  app.post("/v1/floor/add", async (req, reply) => {
+    const body = (req.body ?? {}) as EnvelopeBody & Record<string, unknown>;
+    const envelope = readEnvelope(body);
+    if ("error" in envelope) return reply.code(400).send({ status: "BAD_REQUEST", reason: envelope.error });
+    return respond(reply, await engine.addTable(envelope, {
+      ...managerPin(body),
+      name: String(body.name ?? ""), area: String(body.area ?? ""), seats: Number(body.seats),
+      ...(body.shape !== undefined ? { shape: String(body.shape) } : {}),
+      x: Number(body.x), y: Number(body.y), w: Number(body.w), h: Number(body.h),
+    }));
+  });
+
+  app.post("/v1/floor/update", async (req, reply) => {
+    const body = (req.body ?? {}) as EnvelopeBody & Record<string, unknown>;
+    const envelope = readEnvelope(body);
+    if ("error" in envelope) return reply.code(400).send({ status: "BAD_REQUEST", reason: envelope.error });
+    return respond(reply, await engine.updateTable(envelope, {
+      ...managerPin(body),
+      tableName: String(body.tableName ?? ""),
+      // absent means "leave it alone", so each field is forwarded only when
+      // the caller actually sent it
+      ...(body.newName !== undefined ? { newName: String(body.newName) } : {}),
+      ...(body.seats !== undefined ? { seats: Number(body.seats) } : {}),
+      ...(body.shape !== undefined ? { shape: String(body.shape) } : {}),
+    }));
+  });
+
+  app.post("/v1/floor/resize", async (req, reply) => {
+    const body = (req.body ?? {}) as EnvelopeBody & Record<string, unknown>;
+    const envelope = readEnvelope(body);
+    if ("error" in envelope) return reply.code(400).send({ status: "BAD_REQUEST", reason: envelope.error });
+    return respond(reply, await engine.resizeTable(envelope, {
+      ...managerPin(body), tableName: String(body.tableName ?? ""), w: Number(body.w), h: Number(body.h),
+    }));
+  });
+
+  app.post("/v1/floor/retire", async (req, reply) => {
+    const body = (req.body ?? {}) as EnvelopeBody & Record<string, unknown>;
+    const envelope = readEnvelope(body);
+    if ("error" in envelope) return reply.code(400).send({ status: "BAD_REQUEST", reason: envelope.error });
+    return respond(reply, await engine.retireTable(envelope, {
+      ...managerPin(body), tableName: String(body.tableName ?? ""),
     }));
   });
 

@@ -19,6 +19,7 @@ import { pinHash, ROLE_IDS, STAFF, type Employee } from "./staff.js";
 import {
   FLOOR,
   serviceDateOf,
+  TABLE_SHAPES,
   type Availability,
   type CheckAggregate,
   type CheckGuestLink,
@@ -32,6 +33,7 @@ import {
   type OpMeta,
   type Shift,
   type Store,
+  type TableShape,
 } from "./types.js";
 
 const ORG = "11111111-1111-1111-1111-111111111111";
@@ -159,15 +161,24 @@ export class PgStore implements Store {
     return again.rows[0].id as string;
   }
 
+  /** The dining_table row a check's table NAME points at. Matches
+   *  case-insensitively and prefers the active row, because a name can have
+   *  a retired ghost behind it. When nothing matches, this is the side door:
+   *  a check named a table the room has never had (a walk-in tab, a takeout
+   *  counter). Such a row is born RETIRED, so it anchors party.table_id
+   *  without ever appearing on the floor plan, and addTable can revive it
+   *  into a real table later (E6-T2). */
   private async ensureTable(c: pg.PoolClient, name: string): Promise<string> {
     const found = await c.query(
-      "SELECT dt.id FROM dining_table dt JOIN dining_area da ON da.id = dt.area_id WHERE da.location_id = $1 AND dt.name = $2",
+      `SELECT dt.id FROM dining_table dt JOIN dining_area da ON da.id = dt.area_id
+       WHERE da.location_id = $1 AND lower(dt.name) = lower($2)
+       ORDER BY (dt.retired_at IS NULL) DESC LIMIT 1`,
       [LOC, name],
     );
     if (found.rowCount) return found.rows[0].id as string;
     const inserted = await c.query(
-      `INSERT INTO dining_table (id, org_id, area_id, name, seats, shape)
-       SELECT gen_random_uuid(), $1, a.id, $2, 1, 'rect' FROM dining_area a
+      `INSERT INTO dining_table (id, org_id, area_id, name, seats, shape, retired_at)
+       SELECT gen_random_uuid(), $1, a.id, $2, 1, 'rect', now() FROM dining_area a
        WHERE a.location_id = $3 AND a.name = 'Altro' RETURNING id`,
       [ORG, name, LOC],
     );
@@ -212,11 +223,11 @@ export class PgStore implements Store {
         events: check.courseEvents ?? [],
       });
       await c.query(
-        `INSERT INTO checks (id, org_id, location_id, business_day_id, party_id, check_no, server_id, menu_snapshot_id, status, covers, version, opened_at, closed_at, course_state, reopened_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
-         ON CONFLICT (id) DO UPDATE SET status = $9, covers = $10, version = $11, closed_at = $13, course_state = $14, reopened_at = $15`,
+        `INSERT INTO checks (id, org_id, location_id, business_day_id, party_id, check_no, server_id, menu_snapshot_id, status, covers, version, opened_at, closed_at, course_state, reopened_at, table_name)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+         ON CONFLICT (id) DO UPDATE SET status = $9, covers = $10, version = $11, closed_at = $13, course_state = $14, reopened_at = $15, table_name = $16`,
         [check.id, ORG, LOC, dayId, partyId, check.checkNo, check.serverId ?? EMP, snapUuidFor(check.menuSnapshotId), check.status, check.covers, check.version, check.openedAt, check.closedAt ?? null,
-         courseState, check.reopenedAt ?? null],
+         courseState, check.reopenedAt ?? null, check.tableName],
       );
       for (const l of check.lines) {
         await c.query(
@@ -281,7 +292,8 @@ export class PgStore implements Store {
 
   private async hydrate(where: string, params: unknown[]): Promise<CheckAggregate[]> {
     const checks = await this.pool.query(
-      `SELECT ch.id, ch.check_no, ch.status, ch.covers, ch.version, ch.opened_at, ch.closed_at, dt.name AS table_name,
+      `SELECT ch.id, ch.check_no, ch.status, ch.covers, ch.version, ch.opened_at, ch.closed_at,
+              COALESCE(ch.table_name, dt.name) AS table_name,
               ch.server_id, e.display_name AS server_name, ch.course_state, ch.reopened_at,
               ms.document->>'snapshotId' AS snap_id
        FROM checks ch
@@ -444,7 +456,8 @@ export class PgStore implements Store {
 
   private async hydrateTickets(where: string, params: unknown[]): Promise<KitchenTicket[]> {
     const tickets = await this.pool.query(
-      `SELECT kt.id, kt.status, kt.served_at, od.check_id, od.course, od.fired_at, dt.name AS table_name
+      `SELECT kt.id, kt.status, kt.served_at, od.check_id, od.course, od.fired_at,
+              COALESCE(ch.table_name, dt.name) AS table_name
        FROM kitchen_ticket kt
        JOIN order_dispatch od ON od.id = kt.dispatch_id
        JOIN checks ch ON ch.id = od.check_id
@@ -492,14 +505,17 @@ export class PgStore implements Store {
     const r = await this.pool.query(
       `SELECT dt.name, da.name AS area, dt.seats, dt.shape, dt.pos
        FROM dining_table dt JOIN dining_area da ON da.id = dt.area_id
-       WHERE da.location_id = $1 AND dt.pos ? 'x' ORDER BY da.name, dt.name`,
+       WHERE da.location_id = $1 AND dt.retired_at IS NULL AND dt.pos ? 'x'
+       ORDER BY da.sort, da.name, dt.name`,
       [LOC],
     );
     return r.rows.map((row) => ({
       name: row.name as string,
       area: row.area as string,
       seats: row.seats as number,
-      shape: row.shape === "round" ? "round" as const : row.shape === "stool" ? "stool" as const : "rect" as const,
+      // read the column, do not guess at it: 'booth' round-tripped as 'rect'
+      // until E6-T2, which silently reshaped every booth on a restart
+      shape: (TABLE_SHAPES as readonly string[]).includes(row.shape) ? (row.shape as TableShape) : "rect",
       x: row.pos.x as number, y: row.pos.y as number, w: row.pos.w as number, h: row.pos.h as number,
     }));
   }
@@ -507,8 +523,71 @@ export class PgStore implements Store {
   async moveTable(name: string, pos: { x: number; y: number; w: number; h: number }): Promise<void> {
     await this.pool.query(
       `UPDATE dining_table dt SET pos = $1 FROM dining_area da
-       WHERE da.id = dt.area_id AND da.location_id = $2 AND dt.name = $3`,
+       WHERE da.id = dt.area_id AND da.location_id = $2 AND dt.name = $3 AND dt.retired_at IS NULL`,
       [JSON.stringify(pos), LOC, name],
+    );
+  }
+
+  /** The area's row, created at the end of the sort order when it is new
+   *  (E6-T2). MAX(sort)+1 keeps areas in the order the room grew. */
+  private async ensureArea(c: pg.PoolClient, name: string): Promise<string> {
+    const found = await c.query("SELECT id FROM dining_area WHERE location_id = $1 AND lower(name) = lower($2)", [LOC, name]);
+    if (found.rowCount) return found.rows[0].id as string;
+    const inserted = await c.query(
+      `INSERT INTO dining_area (id, org_id, location_id, name, sort)
+       VALUES (gen_random_uuid(), $1, $2, $3, (SELECT COALESCE(MAX(sort), 0) + 1 FROM dining_area WHERE location_id = $2))
+       RETURNING id`,
+      [ORG, LOC, name],
+    );
+    return inserted.rows[0].id as string;
+  }
+
+  async addTable(table: FloorTable): Promise<void> {
+    const c = await this.pool.connect();
+    try {
+      await c.query("BEGIN");
+      const areaId = await this.ensureArea(c, table.area);
+      const pos = JSON.stringify({ x: table.x, y: table.y, w: table.w, h: table.h });
+      // revive a retired row of the same name in place: party.table_id and
+      // every closed check already point at that id, and a second row would
+      // split one table's history in two
+      const revived = await c.query(
+        `UPDATE dining_table dt SET retired_at = NULL, area_id = $1, name = $2, seats = $3, shape = $4, pos = $5
+         FROM dining_area da
+         WHERE da.id = dt.area_id AND da.location_id = $6 AND lower(dt.name) = lower($2) AND dt.retired_at IS NOT NULL
+         RETURNING dt.id`,
+        [areaId, table.name, table.seats, table.shape, pos, LOC],
+      );
+      if (!revived.rowCount) {
+        await c.query(
+          "INSERT INTO dining_table (id, org_id, area_id, name, seats, shape, pos) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6)",
+          [ORG, areaId, table.name, table.seats, table.shape, pos],
+        );
+      }
+      await c.query("COMMIT");
+    } catch (err) {
+      await c.query("ROLLBACK");
+      throw err;
+    } finally {
+      c.release();
+    }
+  }
+
+  async updateTable(name: string, patch: { name?: string; seats?: number; shape?: TableShape }): Promise<void> {
+    await this.pool.query(
+      `UPDATE dining_table dt
+       SET name = COALESCE($1, dt.name), seats = COALESCE($2, dt.seats), shape = COALESCE($3, dt.shape)
+       FROM dining_area da
+       WHERE da.id = dt.area_id AND da.location_id = $4 AND dt.name = $5 AND dt.retired_at IS NULL`,
+      [patch.name ?? null, patch.seats ?? null, patch.shape ?? null, LOC, name],
+    );
+  }
+
+  async retireTable(name: string, at: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE dining_table dt SET retired_at = $1 FROM dining_area da
+       WHERE da.id = dt.area_id AND da.location_id = $2 AND dt.name = $3 AND dt.retired_at IS NULL`,
+      [at, LOC, name],
     );
   }
 
