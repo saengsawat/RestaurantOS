@@ -1,9 +1,10 @@
 /** Zero-setup Store for dev and tests. State dies with the process. */
 import { GROUPS, MENU, SNAPSHOT_ID } from "./menu.js";
-import { pinHash, staffByPinHash, type Employee } from "./staff.js";
+import { pinHash, STAFF, type Employee, type RosterEntry } from "./staff.js";
 import {
   FLOOR,
   sameName,
+  VENUE,
   type Availability,
   type CheckAggregate,
   type DrawerSession,
@@ -17,6 +18,7 @@ import {
   type Shift,
   type Store,
   type TableShape,
+  type Venue,
 } from "./types.js";
 
 export class MemoryStore implements Store {
@@ -113,8 +115,44 @@ export class MemoryStore implements Store {
   async listAvailability() { return [...this.availability.values()]; }
   async setAvailability(availability: Availability) { this.availability.set(availability.itemId, availability); }
 
+  /* ------------------- venue and roster (E21-T1) -------------------
+     The demo values are the SEED, not the definition: everything here is
+     ordinary mutable state, which is the whole point of the ticket. */
+
+  private venue: Venue = { ...VENUE };
+  // pinHash rides alongside the roster entry and never leaves this class
+  private employees: (RosterEntry & { pinHash: string })[] = STAFF.map((s) => ({
+    id: s.id, name: s.name, role: s.role, active: true, pinHash: pinHash(s.demoPin),
+  }));
+
+  async getVenue() { return { ...this.venue }; }
+  async putVenue(venue: Venue) { this.venue = { ...venue }; }
+
+  private static roster(e: RosterEntry & { pinHash: string }): RosterEntry {
+    return { id: e.id, name: e.name, role: e.role, active: e.active };
+  }
+
+  async listEmployees(): Promise<RosterEntry[]> { return this.employees.map(MemoryStore.roster); }
+  async getEmployee(id: string) {
+    const e = this.employees.find((x) => x.id === id);
+    return e ? MemoryStore.roster(e) : undefined;
+  }
+  async addEmployee(employee: RosterEntry, hash: string) { this.employees.push({ ...employee, pinHash: hash }); }
+  async setEmployeePin(id: string, hash: string) {
+    const e = this.employees.find((x) => x.id === id);
+    if (e) e.pinHash = hash;
+  }
+  async setEmployeeActive(id: string, active: boolean) {
+    const e = this.employees.find((x) => x.id === id);
+    if (e) e.active = active;
+  }
+
+  /** A deactivated employee's PIN opens nothing: not a session, not an
+   *  approval. Their history is untouched, which is the difference between
+   *  letting somebody go and erasing them. */
   async findEmployeeByPin(pin: string): Promise<Employee | undefined> {
-    const hit = staffByPinHash(pinHash(pin));
+    const hash = pinHash(pin);
+    const hit = this.employees.find((e) => e.active && e.pinHash === hash);
     return hit ? { id: hit.id, name: hit.name, role: hit.role } : undefined;
   }
 

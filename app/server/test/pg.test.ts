@@ -454,4 +454,94 @@ describe.skipIf(!PGBIN)("PostgreSQL persistence (E4)", () => {
     // and the closed check still names the table it was served at
     expect((await app2.inject({ method: "GET", url: `/v1/checks/${liveId}` })).json().check.tableName).toBe("Dehors 1");
   }, 60_000);
+
+  /* ------------------- the venue and the roster (E21-T1) -------------------
+   * The rules are proven against the memory store in api.test.ts. What only
+   * Postgres can prove is that a renamed venue, a reset PIN, and a
+   * deactivated employee all SURVIVE a restart, which is exactly what a
+   * seed-on-every-boot roster used to destroy. */
+
+  it("keeps a renamed venue, a new hire, a reset PIN, and a deactivation across a restart", async () => {
+    const app = buildServer(store, "postgres");
+    const MGR = "1122";
+    const roster = async (a: ReturnType<typeof buildServer>) =>
+      (await a.inject({ method: "GET", url: "/v1/staff" })).json().staff as
+        { id: string; name: string; role: string; active: boolean }[];
+
+    /* --- the venue seeded from the demo values, then edited --- */
+    expect((await app.inject({ method: "GET", url: "/v1/venue" })).json()).toEqual({
+      name: "Osteria Nove", address: "9 Vicolo della Luna, New York", timezone: "America/New_York",
+    });
+    const bad = await app.inject({ method: "POST", url: "/v1/venue",
+      payload: ENV({ managerPin: MGR, timezone: "America/Atlantis" }) });
+    expect(bad.statusCode).toBe(422);
+    expect(bad.json().reason).toBe("America/Atlantis is not a timezone this machine knows");
+    const rename = await app.inject({ method: "POST", url: "/v1/venue",
+      payload: ENV({ managerPin: MGR, name: "Trattoria Sedici", address: "16 Elm St, Austin", timezone: "America/Chicago" }) });
+    expect(rename.statusCode).toBe(200);
+
+    /* --- the roster: no PIN on it, and a new hire lands in real rows --- */
+    const before = await roster(app);
+    expect(before.map((s) => s.name)).toEqual(["Gia R.", "Marco B.", "Sofia T."]);
+    expect(JSON.stringify(before)).not.toContain("2468");
+
+    const hired = await app.inject({ method: "POST", url: "/v1/staff",
+      payload: ENV({ managerPin: MGR, name: "Luca P.", role: "server", pin: "4321" }) });
+    expect(hired.statusCode).toBe(200);
+    const luca = hired.json().employee as { id: string };
+    const dupPin = await app.inject({ method: "POST", url: "/v1/staff",
+      payload: ENV({ managerPin: MGR, name: "Clone", role: "server", pin: "4321" }) });
+    expect(dupPin.json().reason).toBe("that PIN already belongs to Luca P.");
+
+    // Luca signs in and opens a check, so he has history worth protecting
+    expect((await app.inject({ method: "POST", url: "/v1/session",
+      payload: { deviceId: "term-luca", pin: "4321" } })).statusCode).toBe(200);
+    const opened = await app.inject({ method: "POST", url: "/v1/checks",
+      payload: { operationId: crypto.randomUUID(), deviceId: "term-luca", tableName: "Table 5", covers: 2 } });
+    expect(opened.statusCode).toBe(200);
+    const lucaCheck = opened.json().check.id as string;
+    expect(opened.json().check.serverName).toBe("Luca P.");
+
+    /* --- reset his PIN, then let Sofia go --- */
+    const reset = await app.inject({ method: "POST", url: `/v1/staff/${luca.id}/pin`,
+      payload: ENV({ managerPin: MGR, pin: "998877" }) });
+    expect(reset.statusCode).toBe(200);
+
+    const sofia = (await roster(app)).find((s) => s.name === "Sofia T.")!;
+    const out = await app.inject({ method: "POST", url: `/v1/staff/${sofia.id}/deactivate`,
+      payload: ENV({ managerPin: MGR }) });
+    expect(out.statusCode).toBe(200);
+
+    const marco = (await roster(app)).find((s) => s.name === "Marco B.")!;
+    const lastManager = await app.inject({ method: "POST", url: `/v1/staff/${marco.id}/deactivate`,
+      payload: ENV({ managerPin: MGR }) });
+    expect(lastManager.statusCode).toBe(422);
+    expect(lastManager.json().reason).toBe("Marco B. is the only active manager; promote someone else first");
+
+    /* THE RESTART: the seed must not undo any of it --- */
+    await store.end();
+    store = new PgStore(url);
+    await store.init();
+    const app3 = buildServer(store, "postgres");
+
+    expect((await app3.inject({ method: "GET", url: "/v1/venue" })).json()).toEqual({
+      name: "Trattoria Sedici", address: "16 Elm St, Austin", timezone: "America/Chicago",
+    });
+
+    const after = await roster(app3);
+    expect(after.map((s) => s.name)).toEqual(["Gia R.", "Marco B.", "Sofia T.", "Luca P."]);
+    expect(after.find((s) => s.name === "Sofia T.")!.active).toBe(false);
+    expect(after.find((s) => s.name === "Luca P.")).toMatchObject({ role: "server", active: true });
+    expect(JSON.stringify(after)).not.toContain("4321");
+
+    // the reset PIN survived and the old one is still dead
+    expect((await app3.inject({ method: "POST", url: "/v1/session", payload: { deviceId: "d9", pin: "4321" } })).statusCode).toBe(401);
+    expect((await app3.inject({ method: "POST", url: "/v1/session", payload: { deviceId: "d9", pin: "998877" } })).json().employee.id).toBe(luca.id);
+    // Sofia's PIN is dead too, and her deactivation did not resurrect on boot
+    expect((await app3.inject({ method: "POST", url: "/v1/session", payload: { deviceId: "d9", pin: "3579" } })).statusCode).toBe(401);
+
+    // and Luca's check still names him: deactivation and PIN resets are
+    // roster events, never history edits
+    expect((await app3.inject({ method: "GET", url: `/v1/checks/${lucaCheck}` })).json().check.serverName).toBe("Luca P.");
+  }, 60_000);
 });

@@ -1046,7 +1046,9 @@ async function loadWho(){
   $("#btnWho").style.background=me?"var(--brand-wash)":"var(--surface-2)";
 }
 $("#btnWho").onclick=async()=>{
-  const staff=(await fetch("/v1/staff").then(r=>r.json())).staff;
+  /* demo PINs off the seed constant; /v1/staff is the roster and never
+     carries a PIN (E21-T1) */
+  const staff=(await fetch("/v1/staff/demo-pins").then(r=>r.json())).staff;
   $("#whoBody").innerHTML=
     (me?`<div class="og-h">Signed in</div><div style="font-weight:700;margin:2px 0 10px">${esc(me.name)} · ${esc(me.role)}</div>`:"")
     +`<div class="og-h">Staff (demo PINs shown, concept demo)</div>

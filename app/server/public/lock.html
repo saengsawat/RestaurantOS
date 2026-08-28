@@ -133,7 +133,9 @@ addEventListener("keydown",e=>{
   if(e.key==="Backspace")press("⌫");
 });
 
-fetch("/v1/staff").then(r=>r.json()).then(d=>{
+/* the three demo PINs, off the seed constant: /v1/staff is the roster and
+   never carries a PIN (E21-T1) */
+fetch("/v1/staff/demo-pins").then(r=>r.json()).then(d=>{
   $("#staff").innerHTML=d.staff.map(s=>
     `<button class="chip" data-p="${esc(s.demoPin)}">${esc(s.name)} <small>${esc(s.demoPin)}</small></button>`).join("");
   document.querySelectorAll("[data-p]").forEach(b=>b.onclick=()=>{buf=b.dataset.p;renderDots();submit();});

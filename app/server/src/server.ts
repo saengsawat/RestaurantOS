@@ -69,6 +69,8 @@ function respond(reply: FastifyReply, outcome: CommandOutcome): unknown {
         ...(outcome.day ? { day: outcome.day } : {}),
         ...(outcome.menu !== undefined ? { menu: outcome.menu } : {}),
         ...(outcome.guest !== undefined ? { guest: outcome.guest } : {}),
+        ...(outcome.venue !== undefined ? { venue: outcome.venue } : {}),
+        ...(outcome.employee !== undefined ? { employee: outcome.employee } : {}),
         ...(outcome.audit !== undefined ? { audit: outcome.audit } : {}),
         ...(outcome.refundDueMinor !== undefined ? { refundDueMinor: outcome.refundDueMinor } : {}),
         ...(outcome.note !== undefined ? { note: outcome.note } : {}),
@@ -112,7 +114,63 @@ export function buildServer(store: Store = new MemoryStore(), storeName = "memor
 
   /* -------------------------- sessions (E15) -------------------------- */
 
-  app.get("/v1/staff", async () => ({ staff: engine.staff() }));
+  /* ------------------- venue and roster (E21-T1) -------------------
+   * The venue read is public: a lock screen prints the restaurant's name
+   * before anybody has signed in. The roster read carries no PIN and no
+   * hash, ever. The demo PINs the lock screen and the sign-in sheet print
+   * on purpose come from their own route off the seed constant, so a PIN a
+   * real manager sets can never be served by the roster. */
+
+  app.get("/v1/venue", async () => engine.venue());
+
+  app.post("/v1/venue", async (req, reply) => {
+    const body = (req.body ?? {}) as EnvelopeBody & Record<string, unknown>;
+    const envelope = readEnvelope(body);
+    if ("error" in envelope) return reply.code(400).send({ status: "BAD_REQUEST", reason: envelope.error });
+    return respond(reply, await engine.updateVenue(envelope, {
+      ...managerPin(body),
+      // absent means "leave it alone"; an empty string is a real edit
+      ...(body.name !== undefined ? { name: String(body.name) } : {}),
+      ...(body.address !== undefined ? { address: String(body.address) } : {}),
+      ...(body.timezone !== undefined ? { timezone: String(body.timezone) } : {}),
+    }));
+  });
+
+  app.get("/v1/staff", async () => ({ staff: await engine.staff() }));
+
+  app.get("/v1/staff/demo-pins", async () => ({ staff: engine.demoPins() }));
+
+  app.post("/v1/staff", async (req, reply) => {
+    const body = (req.body ?? {}) as EnvelopeBody & Record<string, unknown>;
+    const envelope = readEnvelope(body);
+    if ("error" in envelope) return reply.code(400).send({ status: "BAD_REQUEST", reason: envelope.error });
+    return respond(reply, await engine.addEmployee(envelope, {
+      ...managerPin(body),
+      name: String(body.name ?? ""),
+      ...(body.role !== undefined ? { role: String(body.role) } : {}),
+      // the PIN stays a string: Number("0123") would silently become 123
+      ...(typeof body.pin === "string" ? { pin: body.pin } : {}),
+    }));
+  });
+
+  app.post("/v1/staff/:id/pin", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = (req.body ?? {}) as EnvelopeBody & Record<string, unknown>;
+    const envelope = readEnvelope(body);
+    if ("error" in envelope) return reply.code(400).send({ status: "BAD_REQUEST", reason: envelope.error });
+    return respond(reply, await engine.resetPin(envelope, {
+      ...managerPin(body), employeeId: id,
+      ...(typeof body.pin === "string" ? { pin: body.pin } : {}),
+    }));
+  });
+
+  app.post("/v1/staff/:id/deactivate", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = (req.body ?? {}) as EnvelopeBody & Record<string, unknown>;
+    const envelope = readEnvelope(body);
+    if ("error" in envelope) return reply.code(400).send({ status: "BAD_REQUEST", reason: envelope.error });
+    return respond(reply, await engine.deactivateEmployee(envelope, { ...managerPin(body), employeeId: id }));
+  });
 
   app.post("/v1/session", async (req, reply) => {
     const body = (req.body ?? {}) as { deviceId?: unknown; pin?: unknown };

@@ -610,6 +610,237 @@ describe("drawing the room (E6-T2)", () => {
   });
 });
 
+/* --------------------- the venue and the roster (E21-T1) ---------------------
+ * "Osteria Nove", its address, its timezone, and three PINs were source code,
+ * which is a fine way to demo one restaurant and no way to run a second. */
+
+describe("the venue is data now (E21-T1)", () => {
+  const MGR = "1122";
+
+  it("reads without a session, and a manager can rename, move, and re-zone it", async () => {
+    const app = buildServer();
+    const seeded = (await app.inject({ method: "GET", url: "/v1/venue" })).json();
+    expect(seeded).toEqual({
+      name: "Osteria Nove",
+      address: "9 Vicolo della Luna, New York",
+      timezone: "America/New_York",
+    });
+
+    const res = await app.inject({ method: "POST", url: "/v1/venue",
+      payload: { ...ENV(1), managerPin: MGR, name: "Trattoria Sedici", address: "16 Elm St, Austin", timezone: "America/Chicago" } });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().venue).toEqual({ name: "Trattoria Sedici", address: "16 Elm St, Austin", timezone: "America/Chicago" });
+    expect((await app.inject({ method: "GET", url: "/v1/venue" })).json().name).toBe("Trattoria Sedici");
+
+    // an omitted field is left alone; a blank address is a real edit, because
+    // a kitchen with no street frontage is a real thing
+    const partial = await app.inject({ method: "POST", url: "/v1/venue",
+      payload: { ...ENV(2), managerPin: MGR, address: "" } });
+    expect(partial.json().venue).toEqual({ name: "Trattoria Sedici", address: "", timezone: "America/Chicago" });
+  });
+
+  it("refuses the edit without a manager, and refuses a name or a timezone it cannot honor", async () => {
+    const app = buildServer();
+    const bare = await app.inject({ method: "POST", url: "/v1/venue", payload: { ...ENV(1), name: "Nope" } });
+    expect(bare.statusCode).toBe(422);
+    expect(bare.json().reason).toBe("editing the venue requires a manager's PIN");
+
+    const asServer = await app.inject({ method: "POST", url: "/v1/venue",
+      payload: { ...ENV(2), managerPin: "2468", name: "Nope" } });
+    expect(asServer.json().reason).toBe("PIN not recognized as a manager");
+
+    const blank = await app.inject({ method: "POST", url: "/v1/venue",
+      payload: { ...ENV(3), managerPin: MGR, name: "   " } });
+    expect(blank.statusCode).toBe(422);
+    expect(blank.json().reason).toBe("a restaurant needs a name");
+
+    const zone = await app.inject({ method: "POST", url: "/v1/venue",
+      payload: { ...ENV(4), managerPin: MGR, timezone: "America/Atlantis" } });
+    expect(zone.statusCode).toBe(422);
+    expect(zone.json().reason).toBe("America/Atlantis is not a timezone this machine knows");
+
+    // nothing stuck
+    expect((await app.inject({ method: "GET", url: "/v1/venue" })).json().name).toBe("Osteria Nove");
+  });
+
+  it("replays a venue edit exactly once", async () => {
+    const app = buildServer();
+    const payload = { operationId: "venue-op-0001", deviceId: "test-terminal", managerPin: MGR, name: "Trattoria Sedici" };
+    const first = await app.inject({ method: "POST", url: "/v1/venue", payload });
+    const retry = await app.inject({ method: "POST", url: "/v1/venue", payload });
+    expect(first.statusCode).toBe(200);
+    expect(retry.json()).toEqual(first.json());
+  });
+});
+
+describe("hiring, PINs, and letting somebody go (E21-T1)", () => {
+  const MGR = "1122";
+  const roster = async (app: ReturnType<typeof buildServer>) =>
+    (await app.inject({ method: "GET", url: "/v1/staff" })).json().staff as
+      { id: string; name: string; role: string; active: boolean }[];
+
+  const hire = (app: ReturnType<typeof buildServer>, n: number, body: Record<string, unknown>) =>
+    app.inject({ method: "POST", url: "/v1/staff",
+      payload: { ...ENV(n), managerPin: MGR, name: "Luca P.", role: "server", pin: "4321", ...body } });
+
+  it("serves the roster without a single PIN or hash on it", async () => {
+    const app = buildServer();
+    const staff = await roster(app);
+    expect(staff.map((s) => s.name)).toEqual(["Gia R.", "Marco B.", "Sofia T."]);
+    expect(staff.every((s) => s.active)).toBe(true);
+    for (const s of staff) expect(Object.keys(s).sort()).toEqual(["active", "id", "name", "role"]);
+    expect(JSON.stringify(staff)).not.toContain("2468");
+
+    // the demo PINs the lock screen prints on purpose live on their own route
+    const demo = (await app.inject({ method: "GET", url: "/v1/staff/demo-pins" })).json().staff;
+    expect(demo.find((s: { name: string }) => s.name === "Gia R.").demoPin).toBe("2468");
+  });
+
+  it("hires a server who can then sign in and open a check in their own name", async () => {
+    const app = buildServer();
+    const res = await hire(app, 1, {});
+    expect(res.statusCode).toBe(200);
+    const luca = res.json().employee;
+    expect(luca).toMatchObject({ name: "Luca P.", role: "server", active: true });
+    expect(JSON.stringify(res.json())).not.toContain("4321"); // the PIN never comes back
+
+    const session = await app.inject({ method: "POST", url: "/v1/session",
+      payload: { deviceId: "term-luca", pin: "4321" } });
+    expect(session.statusCode).toBe(200);
+    expect(session.json().employee.id).toBe(luca.id);
+
+    const check = await app.inject({ method: "POST", url: "/v1/checks",
+      payload: { operationId: "luca-opens-0001", deviceId: "term-luca", tableName: "Table 5", covers: 2 } });
+    expect(check.json().check.serverName).toBe("Luca P.");
+    expect(check.json().check.serverId).toBe(luca.id);
+  });
+
+  it("refuses a hire without a manager, without a name, without a role, or with a PIN somebody already has", async () => {
+    const app = buildServer();
+    const bare = await app.inject({ method: "POST", url: "/v1/staff",
+      payload: { ...ENV(1), name: "Luca P.", role: "server", pin: "4321" } });
+    expect(bare.json().reason).toBe("adding an employee requires a manager's PIN");
+
+    for (const [patch, reason] of [
+      [{ name: "  " }, "an employee needs a name"],
+      [{ role: "chef" }, "role must be server or manager"],
+      [{ pin: "12" }, "a PIN is 4 to 6 digits"],
+      [{ pin: "1234567" }, "a PIN is 4 to 6 digits"],
+      [{ pin: "12a4" }, "a PIN is 4 to 6 digits"],
+      [{ pin: "2468" }, "that PIN already belongs to Gia R."],
+    ] as [Record<string, unknown>, string][]) {
+      const res = await hire(app, 2, patch);
+      expect(res.statusCode, reason).toBe(422);
+      expect(res.json().reason).toBe(reason);
+    }
+    expect(await roster(app)).toHaveLength(3);
+  });
+
+  it("resets a PIN: the old one stops working the moment the new one starts", async () => {
+    const app = buildServer();
+    const luca = (await hire(app, 1, {})).json().employee;
+
+    const reset = await app.inject({ method: "POST", url: `/v1/staff/${luca.id}/pin`,
+      payload: { ...ENV(2), managerPin: MGR, pin: "998877" } });
+    expect(reset.statusCode).toBe(200);
+
+    const old = await app.inject({ method: "POST", url: "/v1/session", payload: { deviceId: "d1", pin: "4321" } });
+    expect(old.statusCode).toBe(401);
+    const now = await app.inject({ method: "POST", url: "/v1/session", payload: { deviceId: "d1", pin: "998877" } });
+    expect(now.json().employee.name).toBe("Luca P.");
+
+    // somebody else's PIN is still somebody else's
+    const clash = await app.inject({ method: "POST", url: `/v1/staff/${luca.id}/pin`,
+      payload: { ...ENV(3), managerPin: MGR, pin: "1122" } });
+    expect(clash.json().reason).toBe("that PIN already belongs to Marco B.");
+    // but re-setting a PIN to the one you already have is not a clash with yourself
+    const same = await app.inject({ method: "POST", url: `/v1/staff/${luca.id}/pin`,
+      payload: { ...ENV(4), managerPin: MGR, pin: "998877" } });
+    expect(same.statusCode).toBe(200);
+
+    const nobody = await app.inject({ method: "POST", url: "/v1/staff/not-a-real-id/pin",
+      payload: { ...ENV(5), managerPin: MGR, pin: "5555" } });
+    expect(nobody.json().reason).toBe("no employee not-a-real-id");
+  });
+
+  it("deactivates a server: their PIN opens nothing, their history is untouched", async () => {
+    const app = buildServer();
+    // Gia opens and closes a check, so there is history to protect
+    await app.inject({ method: "POST", url: "/v1/session", payload: { deviceId: "term-gia", pin: "2468" } });
+    const open = await app.inject({ method: "POST", url: "/v1/checks",
+      payload: { operationId: "gia-opens-0001", deviceId: "term-gia", tableName: "Table 3", covers: 2 } });
+    const checkId = open.json().check.id;
+    expect(open.json().check.serverName).toBe("Gia R.");
+
+    const gia = (await roster(app)).find((s) => s.name === "Gia R.")!;
+    const out = await app.inject({ method: "POST", url: `/v1/staff/${gia.id}/deactivate`,
+      payload: { ...ENV(1), managerPin: MGR } });
+    expect(out.statusCode).toBe(200);
+    expect(out.json().employee.active).toBe(false);
+    expect((await roster(app)).find((s) => s.name === "Gia R.")!.active).toBe(false);
+
+    // the PIN is dead for sign-in, and the terminal she was on is signed out
+    expect((await app.inject({ method: "POST", url: "/v1/session", payload: { deviceId: "d2", pin: "2468" } })).statusCode).toBe(401);
+    expect((await app.inject({ method: "GET", url: "/v1/session?deviceId=term-gia" })).json().employee).toBeNull();
+
+    // the check she opened still says she opened it
+    expect((await app.inject({ method: "GET", url: `/v1/checks/${checkId}` })).json().check.serverName).toBe("Gia R.");
+
+    const twice = await app.inject({ method: "POST", url: `/v1/staff/${gia.id}/deactivate`,
+      payload: { ...ENV(2), managerPin: MGR } });
+    expect(twice.json().reason).toBe("Gia R. is already deactivated");
+  });
+
+  it("a deactivated manager cannot approve, and the last one cannot be deactivated", async () => {
+    const app = buildServer();
+    // a second manager, so Marco is not the last one
+    const nina = (await hire(app, 1, { name: "Nina V.", role: "manager", pin: "7788" })).json().employee;
+
+    const out = await app.inject({ method: "POST", url: `/v1/staff/${nina.id}/deactivate`,
+      payload: { ...ENV(2), managerPin: MGR } });
+    expect(out.statusCode).toBe(200);
+
+    // her PIN no longer approves anything
+    const check = await openCheck(app);
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items`,
+      payload: { ...ENV(3), itemId: "acqua", quantity: 1, seatNo: 1 } });
+    const state = (await app.inject({ method: "GET", url: `/v1/checks/${check.id}` })).json().check;
+    const refused = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items/${state.lines[0].id}/void`,
+      payload: { ...ENV(4), reason: "guest changed mind", managerPin: "7788" } });
+    expect(refused.statusCode).toBe(422);
+    expect(refused.json().reason).toBe("PIN not recognized as a manager");
+
+    // and now Marco is the last active manager, so he stays
+    const marco = (await roster(app)).find((s) => s.name === "Marco B.")!;
+    const last = await app.inject({ method: "POST", url: `/v1/staff/${marco.id}/deactivate`,
+      payload: { ...ENV(5), managerPin: MGR } });
+    expect(last.statusCode).toBe(422);
+    expect(last.json().reason).toBe("Marco B. is the only active manager; promote someone else first");
+    expect((await roster(app)).find((s) => s.name === "Marco B.")!.active).toBe(true);
+  });
+
+  it("the unsigned-device opener falls to the roster, never to nobody", async () => {
+    const app = buildServer();
+    // nobody signs in anywhere: the check lands on the first active server
+    const first = await app.inject({ method: "POST", url: "/v1/checks",
+      payload: { operationId: "anon-opens-0001", deviceId: "term-anon", tableName: "Table 3", covers: 2 } });
+    expect(first.json().check.serverName).toBe("Gia R.");
+
+    const gia = (await roster(app)).find((s) => s.name === "Gia R.")!;
+    await app.inject({ method: "POST", url: `/v1/staff/${gia.id}/deactivate`, payload: { ...ENV(1), managerPin: MGR } });
+    const second = await app.inject({ method: "POST", url: "/v1/checks",
+      payload: { operationId: "anon-opens-0002", deviceId: "term-anon", tableName: "Table 5", covers: 2 } });
+    expect(second.json().check.serverName).toBe("Sofia T."); // the next active SERVER
+
+    const sofia = (await roster(app)).find((s) => s.name === "Sofia T.")!;
+    await app.inject({ method: "POST", url: `/v1/staff/${sofia.id}/deactivate`, payload: { ...ENV(2), managerPin: MGR } });
+    const third = await app.inject({ method: "POST", url: "/v1/checks",
+      payload: { operationId: "anon-opens-0003", deviceId: "term-anon", tableName: "Table 7", covers: 2 } });
+    expect(third.json().check.serverName).toBe("Marco B."); // no servers left: any active employee
+    expect(third.json().check.serverId).toBeTruthy();
+  });
+});
+
 describe("employees, PINs, and sessions (E15)", () => {
   it("signs staff in and out per device, and reports who is on it", async () => {
     const app = buildServer();

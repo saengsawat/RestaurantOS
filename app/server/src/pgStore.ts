@@ -15,11 +15,12 @@ import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { GROUPS, MENU, SNAPSHOT_ID } from "./menu.js";
-import { pinHash, ROLE_IDS, STAFF, type Employee } from "./staff.js";
+import { pinHash, ROLE_IDS, STAFF, type Employee, type RosterEntry } from "./staff.js";
 import {
   FLOOR,
   serviceDateOf,
   TABLE_SHAPES,
+  VENUE,
   type Availability,
   type CheckAggregate,
   type CheckGuestLink,
@@ -34,6 +35,7 @@ import {
   type Shift,
   type Store,
   type TableShape,
+  type Venue,
 } from "./types.js";
 
 const ORG = "11111111-1111-1111-1111-111111111111";
@@ -90,8 +92,8 @@ export class PgStore implements Store {
       await c.query("BEGIN");
       await c.query("INSERT INTO organization (id, name) VALUES ($1, 'Osteria Nove Group') ON CONFLICT (id) DO NOTHING", [ORG]);
       await c.query(
-        "INSERT INTO location (id, org_id, name, timezone) VALUES ($1, $2, 'Osteria Nove', 'America/New_York') ON CONFLICT (id) DO NOTHING",
-        [LOC, ORG],
+        "INSERT INTO location (id, org_id, name, address, timezone) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING",
+        [LOC, ORG, VENUE.name, VENUE.address, VENUE.timezone],
       );
       // staff roster (E15): hashed PINs, roles, and role assignments
       for (const [role, roleId] of Object.entries(ROLE_IDS)) {
@@ -101,9 +103,12 @@ export class PgStore implements Store {
         );
       }
       for (const s of STAFF) {
+        // DO NOTHING, not DO UPDATE: STAFF is a seed now (E21-T1), so a PIN a
+        // manager reset and an employee they deactivated must survive the
+        // restart instead of being overwritten back to the demo values
         await c.query(
           `INSERT INTO employee (id, org_id, location_id, display_name, pin_hash) VALUES ($1, $2, $3, $4, $5)
-           ON CONFLICT (id) DO UPDATE SET display_name = $4, pin_hash = $5`,
+           ON CONFLICT (id) DO NOTHING`,
           [s.id, ORG, LOC, s.name, pinHash(s.demoPin)],
         );
         await c.query(
@@ -760,13 +765,15 @@ export class PgStore implements Store {
     }
   }
 
+  /** A deactivated employee's PIN opens nothing: not a session, not an
+   *  approval. Their history is untouched (E21-T1). */
   async findEmployeeByPin(pin: string): Promise<Employee | undefined> {
     const r = await this.pool.query(
       `SELECT e.id, e.display_name, r.name AS role
        FROM employee e
        JOIN employee_role er ON er.employee_id = e.id
        JOIN role r ON r.id = er.role_id
-       WHERE e.location_id = $1 AND e.pin_hash = $2 LIMIT 1`,
+       WHERE e.location_id = $1 AND e.pin_hash = $2 AND e.active LIMIT 1`,
       [LOC, pinHash(pin)],
     );
     if (!r.rowCount) return undefined;
@@ -775,6 +782,78 @@ export class PgStore implements Store {
       name: r.rows[0].display_name as string,
       role: (r.rows[0].role as string).toLowerCase() === "manager" ? "manager" : "server",
     };
+  }
+
+  /* ------------------- venue and roster (E21-T1) ------------------- */
+
+  async getVenue(): Promise<Venue> {
+    const r = await this.pool.query("SELECT name, address, timezone FROM location WHERE id = $1", [LOC]);
+    const row = r.rows[0];
+    return {
+      name: (row?.name as string) ?? VENUE.name,
+      // NULL only on a database seeded before 0007 backfilled it
+      address: (row?.address as string) ?? VENUE.address,
+      timezone: (row?.timezone as string) ?? VENUE.timezone,
+    };
+  }
+
+  async putVenue(venue: Venue): Promise<void> {
+    await this.pool.query(
+      "UPDATE location SET name = $1, address = $2, timezone = $3 WHERE id = $4",
+      [venue.name, venue.address, venue.timezone, LOC],
+    );
+  }
+
+  /** The roster, ordered so the list a manager reads does not reshuffle
+   *  itself between two visits to the settings screen. */
+  async listEmployees(): Promise<RosterEntry[]> {
+    const r = await this.pool.query(
+      `SELECT e.id, e.display_name, e.active, r.name AS role
+       FROM employee e
+       LEFT JOIN employee_role er ON er.employee_id = e.id
+       LEFT JOIN role r ON r.id = er.role_id
+       WHERE e.location_id = $1 ORDER BY e.created_at, e.display_name`,
+      [LOC],
+    );
+    return r.rows.map((row) => ({
+      id: row.id as string,
+      name: row.display_name as string,
+      role: String(row.role ?? "").toLowerCase() === "manager" ? "manager" as const : "server" as const,
+      active: row.active as boolean,
+    }));
+  }
+
+  async getEmployee(id: string): Promise<RosterEntry | undefined> {
+    return (await this.listEmployees()).find((e) => e.id === id);
+  }
+
+  async addEmployee(employee: RosterEntry, hash: string): Promise<void> {
+    const c = await this.pool.connect();
+    try {
+      await c.query("BEGIN");
+      await c.query(
+        "INSERT INTO employee (id, org_id, location_id, display_name, pin_hash, active) VALUES ($1, $2, $3, $4, $5, $6)",
+        [employee.id, ORG, LOC, employee.name, hash, employee.active],
+      );
+      await c.query(
+        "INSERT INTO employee_role (employee_id, role_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+        [employee.id, ROLE_IDS[employee.role]],
+      );
+      await c.query("COMMIT");
+    } catch (err) {
+      await c.query("ROLLBACK");
+      throw err;
+    } finally {
+      c.release();
+    }
+  }
+
+  async setEmployeePin(id: string, hash: string): Promise<void> {
+    await this.pool.query("UPDATE employee SET pin_hash = $1 WHERE id = $2 AND location_id = $3", [hash, id, LOC]);
+  }
+
+  async setEmployeeActive(id: string, active: boolean): Promise<void> {
+    await this.pool.query("UPDATE employee SET active = $1 WHERE id = $2 AND location_id = $3", [active, id, LOC]);
   }
 
   async putShift(shift: Shift): Promise<void> {

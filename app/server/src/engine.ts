@@ -24,9 +24,9 @@ import {
   type SplitPortion,
 } from "@restaurantos/domain";
 import type { MenuEntry } from "./menu.js";
-import { STAFF, type Employee } from "./staff.js";
+import { PIN_RULE, pinHash, STAFF, type Employee, type RosterEntry } from "./staff.js";
 import { randomUUID } from "node:crypto";
-import { sameName, serviceDateOf, TABLE_SHAPES, type CashEvent, type CheckAggregate, type DrawerSession, type Envelope, type FloorTable, type Guest, type KitchenTicket, type MenuSnapshot, type OrderLine, type Store, type TableShape } from "./types.js";
+import { sameName, serviceDateOf, TABLE_SHAPES, type CashEvent, type CheckAggregate, type DrawerSession, type Envelope, type FloorTable, type Guest, type KitchenTicket, type MenuSnapshot, type OrderLine, type Store, type TableShape, type Venue } from "./types.js";
 import type { GroupIndex } from "@restaurantos/domain";
 
 export const TAX_RATE = { num: 8_875, den: 100_000 };
@@ -46,7 +46,7 @@ function usd(minor: number): string {
 // an employee who holds the manager role. See Engine.manager().
 
 export type CommandOutcome =
-  | { kind: "applied"; check?: CheckView; tickets?: KitchenTicket[]; session?: DrawerSession; day?: unknown; menu?: unknown; guest?: unknown; audit?: unknown; refundDueMinor?: number; note?: string }
+  | { kind: "applied"; check?: CheckView; tickets?: KitchenTicket[]; session?: DrawerSession; day?: unknown; menu?: unknown; guest?: unknown; venue?: Venue; employee?: RosterEntry; audit?: unknown; refundDueMinor?: number; note?: string }
   | { kind: "replay"; result: CommandOutcome }
   | { kind: "conflict"; expectedVersion: number | undefined; currentVersion: number }
   | { kind: "rejected"; reason: string; modifierErrors?: readonly ModifierError[] }
@@ -344,8 +344,28 @@ export class Engine {
    *  restart signs everyone out, which is the honest behavior. */
   private sessions = new Map<string, Employee>();
 
-  staff() {
+  /** The roster: who works here. Never a PIN, never a hash (E21-T1). */
+  async staff(): Promise<RosterEntry[]> {
+    return this.store.listEmployees();
+  }
+
+  /** The three demo PINs, straight off the seed constant, for the lock screen
+   *  and the POS sign-in sheet that print them on purpose. Separate from the
+   *  roster read so a PIN a real manager sets can never come out of it. */
+  demoPins() {
     return STAFF.map(({ id, name, role, demoPin }) => ({ id, name, role, demoPin }));
+  }
+
+  /** Who a check belongs to when nobody is signed in on the device (E19).
+   *  The store roster decides, not a source-code constant: first active
+   *  server, else any active employee. The seed is the last resort, for the
+   *  install with an empty roster that the last-manager guard makes
+   *  impossible to reach by ordinary means. */
+  private async defaultOpener(): Promise<Employee> {
+    const roster = await this.store.listEmployees();
+    const active = roster.filter((e) => e.active);
+    const pick = active.find((e) => e.role === "server") ?? active[0];
+    return pick ? { id: pick.id, name: pick.name, role: pick.role } : STAFF[0]!;
   }
 
   async signIn(deviceId: string, pin: string): Promise<Employee | undefined> {
@@ -475,7 +495,7 @@ export class Engine {
     // who opened it (E19): the employee signed in on this device, or the
     // seeded default when nobody is, so an unsigned demo terminal still
     // attributes its checks to a real server instead of to nobody
-    const opener = this.sessions.get(envelope.deviceId) ?? STAFF[0]!;
+    const opener = this.sessions.get(envelope.deviceId) ?? await this.defaultOpener();
     const check: CheckAggregate = {
       id: randomUUID(),
       checkNo: await this.store.nextCheckNo(),
@@ -1505,6 +1525,138 @@ export class Engine {
     return this.remember(envelope, { kind: "applied" }, "table", table.name);
   }
 
+  /* --------------------- venue and roster (E21-T1) ---------------------
+   * "Osteria Nove", its address, its timezone, and three PINs used to be
+   * source code, which is a fine way to demo one restaurant and no way at
+   * all to run a second. All of it is data now; the demo values are simply
+   * the seed, because an empty POS demos badly. */
+
+  /** Who the restaurant is. Public read: a lock screen has to print the name
+   *  before anybody has signed in. */
+  async venue(): Promise<Venue> {
+    return this.store.getVenue();
+  }
+
+  /** Whether a string is a timezone this machine actually knows. Intl carries
+   *  the IANA list, so nothing here has to be maintained by hand.
+   *  supportedValuesOf is ES2023 and this project's lib is ES2022, hence the
+   *  narrow cast rather than a wider lib bump. */
+  private static knownTimezone(tz: string): boolean {
+    const zones = (Intl as unknown as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf;
+    if (!zones) return true; // an older runtime cannot check; do not invent a refusal
+    return zones("timeZone").includes(tz);
+  }
+
+  /**
+   * Rename the restaurant, move it, or correct its timezone.
+   *
+   * NOTE: `serviceDateOf` buckets the business day on SERVER-LOCAL time, so
+   * changing the stored timezone here does NOT change day bucketing. Wiring
+   * the service date to the venue timezone is its own ticket.
+   */
+  async updateVenue(
+    envelope: Envelope,
+    input: { managerPin?: string; name?: string; address?: string; timezone?: string },
+  ): Promise<CommandOutcome> {
+    const replay = await this.store.opResult(envelope.operationId);
+    if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
+    const refuse = (reason: string) => this.remember(envelope, { kind: "rejected", reason }, "venue", "venue");
+
+    if (!(await this.manager(input.managerPin))) return refuse(this.managerRefusal(input.managerPin, "editing the venue"));
+    const venue = { ...(await this.store.getVenue()) };
+
+    if (input.name !== undefined) {
+      const name = input.name.trim();
+      if (!name) return refuse("a restaurant needs a name");
+      venue.name = name;
+    }
+    // an address CAN be cleared: a ghost kitchen with no street frontage is
+    // a real thing, and a blank line prints as a blank line
+    if (input.address !== undefined) venue.address = input.address.trim();
+    if (input.timezone !== undefined) {
+      const tz = input.timezone.trim();
+      if (!Engine.knownTimezone(tz)) return refuse(`${tz} is not a timezone this machine knows`);
+      venue.timezone = tz;
+    }
+
+    await this.store.putVenue(venue);
+    return this.remember(envelope, { kind: "applied", venue }, "venue", "venue");
+  }
+
+  /** The PIN must be unambiguous across ACTIVE employees: sign-in identifies
+   *  a person BY their PIN, so two people sharing one would make every check
+   *  and every approval a coin toss. */
+  private async pinError(pin: unknown, exceptId?: string): Promise<string | undefined> {
+    if (typeof pin !== "string" || !PIN_RULE.test(pin)) return "a PIN is 4 to 6 digits";
+    const holder = await this.store.findEmployeeByPin(pin);
+    if (holder && holder.id !== exceptId) return `that PIN already belongs to ${holder.name}`;
+    return undefined;
+  }
+
+  async addEmployee(
+    envelope: Envelope,
+    input: { managerPin?: string; name?: string; role?: string; pin?: string },
+  ): Promise<CommandOutcome> {
+    const replay = await this.store.opResult(envelope.operationId);
+    if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
+    const refuse = (reason: string) => this.remember(envelope, { kind: "rejected", reason }, "employee", "new");
+
+    if (!(await this.manager(input.managerPin))) return refuse(this.managerRefusal(input.managerPin, "adding an employee"));
+    const name = (input.name ?? "").trim();
+    if (!name) return refuse("an employee needs a name");
+    if (input.role !== "server" && input.role !== "manager") return refuse("role must be server or manager");
+    const bad = await this.pinError(input.pin);
+    if (bad) return refuse(bad);
+
+    const employee: RosterEntry = { id: randomUUID(), name, role: input.role, active: true };
+    await this.store.addEmployee(employee, pinHash(input.pin as string));
+    return this.remember(envelope, { kind: "applied", employee }, "employee", employee.id);
+  }
+
+  /** Change somebody's PIN. Nobody's old PIN survives this, which is the
+   *  point: it is what a manager does the morning after one is overheard. */
+  async resetPin(envelope: Envelope, input: { managerPin?: string; employeeId?: string; pin?: string }): Promise<CommandOutcome> {
+    const replay = await this.store.opResult(envelope.operationId);
+    if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
+    const id = String(input.employeeId ?? "");
+    const refuse = (reason: string) => this.remember(envelope, { kind: "rejected", reason }, "employee", id);
+
+    if (!(await this.manager(input.managerPin))) return refuse(this.managerRefusal(input.managerPin, "resetting a PIN"));
+    const employee = await this.store.getEmployee(id);
+    if (!employee) return refuse(`no employee ${id}`);
+    const bad = await this.pinError(input.pin, employee.id);
+    if (bad) return refuse(bad);
+
+    await this.store.setEmployeePin(employee.id, pinHash(input.pin as string));
+    return this.remember(envelope, { kind: "applied", employee }, "employee", employee.id);
+  }
+
+  /** Let somebody go. SOFT, always: checks.server_id still points at them and
+   *  every report they earned still names them. The last active manager
+   *  cannot be deactivated, because a restaurant that cannot approve a void
+   *  is a restaurant that cannot open. */
+  async deactivateEmployee(envelope: Envelope, input: { managerPin?: string; employeeId?: string }): Promise<CommandOutcome> {
+    const replay = await this.store.opResult(envelope.operationId);
+    if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
+    const id = String(input.employeeId ?? "");
+    const refuse = (reason: string) => this.remember(envelope, { kind: "rejected", reason }, "employee", id);
+
+    if (!(await this.manager(input.managerPin))) return refuse(this.managerRefusal(input.managerPin, "deactivating an employee"));
+    const roster = await this.store.listEmployees();
+    const employee = roster.find((e) => e.id === id);
+    if (!employee) return refuse(`no employee ${id}`);
+    if (!employee.active) return refuse(`${employee.name} is already deactivated`);
+    if (employee.role === "manager" && roster.filter((e) => e.active && e.role === "manager").length === 1) {
+      return refuse(`${employee.name} is the only active manager; promote someone else first`);
+    }
+
+    await this.store.setEmployeeActive(employee.id, false);
+    // their session dies with the PIN: a signed-in terminal must not keep
+    // working for somebody who no longer works here
+    for (const [device, who] of this.sessions) if (who.id === employee.id) this.sessions.delete(device);
+    return this.remember(envelope, { kind: "applied", employee: { ...employee, active: false } }, "employee", employee.id);
+  }
+
   /* ------------------------------ reads ------------------------------ */
 
   /** The active menu plus the live 86 board, in one payload for the POS. */
@@ -1608,14 +1760,15 @@ export class Engine {
     const shifts = allShifts.filter((s) => serviceDateOf(s.clockIn) === date || !s.clockOut);
 
     const rows = new Map<string, ServerRow>();
+    // a check written before E19 carries no opener; it lands on the same
+    // default an unsigned device would have stamped
+    const fallback = await this.defaultOpener();
     for (const c of closed) {
-      // a check written before E19 carries no opener; it lands on the same
-      // seeded default an unsigned device would have stamped
-      const serverId = c.serverId ?? STAFF[0]!.id;
+      const serverId = c.serverId ?? fallback.id;
       let row = rows.get(serverId);
       if (!row) {
         row = {
-          serverId, serverName: c.serverName ?? STAFF[0]!.name,
+          serverId, serverName: c.serverName ?? fallback.name,
           checks: 0, covers: 0, netMinor: 0, totalMinor: 0, tipMinor: 0, discountMinor: 0,
           declaredTipsMinor: 0, voidCount: 0, voidValueMinor: 0, turnMs: 0, courses: {},
           avgCheckMinor: 0, perCoverMinor: 0, avgTurnMinutes: 0,

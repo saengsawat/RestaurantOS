@@ -7,7 +7,7 @@
  */
 import type { CheckStatus, GroupIndex, OrderItemStatus, SelectedModifier } from "@restaurantos/domain";
 import type { MenuEntry } from "./menu.js";
-import type { Employee } from "./staff.js";
+import type { Employee, RosterEntry } from "./staff.js";
 
 export interface Envelope {
   operationId: string;
@@ -271,8 +271,23 @@ export interface Store {
   listAvailability(): Promise<Availability[]>;
   setAvailability(availability: Availability): Promise<void>;
 
-  /** PIN verification (E15): stores compare HASHES, never plaintext */
+  /** PIN verification (E15): stores compare HASHES, never plaintext, and a
+   *  deactivated employee matches nothing (E21-T1). */
   findEmployeeByPin(pin: string): Promise<Employee | undefined>;
+
+  /** The venue's own identity (E21-T1). Data, not source code, so a second
+   *  restaurant can exist. */
+  getVenue(): Promise<Venue>;
+  putVenue(venue: Venue): Promise<void>;
+
+  /** The roster (E21-T1). Never carries a PIN or a hash: hashing happens in
+   *  the engine, and what comes back out is who works here, nothing more. */
+  listEmployees(): Promise<RosterEntry[]>;
+  getEmployee(id: string): Promise<RosterEntry | undefined>;
+  addEmployee(employee: RosterEntry, pinHash: string): Promise<void>;
+  setEmployeePin(id: string, pinHash: string): Promise<void>;
+  /** Deactivation is soft, always: checks.server_id still points here. */
+  setEmployeeActive(id: string, active: boolean): Promise<void>;
 
   listShifts(): Promise<Shift[]>;
   putShift(shift: Shift): Promise<void>;
@@ -325,6 +340,24 @@ export interface Shift {
   clockOut?: string;
   declaredTipsMinor?: number;
 }
+
+/** Who the restaurant is (E21-T1). Three fields, all editable, because
+ *  "Osteria Nove" being a string literal in the source is exactly what stops
+ *  a second restaurant from existing. */
+export interface Venue {
+  name: string;
+  address: string;
+  timezone: string;
+}
+
+/** The demo venue, seeded into whichever store is active. It stays the seed
+ *  (an empty POS demos badly); it is no longer the only venue possible. The
+ *  address is the one the receipt has always printed. */
+export const VENUE: Venue = {
+  name: "Osteria Nove",
+  address: "9 Vicolo della Luna, New York",
+  timezone: "America/New_York",
+};
 
 /** Osteria Nove's room, seeded into whichever store is active. */
 export const FLOOR: readonly FloorTable[] = [
