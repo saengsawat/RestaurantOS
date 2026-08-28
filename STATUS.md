@@ -2,7 +2,7 @@
 
 **The at-a-glance view: where the project is right now.** Updated at the end of every working session. Detail lives in [BACKLOG.md](BACKLOG.md) (tickets), [DECISIONS.md](DECISIONS.md) (decisions), and the [master plan](docs/plans/RestaurantOS_Master_Plan_v2.0.md) (the map).
 
-**Last updated:** 2026-08-23
+**Last updated:** 2026-08-25
 
 ## Where we are
 
