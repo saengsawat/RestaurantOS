@@ -1438,6 +1438,54 @@ describe("reads", () => {
     expect(floor.json().tables.length).toBe(13);
     expect(floor.json().tables.find((t: { name: string }) => t.name === "Table 7").check).toBeNull();
   });
+
+  it("the Tables page carries the floor editor: PIN gate, add sheet, booth (E6-T3)", async () => {
+    const app = buildServer();
+    const page = (await app.inject({ method: "GET", url: "/tables" })).body;
+
+    // a booth is finally drawable, so it finally has a class of its own
+    expect(page).toContain(".tbl.booth{border-radius:");
+    expect(page).toContain('data-s="booth"');
+
+    // the manager gate on entering edit mode, held for the visit and
+    // re-validated by the server on every command
+    expect(page).toContain('id="ovPin"');
+    expect(page).toContain('id="pinGo"');
+    expect(page).toContain("Start editing");
+    expect(page).toContain("askPin(()=>{edit=true;render();})");
+
+    // the one sheet that adds and edits
+    expect(page).toContain('id="ovSheet"');
+    expect(page).toContain('id="addBtn"');
+    expect(page).toContain("+ Add table");
+    expect(page).toContain('class="shapes"');
+    expect(page).toContain('data-seat="-1"');
+    // S / M / L at 0.75x / 1x / 1.3x of the shape default, not drag handles
+    expect(page).toContain('const SIZES=[{k:"S",f:.75},{k:"M",f:1},{k:"L",f:1.3}]');
+    expect(page).toContain('data-z="${s.k}"');
+    expect(page).toContain("Or a new area, e.g. Patio");
+
+    // all four shapes, each with the default size the ticket fixes
+    for (const [shape, w, h] of [["rect", 16, 26], ["round", 12, 22], ["booth", 20, 30], ["stool", 6, 10]] as const) {
+      expect(page).toContain(`{k:"${shape}",label:`);
+      expect(page).toContain(`w:${w},h:${h}}`);
+    }
+
+    // retire is two-step, and the confirm says what survives it
+    expect(page).toContain("Retire table");
+    expect(page).toContain("Its past checks stay in the books");
+    expect(page).toContain('id="shRetireGo"');
+
+    // the four E6-T2 commands, and drag-to-move still ungated
+    for (const url of ["/v1/floor/add", "/v1/floor/update", "/v1/floor/resize", "/v1/floor/retire"]) {
+      expect(page).toContain(url);
+    }
+    expect(page).toContain("managerPin:mgrPin");
+
+    // a refusal is the engine's own sentence, never a paraphrase
+    expect(page).toContain("sh.err=reason");
+    expect(page).toContain('class="err ${sh.err?"on":""}"');
+  });
 });
 
 /* ----------------------------- split checks (E11) -----------------------------

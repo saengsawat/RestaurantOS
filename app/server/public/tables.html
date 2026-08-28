@@ -45,7 +45,10 @@ button:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
 
 .wrap{flex:1;overflow-y:auto;padding:16px 18px}
 .tabs{display:flex;gap:8px;margin-bottom:14px}
-.tab{min-height:38px;border-radius:999px;padding:0 16px;font-size:13.5px;font-weight:600;background:var(--surface-2);color:var(--ink-2)}
+/* 44px, not the 38 this row used to be: DESIGN.md section 8 makes the touch
+   floor non-negotiable, and edit mode puts a destructive path behind these */
+.tab{min-height:var(--tap);border-radius:999px;padding:0 16px;font-size:13.5px;font-weight:600;background:var(--surface-2);color:var(--ink-2);transition:transform .1s}
+.tab:active{transform:scale(.97)}
 .tab.on{background:var(--ink);color:var(--bg)}
 .room{position:relative;width:100%;aspect-ratio:16/8;max-height:560px;background:var(--surface);
   border-radius:16px;box-shadow:var(--ring);overflow:hidden}
@@ -54,6 +57,10 @@ button:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
 .tbl:active{transform:scale(.94)}
 @media (hover:hover){.tbl:hover{box-shadow:0 6px 16px rgba(14,15,12,.14)}}
 .tbl.round,.tbl.stool{border-radius:50%}
+/* a booth is a bench: one curved back, two square ends (E6-T3). The shape
+   was in the database CHECK constraint from day one and the API only started
+   offering it in E6-T2, so this is the first time a room can draw one. */
+.tbl.booth{border-radius:34px 34px 10px 10px}
 .tbl .n{font-size:clamp(11px,1.5vw,15px);font-weight:700;line-height:1.1}
 .tbl .m{font-size:clamp(9px,1.1vw,11.5px);font-weight:600;color:var(--ink-3)}
 .tbl .d{font-family:var(--mono);font-size:clamp(9px,1vw,11px);color:var(--ink-4)}
@@ -64,6 +71,7 @@ button:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
 .tbl.late{border-color:var(--red);background:var(--red-wash);animation:latePulse 2s infinite}
 .tab.edit{margin-left:auto;background:transparent;border:1.5px solid var(--line);color:var(--ink-3)}
 .tab.edit.on{background:var(--brand);color:var(--brand-ink);border-color:transparent}
+.tab.add{background:var(--ink);color:var(--bg)}
 .room.editing{outline:2px dashed var(--brand);outline-offset:-2px}
 .editing .tbl{cursor:grab;touch-action:none}
 .editing .tbl:active{transform:none;cursor:grabbing}
@@ -73,7 +81,10 @@ button:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
 .lg .sw{width:13px;height:13px;border-radius:4px;border:2px solid}
 .note{font-size:11.5px;color:var(--ink-4)}
 
-.ov{position:fixed;inset:0;background:var(--overlay);display:none;align-items:center;justify-content:center;z-index:100;padding:16px}
+/* above the bottom tab bar's 150 (UI-T1), below the toasts' 200: on a phone
+   the rail is fixed to the bottom and would otherwise paint straight over a
+   sheet's action row */
+.ov{position:fixed;inset:0;background:var(--overlay);display:none;align-items:center;justify-content:center;z-index:160;padding:16px}
 .ov.open{display:flex}
 .modal{background:var(--surface);border-radius:16px;box-shadow:var(--shadow-lg);width:min(420px,100%);animation:pop .15s ease-out}
 @keyframes pop{from{transform:scale(.97);opacity:.6}to{transform:none;opacity:1}}
@@ -91,9 +102,66 @@ button:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
 .btn:active{transform:scale(.97)}
 .btn-p{background:var(--brand);color:var(--brand-ink)}
 .btn-s{background:var(--surface-2)}
-.toasts{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:200}
-.toast{background:var(--red);color:#fff;border-radius:999px;padding:9px 18px;font-size:13px;font-weight:600}
-@media (max-width:820px){.room{aspect-ratio:4/3;max-height:none}}
+/* neutral by default, red only for a refusal, and stacked: the shape the
+   other five pages already use. This page shouted every message in red,
+   which left "Table 9 saved" wearing the colour of a rejection. */
+.toasts{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:200;
+  display:flex;flex-direction:column;gap:8px;align-items:center}
+.toast{background:var(--ink);color:var(--bg);border-radius:999px;padding:9px 18px;font-size:13px;font-weight:600;
+  max-width:92vw;text-align:center}
+.toast.err{background:var(--red);color:#fff}
+
+/* ============================================================
+   FLOOR EDITOR (E6-T3): the sheet that draws the room.
+   Add, rename, reseat, reshape, resize and retire, all through E6-T2's
+   four manager-gated commands. Drag-to-move is untouched and still needs
+   no PIN: nudging a table during service is ordinary work, redrawing the
+   room is not.
+   ============================================================ */
+.sheet{background:var(--surface);border-radius:16px;box-shadow:var(--shadow-lg);width:min(460px,100%);
+  max-height:calc(var(--vph) - 40px);display:flex;flex-direction:column;animation:pop .15s ease-out}
+.s-b{flex:1;overflow-y:auto;padding:2px 18px 12px}
+.s-f{display:flex;gap:8px;padding:10px 18px 16px;border-top:1px solid var(--line-subtle)}
+.s-f .btn{flex:1;margin-bottom:0}
+.fh{font-size:12.5px;font-weight:700;margin:14px 2px 6px}
+.fld{width:100%;min-height:var(--tap);border-radius:10px;border:1px solid var(--line);background:var(--panel);
+  color:inherit;font:inherit;padding:10px 12px}
+/* shape tiles: 44px CSS mini-previews, no images and no icon font */
+.shapes{display:flex;gap:8px;flex-wrap:wrap}
+.shape{min-width:var(--tap);min-height:66px;border-radius:12px;padding:7px 12px 6px;background:var(--surface-2);
+  border:1.5px solid transparent;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:6px;font-size:11px;font-weight:600;color:var(--ink-3);transition:transform .1s}
+.shape:active{transform:scale(.95)}
+.shape.on{background:var(--brand-wash);border-color:var(--brand);color:var(--ink)}
+.shape i{display:block;width:30px;height:21px;border:2.5px solid var(--ink-3);border-radius:6px}
+.shape.on i{border-color:var(--ink)}
+.shape[data-s="round"] i{width:23px;height:23px;border-radius:50%}
+.shape[data-s="stool"] i{width:15px;height:15px;border-radius:50%}
+.shape[data-s="booth"] i{border-radius:11px 11px 5px 5px}
+.step{display:flex;align-items:center;gap:12px}
+.step button{width:var(--tap);height:var(--tap);border-radius:999px;background:var(--surface-2);font-size:19px;
+  transition:transform .1s}
+.step button:active{transform:scale(.95)}
+.step span{font-size:19px;font-weight:800;min-width:28px;text-align:center;font-variant-numeric:tabular-nums}
+/* the engine's own words, never a paraphrase and never a silent retry */
+.err{display:none;margin:14px 0 2px;padding:10px 12px;border-radius:10px;font-size:12.5px;font-weight:600;
+  color:var(--red);background:var(--red-wash);border:1px solid var(--red-line);line-height:1.45}
+.err.on{display:block}
+.danger{min-height:var(--tap);border-radius:999px;padding:0 18px;width:100%;background:transparent;
+  border:1.5px solid var(--red);color:var(--red);font-size:14px;font-weight:600;transition:transform .1s}
+.danger:active{transform:scale(.97)}
+.confirm{padding:12px;border-radius:12px;background:var(--red-wash);border:1px solid var(--red-line)}
+.confirm p{font-size:12.5px;color:var(--ink-2);line-height:1.5;margin-bottom:10px}
+.hint{font-size:11.5px;color:var(--ink-4);margin-top:8px;line-height:1.45}
+@media (max-width:820px){
+  .room{aspect-ratio:4/3;max-height:none}
+  /* DESIGN.md section 8: modals and the sheet go full width on a handheld,
+     and the sheet rises from the bottom clear of the home indicator */
+  .ov{padding:0;align-items:flex-end}
+  .modal,.sheet{width:100%;border-radius:16px 16px 0 0}
+  .sheet{max-height:calc(var(--vph) - 24px);padding-bottom:var(--safe-b);animation:rise .18s ease-out}
+}
+@keyframes rise{from{transform:translateY(16px);opacity:.6}to{transform:none;opacity:1}}
 /* ============================================================
    APP SHELL (UI-T1, DESIGN.md section 5 "App shell")
    Navigation is a place you go, so it lives in the left icon rail with
@@ -219,6 +287,28 @@ button:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
   </div>
 </div></div>
 
+<!-- the manager gate on entering edit mode (E6-T3). It is held for the visit
+     and sent with every structural command; the SERVER re-validates each one,
+     which is where the real gate lives. -->
+<div class="ov" id="ovPin"><div class="modal">
+  <div class="m-h"><div><h3>Manager PIN</h3><div class="sub">Redrawing the room is a manager's call</div></div><button class="m-x" data-close="ovPin">✕</button></div>
+  <div class="m-b">
+    <input class="fld" id="pinFld" inputmode="numeric" maxlength="6" placeholder="••••" autocomplete="off" aria-label="Manager PIN">
+    <p class="hint">Held for this visit and sent with every change you make. The server checks it again on every one, so a PIN it will not take is refused at the change, not here. Demo manager: Marco B. · 1122</p>
+  </div>
+  <div class="s-f">
+    <button class="btn btn-s" data-close="ovPin">Cancel</button>
+    <button class="btn btn-p" id="pinGo">Start editing</button>
+  </div>
+</div></div>
+
+<!-- one sheet for both jobs: adding a table and editing the one you tapped -->
+<div class="ov" id="ovSheet"><div class="sheet">
+  <div class="m-h"><div><h3 id="shTitle">Add table</h3><div class="sub" id="shSub"></div></div><button class="m-x" data-close="ovSheet">✕</button></div>
+  <div class="s-b" id="shBody"></div>
+  <div class="s-f" id="shFoot"></div>
+</div></div>
+
 <div class="toasts" id="toasts"></div>
 
 <script>
@@ -228,14 +318,55 @@ const money=n=>"$"+(n/100).toFixed(2);
 const DEVICE="floor-"+(localStorage.getItem("ros.floor")||(()=>{const d=crypto.randomUUID().slice(0,8);localStorage.setItem("ros.floor",d);return d;})());
 let tables=[],area=null,seatTarget=null,edit=false,drag=null;
 
-function toast(m){const el=document.createElement("div");el.className="toast";el.textContent=m;
+/* ---------- the floor editor (E6-T3) ----------
+   E6-T2 gave the engine four manager-gated commands; this is the sheet in
+   front of them. Two rules shape everything here:
+   - the PIN is asked once on entering edit mode and held in a page variable.
+     It is a convenience, not the gate: the server re-validates every command,
+     and a PIN it refuses drops out of this page and gets asked again.
+   - a size is a preset, never a drag handle. On a two-top the handles land
+     under 44px and fight drag-to-move, so S / M / L live in the sheet. */
+
+/* default size per shape, in the floor's own percent units */
+const SHAPES=[
+  {k:"rect",label:"Rect",w:16,h:26},
+  {k:"round",label:"Round",w:12,h:22},
+  {k:"booth",label:"Booth",w:20,h:30},
+  {k:"stool",label:"Stool",w:6,h:10},
+];
+const SIZES=[{k:"S",f:.75},{k:"M",f:1},{k:"L",f:1.3}];
+const shapeDef=k=>SHAPES.find(s=>s.k===k)||SHAPES[0];
+const round1=v=>Math.round(v*10)/10;
+/* the engine refuses a side outside 3..40, so the presets clamp there too:
+   a preset that cannot be saved is not a preset */
+const sizeFor=(shape,key)=>{
+  const d=shapeDef(shape),f=(SIZES.find(s=>s.k===key)||SIZES[1]).f;
+  const fit=v=>Math.min(40,Math.max(3,round1(v*f)));
+  return{w:fit(d.w),h:fit(d.h)};
+};
+/* which preset a table already IS, so the sheet opens on its real size
+   instead of always claiming M */
+function presetOf(shape,w,h){
+  let best="M",gap=Infinity;
+  for(const s of SIZES){
+    const t=sizeFor(shape,s.k),d=Math.abs(t.w-w)+Math.abs(t.h-h);
+    if(d<gap){gap=d;best=s.k;}
+  }
+  return best;
+}
+
+let mgrPin=null,pinThen=null,sh=null;
+
+function toast(m,err){const el=document.createElement("div");el.className="toast"+(err?" err":"");el.textContent=m;
   $("#toasts").appendChild(el);setTimeout(()=>el.remove(),3000);}
 
 function ago(iso){const m=Math.max(0,Math.round((Date.now()-Date.parse(iso))/60000));return m<1?"now":m+"m";}
 
 async function refresh(){
   tables=(await fetch("/v1/floor").then(r=>r.json())).tables;
-  if(!area)area=tables[0]&&tables[0].area;
+  // retiring the last table of an area leaves the tab pointing at a room
+  // that no longer exists, so fall back rather than render an empty floor
+  if(!area||!tables.some(t=>t.area===area))area=tables[0]&&tables[0].area;
   render();
 }
 
@@ -249,11 +380,17 @@ function statusOf(t){
 function render(){
   const areas=[...new Set(tables.map(t=>t.area))];
   $("#tabs").innerHTML=areas.map(a=>`<button class="tab ${a===area?"on":""}" data-a="${esc(a)}">${esc(a)}</button>`).join("")
+    +(edit?`<button class="tab add" id="addBtn">+ Add table</button>`:"")
     +`<button class="tab edit ${edit?"on":""}" id="editBtn">${edit?"Done editing":"Edit layout"}</button>`;
   document.querySelectorAll("[data-a]").forEach(b=>b.onclick=()=>{area=b.dataset.a;render();});
-  $("#editBtn").onclick=()=>{edit=!edit;if(!edit)refresh().catch(()=>{});else render();};
+  // entering edit mode asks for the PIN; leaving it re-fetches, as it always did
+  $("#editBtn").onclick=()=>{
+    if(edit){edit=false;refresh().catch(()=>{});return;}
+    askPin(()=>{edit=true;render();});
+  };
+  if(edit)$("#addBtn").onclick=()=>openSheet("add",null);
   $("#note").textContent=edit
-    ?"Layout mode: drag tables to match your room. Each drop saves to the server for every device."
+    ?"Layout mode: drag a table to move it, tap one to rename, resize or retire it. Every change saves to the server for every device."
     :"Tap an open table to seat a party (opens a real check on the server), or an occupied one to jump to its check in Service.";
   const list=tables.filter(t=>t.area===area);
   $("#roomWrap").innerHTML=`<div class="room ${edit?"editing":""}">`+list.map(t=>{
@@ -284,12 +421,15 @@ function wireDrag(btn,t){
   btn.onpointerdown=e=>{
     e.preventDefault();
     const room=btn.parentElement.getBoundingClientRect(),r=btn.getBoundingClientRect();
-    drag={t,btn,room,dx:e.clientX-r.left,dy:e.clientY-r.top,moved:false};
+    drag={t,btn,room,dx:e.clientX-r.left,dy:e.clientY-r.top,sx:e.clientX,sy:e.clientY,moved:false};
     btn.classList.add("dragging");
     btn.setPointerCapture(e.pointerId);
   };
   btn.onpointermove=e=>{
     if(!drag||drag.btn!==btn)return;
+    // a finger never holds perfectly still. Under 5px this is a TAP asking
+    // for the edit sheet, not a drag asking to move the table.
+    if(!drag.moved&&Math.abs(e.clientX-drag.sx)<5&&Math.abs(e.clientY-drag.sy)<5)return;
     const x=(e.clientX-drag.dx-drag.room.left)/drag.room.width*100;
     const y=(e.clientY-drag.dy-drag.room.top)/drag.room.height*100;
     drag.x=Math.round(Math.min(Math.max(x,0),100-t.w)*10)/10;
@@ -299,28 +439,187 @@ function wireDrag(btn,t){
   };
   btn.onpointerup=async()=>{
     const d=drag;drag=null;btn.classList.remove("dragging");
-    if(!d||!d.moved)return;
+    if(!d)return;
+    if(!d.moved){openSheet("edit",t);return;}
     d.t.x=d.x;d.t.y=d.y;
     const res=await fetch("/v1/floor/move",{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({operationId:crypto.randomUUID(),deviceId:DEVICE,tableName:d.t.name,x:d.x,y:d.y})});
-    if(!res.ok){toast("Move refused, reloading");refresh().catch(()=>{});return;}
+    if(!res.ok){toast("Move refused, reloading",true);refresh().catch(()=>{});return;}
     toast(d.t.name+" saved");
   };
   btn.onpointercancel=()=>{drag=null;btn.classList.remove("dragging");render();};
 }
+
+/* ---------- the manager gate ---------- */
+
+function askPin(then){
+  pinThen=then;
+  $("#pinFld").value=mgrPin||"";
+  $("#ovPin").classList.add("open");
+  setTimeout(()=>$("#pinFld").focus(),60);
+}
+$("#pinGo").onclick=()=>{
+  const v=$("#pinFld").value.trim();
+  if(!/^[0-9]{4,6}$/.test(v)){toast("A PIN is 4 to 6 digits",true);return;}
+  mgrPin=v;
+  $("#ovPin").classList.remove("open");
+  const then=pinThen;pinThen=null;
+  if(then)then();
+};
+$("#pinFld").onkeydown=e=>{if(e.key==="Enter")$("#pinGo").click();};
+
+/* every structural command goes through here, so the PIN is attached in
+   exactly one place and a refusal comes back as the engine's own sentence */
+async function cmd(url,body){
+  const res=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({operationId:crypto.randomUUID(),deviceId:DEVICE,managerPin:mgrPin,...body})});
+  const data=await res.json().catch(()=>({}));
+  return{ok:res.ok,reason:data.reason||"The server refused that change"};
+}
+
+/* ---------- the add / edit sheet ---------- */
+
+function openSheet(mode,t){
+  sh={mode,orig:t?{...t}:null,
+    name:t?t.name:"",
+    area:t?t.area:(area||(tables[0]&&tables[0].area)||""),
+    newArea:"",
+    seats:t?t.seats:2,
+    shape:t?t.shape:"rect",
+    size:t?presetOf(t.shape,t.w,t.h):"M",
+    confirming:false,err:""};
+  renderSheet();
+  $("#ovSheet").classList.add("open");
+}
+function closeSheet(){$("#ovSheet").classList.remove("open");sh=null;}
+
+/* a refusal never closes the sheet and never silently retries: the reason
+   sits under the fields, verbatim, with the room re-read behind it in case
+   the first of two commands already landed */
+function sheetErr(reason){
+  sh.err=reason;
+  sh.confirming=false;
+  renderSheet();
+  refresh().then(()=>{
+    if(!sh||!sh.orig)return;
+    const fresh=tables.find(x=>x.name===sh.orig.name);
+    if(fresh)sh.orig={...fresh};
+  }).catch(()=>{});
+  // a PIN the server will not take is not a typo to live with
+  if(/PIN/i.test(reason))mgrPin=null;
+}
+
+function renderSheet(){
+  const add=sh.mode==="add",sz=sizeFor(sh.shape,sh.size);
+  const areas=[...new Set(tables.map(t=>t.area))];
+  $("#shTitle").textContent=add?"Add table":sh.orig.name;
+  $("#shSub").textContent=add
+    ?"It lands in the middle of the room; drag it where it belongs"
+    :sh.orig.area+" · "+sh.orig.seats+" seats";
+  $("#shBody").innerHTML=`
+    <div class="fh">Shape</div>
+    <div class="shapes">${SHAPES.map(s=>
+      `<button class="shape ${s.k===sh.shape?"on":""}" data-s="${s.k}"><i></i>${s.label}</button>`).join("")}</div>
+    <div class="fh">Name</div>
+    <input class="fld" id="shName" maxlength="40" placeholder="Table 15" value="${esc(sh.name)}" autocomplete="off" aria-label="Table name">
+    <div class="fh">Seats</div>
+    <div class="step">
+      <button data-seat="-1" aria-label="One seat fewer">−</button>
+      <span class="num">${sh.seats}</span>
+      <button data-seat="1" aria-label="One seat more">+</button>
+    </div>
+    <div class="fh">Size</div>
+    <div class="opts">${SIZES.map(s=>
+      `<button class="opt ${s.k===sh.size?"on":""}" data-z="${s.k}">${s.k}</button>`).join("")}</div>
+    <p class="hint">${sz.w}% by ${sz.h}% of the room. No drag handles on purpose: on a two-top they land under 44px and fight the drag.</p>
+    ${add?`<div class="fh">Area</div>
+      <div class="opts">${areas.map(a=>
+        `<button class="opt ${!sh.newArea.trim()&&a===sh.area?"on":""}" data-ar="${esc(a)}">${esc(a)}</button>`).join("")}</div>
+      <input class="fld" id="shNewArea" maxlength="40" placeholder="Or a new area, e.g. Patio" value="${esc(sh.newArea)}" autocomplete="off" aria-label="New area">`:""}
+    <div class="err ${sh.err?"on":""}">${esc(sh.err)}</div>
+    ${add?"":`<div class="fh">Remove</div>${sh.confirming
+      ?`<div class="confirm">
+          <p>Retire ${esc(sh.orig.name)}? It leaves the floor plan and stops taking parties. Its past checks stay in the books, and adding the name back later brings this same table back.</p>
+          <button class="danger" id="shRetireGo">Yes, retire ${esc(sh.orig.name)}</button>
+        </div>`
+      :`<button class="danger" id="shRetire">Retire table</button>`}`}`;
+  $("#shFoot").innerHTML=`<button class="btn btn-s" data-close="ovSheet">Cancel</button>`
+    +`<button class="btn btn-p" id="shSave">${add?"Add table":"Save changes"}</button>`;
+
+  document.querySelectorAll("#shBody [data-s]").forEach(b=>b.onclick=()=>{sh.shape=b.dataset.s;renderSheet();});
+  document.querySelectorAll("#shBody [data-seat]").forEach(b=>b.onclick=()=>{
+    sh.seats=Math.max(1,sh.seats+ +b.dataset.seat);renderSheet();});
+  document.querySelectorAll("#shBody [data-z]").forEach(b=>b.onclick=()=>{sh.size=b.dataset.z;renderSheet();});
+  document.querySelectorAll("#shBody [data-ar]").forEach(b=>b.onclick=()=>{
+    sh.area=b.dataset.ar;sh.newArea="";renderSheet();});
+  // the text fields write straight to state and never re-render: rebuilding
+  // the sheet under a keystroke would take the cursor with it
+  const nm=$("#shName");if(nm)nm.oninput=()=>{sh.name=nm.value;};
+  const na=$("#shNewArea");if(na)na.oninput=()=>{
+    sh.newArea=na.value;
+    document.querySelectorAll("#shBody [data-ar]").forEach(x=>
+      x.classList.toggle("on",!na.value.trim()&&x.dataset.ar===sh.area));};
+  const rt=$("#shRetire");if(rt)rt.onclick=()=>{sh.confirming=true;renderSheet();};
+  const rg=$("#shRetireGo");if(rg)rg.onclick=retireTable;
+  $("#shSave").onclick=saveSheet;
+}
+
+async function saveSheet(){
+  const name=(sh.name||"").trim(),sz=sizeFor(sh.shape,sh.size);
+  if(sh.mode==="add"){
+    const ar=sh.newArea.trim()||sh.area;
+    const r=await cmd("/v1/floor/add",{name,area:ar,seats:sh.seats,shape:sh.shape,
+      w:sz.w,h:sz.h,x:round1((100-sz.w)/2),y:round1((100-sz.h)/2)});
+    if(!r.ok)return sheetErr(r.reason);
+    closeSheet();area=ar;await refresh();toast(name+" added to "+ar);
+    return;
+  }
+  const o=sh.orig,patch={};
+  if(name&&name!==o.name)patch.newName=name;
+  if(sh.seats!==o.seats)patch.seats=sh.seats;
+  if(sh.shape!==o.shape)patch.shape=sh.shape;
+  const resizing=sz.w!==o.w||sz.h!==o.h;
+  if(!resizing&&!Object.keys(patch).length){closeSheet();return;}
+  // size first, then the patch: the resize takes the name the table has NOW,
+  // and a rename in the same save would already have moved it
+  if(resizing){
+    const r=await cmd("/v1/floor/resize",{tableName:o.name,w:sz.w,h:sz.h});
+    if(!r.ok)return sheetErr(r.reason);
+  }
+  if(Object.keys(patch).length){
+    const r=await cmd("/v1/floor/update",{tableName:o.name,...patch});
+    if(!r.ok)return sheetErr(r.reason);
+  }
+  const shown=patch.newName||o.name;
+  closeSheet();await refresh();toast(shown+" saved");
+}
+
+async function retireTable(){
+  const name=sh.orig.name;
+  const r=await cmd("/v1/floor/retire",{tableName:name});
+  if(!r.ok)return sheetErr(r.reason);
+  closeSheet();await refresh();toast(name+" retired, its history kept");
+}
+
+// one handler for every dismiss button on the page, including the ones the
+// sheet rebuilds under itself
+document.addEventListener("click",e=>{
+  const b=e.target.closest&&e.target.closest("[data-close]");
+  if(b)document.getElementById(b.dataset.close).classList.remove("open");
+});
 
 $("#seatGo").onclick=async()=>{
   const covers=+document.querySelector("#seatCovers .opt.on").dataset.n;
   const res=await fetch("/v1/checks",{method:"POST",headers:{"Content-Type":"application/json"},
     body:JSON.stringify({operationId:crypto.randomUUID(),deviceId:DEVICE,tableName:seatTarget.name,covers})});
   const data=await res.json();
-  if(!res.ok){toast(data.reason||"refused");return;}
+  if(!res.ok){toast(data.reason||"refused",true);return;}
   location.href="/pos?check="+data.check.id;
 };
 
 function setViewportH(){document.documentElement.style.setProperty("--vph",window.innerHeight+"px");}
 addEventListener("resize",setViewportH);setViewportH();
-refresh().catch(()=>toast("Cannot reach the server"));
+refresh().catch(()=>toast("Cannot reach the server",true));
 setInterval(()=>{if(!edit)refresh().catch(()=>{});},5000);
 /* ---------- APP SHELL: rail badge counts (UI-T1) ----------
    Two cheap reads on the rail's own timer, so no page's existing poll
