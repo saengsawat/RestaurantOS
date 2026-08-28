@@ -15,7 +15,10 @@ Read `CLAUDE.md`, `design/restaurantos/DESIGN.md`, and `docs/tickets/E21-T1-venu
 - **Team section**: the roster from `GET /v1/staff` (name, role chip, active state), add employee (name, role, initial PIN entered twice), reset PIN, deactivate with a confirm; the last-manager refusal shown verbatim. PINs are never displayed.
 - The whole page is manager-territory: a PIN prompt on first mutation, held for the visit like the floor editor does.
 
-### 2. De-branding every page
+### 2. PIN fields catch up (amendment from the E21-T1 review)
+- E21-T1 accepts 4-6 digit PINs, but `pos.html`'s sign-in field and `lock.html`'s pad still assume `maxlength="4"`. Widen every PIN entry surface (sign-in, lock pad, manager-approval prompts) to accept 4-6 digits; submission behavior otherwise unchanged.
+
+### 3. De-branding every page
 - All seven page headers, the POS receipt (name + address lines), and `lock.html` (title + heading) render the venue from `GET /v1/venue` at boot instead of hardcoded "Osteria Nove" text; fallback text while loading is "RestaurantOS", never a flash of the wrong restaurant's name.
 - The `<title>` tags stay generic except lock.html, which follows the venue name.
 
