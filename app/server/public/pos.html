@@ -197,7 +197,10 @@ button.li:active{background:var(--surface-2)}
 .vrow .vm{display:block;font-size:12px;color:var(--ink-3)}
 
 /* modal */
-.ov{position:fixed;inset:0;background:var(--overlay);display:none;align-items:center;justify-content:center;z-index:100;padding:16px}
+/* above the bottom tab bar's 150 (UI-T1), below the toasts' 200: on a phone
+   the rail is fixed to the bottom and would otherwise paint straight over a
+   modal's action row (E21-T2) */
+.ov{position:fixed;inset:0;background:var(--overlay);display:none;align-items:center;justify-content:center;z-index:160;padding:16px}
 .ov.open{display:flex}
 .modal{background:var(--surface);border-radius:16px;box-shadow:var(--shadow-lg);width:min(520px,100%);
   max-height:calc(var(--vph) - 40px);display:flex;flex-direction:column;animation:pop .15s ease-out}
@@ -442,11 +445,12 @@ textarea.fld{min-height:72px;resize:vertical;font:inherit;color:inherit;line-hei
     <a class="nav-btn" href="/menu"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5.6" cy="7" r="1.1"/><circle cx="5.6" cy="12" r="1.1"/><circle cx="5.6" cy="17" r="1.1"/><path d="M9.6 7h8.8M9.6 12h8.8M9.6 17h8.8"/></svg>Menu</a>
     <a class="nav-btn" href="/close"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="7.5" width="17" height="11" rx="2.5"/><path d="M3.5 12.6h17M10 15.8h4"/></svg>Close</a>
     <a class="nav-btn" href="/reports"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.6 19.6h16.8"/><path d="M6.6 19.6v-6.4M12 19.6V5.4M17.4 19.6v-9"/></svg>Reports</a>
+    <a class="nav-btn" href="/settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7.6h9.2M18.4 7.6h1.6M4 16.4h4.6M13.8 16.4h6.2"/><circle cx="15.6" cy="7.6" r="2.4"/><circle cx="11.2" cy="16.4" r="2.4"/></svg>Settings</a>
     <div class="rail-spacer"></div>
     <div class="rail-foot">Concept build.<br>Demo data only.</div>
   </nav>
   <header class="topbar">
-    <div class="venue"><b>Osteria Nove</b><small>RestaurantOS POS · connected to the real engine</small></div>
+    <div class="venue"><b data-venue-name>RestaurantOS</b><small>RestaurantOS POS · connected to the real engine</small></div>
     <div class="screen-title">Service</div>
     <div class="top-meta">
       <span class="badge">Concept · live API</span>
@@ -550,7 +554,7 @@ textarea.fld{min-height:72px;resize:vertical;font:inherit;color:inherit;line-hei
     <div class="opts" id="voidReasons"></div>
     <input class="fld" id="voidReason" placeholder="Type the reason" style="display:none;margin-top:8px">
     <div class="og-h" style="margin-top:10px">Manager PIN, once for the batch (demo manager: Marco B. · 1122)</div>
-    <input class="fld" id="voidPin" inputmode="numeric" maxlength="4" placeholder="••••">
+    <input class="fld" id="voidPin" inputmode="numeric" maxlength="6" placeholder="••••">
   </div>
   <div class="m-f"><button class="btn btn-d" id="voidGo">Void</button></div>
 </div></div>
@@ -575,7 +579,7 @@ textarea.fld{min-height:72px;resize:vertical;font:inherit;color:inherit;line-hei
     <div class="og-h" style="margin-top:10px">Reason (required, audited)</div>
     <input class="fld" id="adjReason" placeholder="e.g. industry guest, long wait on primi">
     <div class="og-h" style="margin-top:10px">Manager PIN (demo manager: Marco B. · 1122)</div>
-    <input class="fld" id="adjPin" inputmode="numeric" maxlength="4" placeholder="••••">
+    <input class="fld" id="adjPin" inputmode="numeric" maxlength="6" placeholder="••••">
   </div>
   <div class="m-f"><button class="btn btn-p" id="adjGo">Apply</button></div>
 </div></div>
@@ -1054,7 +1058,7 @@ $("#btnWho").onclick=async()=>{
     +`<div class="og-h">Staff (demo PINs shown, concept demo)</div>
      <div class="opts">${staff.map(s=>`<button class="opt" data-pin="${esc(s.demoPin)}">${esc(s.name)} · ${esc(s.role)} · ${esc(s.demoPin)}</button>`).join("")}</div>
      <div class="og-h" style="margin-top:10px">PIN</div>
-     <input class="fld" id="whoPin" inputmode="numeric" maxlength="4" placeholder="••••">`;
+     <input class="fld" id="whoPin" inputmode="numeric" maxlength="6" placeholder="••••">`;
   $("#whoFoot").innerHTML=`<button class="btn btn-p" id="whoGo">Sign in</button>`
     +(me?`<button class="btn btn-s" id="whoClock" style="margin-left:8px">Clock out…</button>
           <button class="btn btn-s" id="whoOut" style="margin-left:8px">Sign out</button>`:"");
@@ -1076,7 +1080,7 @@ $("#btnWho").onclick=async()=>{
       `<div class="og-h">Declared cash tips ($) for ${esc(me.name)}</div>
        <input class="fld" id="ckTips" inputmode="decimal" placeholder="0.00">
        <div class="og-h" style="margin-top:10px">Your PIN confirms the declaration</div>
-       <input class="fld" id="ckPin" inputmode="numeric" maxlength="4" placeholder="••••">`;
+       <input class="fld" id="ckPin" inputmode="numeric" maxlength="6" placeholder="••••">`;
     $("#whoFoot").innerHTML=`<button class="btn btn-p" id="ckGo">Clock out</button>`;
     $("#ckGo").onclick=async()=>{
       const tips=Math.round(parseFloat($("#ckTips").value||"0")*100);
@@ -1107,7 +1111,7 @@ $("#btnMore").onclick=async()=>{
      <div class="opts" id="mgOpts">${others.map(x=>`<button class="opt" data-mg="${x.id}">${esc(x.tableName)} · #${x.checkNo}</button>`).join("")||'<span class="md">No other open checks</span>'}</div>
      <div id="mgPinWrap" style="display:none">
        <div class="og-h" style="margin-top:10px">Manager PIN (demo manager: Marco B. · 1122)</div>
-       <input class="fld" id="mgPin" inputmode="numeric" maxlength="4" placeholder="••••">
+       <input class="fld" id="mgPin" inputmode="numeric" maxlength="6" placeholder="••••">
      </div>`;
   $("#moreFoot").style.display="none";
   $("#btnGuests").onclick=()=>openGuests();
@@ -1189,8 +1193,8 @@ function renderReceipt(){
 
   $("#rcSub").textContent=c.tableName+" · check #"+c.checkNo+(pt?" · "+pt.label:"");
   $("#printArea").innerHTML=pick+`<div class="paper">
-    <h4>Osteria Nove</h4>
-    <div class="ctr">9 Vicolo della Luna · New York</div>
+    <h4>${esc(VENUE.name)}</h4>
+    ${VENUE.address?`<div class="ctr">${esc(VENUE.address)}</div>`:""}
     <div class="ctr">Concept prototype · demo data · not a fiscal receipt</div>
     <hr>
     <div class="r"><span>Check #${c.checkNo} · ${esc(c.tableName)}</span><span>${c.covers} covers</span></div>
@@ -1611,7 +1615,7 @@ function openRefundClose(){
     `<div class="tip-note">${money(owed)} goes back to the guest; the refund is recorded on the check.
        The payments already taken stay exactly as they are, and moving the money is the card provider's job.</div>
      <div class="og-h">Manager PIN (demo manager: Marco B. · 1122)</div>
-     <input class="fld" id="clPin" inputmode="numeric" maxlength="4" placeholder="••••">`;
+     <input class="fld" id="clPin" inputmode="numeric" maxlength="6" placeholder="••••">`;
   $("#clGo").textContent="Close · refund "+money(owed);
   openOv("ovClose");
   setTimeout(()=>{const el=$("#clPin");if(el)el.focus();},60);
@@ -1837,7 +1841,7 @@ function renderGuestMerge(){
         </div>`).join("")
        :`<div class="empty">No other guests to merge in.</div>`}
      ${picked?`<div class="og-h" style="margin-top:12px">Manager PIN (demo manager: Marco B. · 1122)</div>
-       <input class="fld" id="gmPin" inputmode="numeric" maxlength="4" placeholder="••••">`:""}`;
+       <input class="fld" id="gmPin" inputmode="numeric" maxlength="6" placeholder="••••">`:""}`;
   $("#gFoot").innerHTML=
     `<button class="btn btn-s" id="gmBack">◂ Back</button>
      ${picked?`<button class="btn btn-p" id="gmGo">Merge "${esc(picked.displayName)}" in</button>`:""}`;
@@ -1864,7 +1868,7 @@ function renderGuestDelete(){
   $("#gBody").innerHTML=
     `<div class="gnote">The record and its links to checks are removed. Every check stays exactly as it is, same lines, same money; it simply stops pointing at a person. This cannot be undone from here.</div>
      <div class="og-h">Manager PIN (demo manager: Marco B. · 1122)</div>
-     <input class="fld" id="gdPin" inputmode="numeric" maxlength="4" placeholder="••••">`;
+     <input class="fld" id="gdPin" inputmode="numeric" maxlength="6" placeholder="••••">`;
   $("#gFoot").innerHTML=
     `<button class="btn btn-s" id="gdBack">◂ Back</button>
      <button class="gdanger" id="gdGo" style="flex:1">Delete ${esc(g.displayName)}</button>`;
@@ -1889,6 +1893,23 @@ addEventListener("resize",setViewportH);
 setViewportH();
 refresh().catch(()=>toast("Cannot reach the server. Is it running?","err"));
 setInterval(()=>refresh().catch(()=>{}),8000);
+/* ---------- the venue's own name (E21-T2) ----------
+   The markup ships "RestaurantOS" and this replaces it with whatever the
+   restaurant is actually called. The demo's name is never in the markup: a
+   page that flashed "Osteria Nove" at somebody else's restaurant would be
+   worse than one that says nothing for forty milliseconds. Identical on all
+   seven pages; failure is silent, because a header is not worth an alarm. */
+let VENUE={name:"RestaurantOS",address:"",timezone:""};
+async function loadVenue(){
+  try{
+    const v=await fetch("/v1/venue").then(r=>r.json());
+    if(v&&v.name)VENUE=v;
+  }catch(_){}
+  document.querySelectorAll("[data-venue-name]").forEach(el=>{el.textContent=VENUE.name;});
+  document.querySelectorAll("[data-venue-address]").forEach(el=>{el.textContent=VENUE.address;});
+}
+const venueReady=loadVenue();
+
 /* ---------- APP SHELL: rail badge counts (UI-T1) ----------
    Two cheap reads on the rail's own timer, so no page's existing poll
    changes shape. Identical on all six pages. Failure is silent: a badge

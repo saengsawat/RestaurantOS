@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>RestaurantOS · Osteria Nove</title>
+<title>RestaurantOS</title>
 <style>
 :root{
   color-scheme:light;
@@ -60,6 +60,10 @@ h1{font-size:24px;letter-spacing:-.02em}
 .key{min-height:60px;border-radius:16px;background:var(--surface-2);font-size:21px;font-weight:700;transition:transform .08s}
 .key:active{transform:scale(.93);background:var(--brand-wash)}
 .key.ghost{background:transparent;box-shadow:none;font-size:17px;color:var(--ink-3)}
+/* ✓ is the one forward action on this screen, so it wears the brand once
+   it can be pressed, and reads as unavailable under four digits (E21-T2) */
+#padGo:not(:disabled){background:var(--brand);color:var(--brand-ink);font-size:21px}
+#padGo:disabled{opacity:.4;cursor:default}
 
 .staff{margin-top:16px;border-top:1px solid var(--line-subtle);padding-top:13px}
 .staff-t{font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-4);margin-bottom:8px}
@@ -76,7 +80,7 @@ h1{font-size:24px;letter-spacing:-.02em}
 <body>
 <main class="card">
   <div class="logo">R</div>
-  <h1>Osteria Nove</h1>
+  <h1 data-venue-name>RestaurantOS</h1>
   <div class="sub">RestaurantOS · enter your PIN to start service</div>
   <div class="badge">Concept prototype · demo data only</div>
 
@@ -100,8 +104,34 @@ const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"
 const DEVICE=(()=>{try{let d=localStorage.getItem("ros.device");if(!d){d="web-"+crypto.randomUUID().slice(0,8);localStorage.setItem("ros.device",d);}return d;}catch(_){return "web-anon";}})();
 let buf="";
 
+/* ---------- the venue's own name (E21-T2) ----------
+   The markup ships "RestaurantOS" and this replaces it with whatever the
+   restaurant is actually called. This is the one page whose <title> follows
+   the venue too: it is the screen a terminal sits on all day. */
+let VENUE={name:"RestaurantOS",address:"",timezone:""};
+async function loadVenue(){
+  try{
+    const v=await fetch("/v1/venue").then(r=>r.json());
+    if(v&&v.name)VENUE=v;
+  }catch(_){}
+  document.querySelectorAll("[data-venue-name]").forEach(el=>{el.textContent=VENUE.name;});
+  document.title=VENUE.name==="RestaurantOS"?"RestaurantOS":"RestaurantOS · "+VENUE.name;
+}
+loadVenue();
+
+/* PINs are 4 to 6 digits (E21-T1), so the pad cannot auto-submit the moment
+   it has four: it would lock everybody with a longer one out of their own
+   terminal. Four dots are always shown and a fifth and sixth appear as they
+   are typed; the ✓ key sends it, and six digits send themselves because
+   there is nothing more to key. */
+const PIN_MIN=4,PIN_MAX=6;
+
 function renderDots(){
-  $("#dots").innerHTML=[0,1,2,3].map(i=>`<span class="pin-dot ${i<buf.length?"on":""}"></span>`).join("");
+  const slots=Math.max(PIN_MIN,buf.length);
+  $("#dots").innerHTML=Array.from({length:slots},(_,i)=>
+    `<span class="pin-dot ${i<buf.length?"on":""}"></span>`).join("");
+  const go=$("#padGo");
+  if(go)go.disabled=buf.length<PIN_MIN;
 }
 
 async function submit(){
@@ -120,17 +150,19 @@ async function submit(){
 
 function press(k){
   if(k==="⌫"){buf=buf.slice(0,-1);renderDots();return;}
-  if(buf.length>=4)return;
+  if(k==="✓"){if(buf.length>=PIN_MIN)submit();return;}
+  if(buf.length>=PIN_MAX)return;
   buf+=k;renderDots();
-  if(buf.length===4)submit();
+  if(buf.length===PIN_MAX)submit();
 }
 
-$("#pad").innerHTML=["1","2","3","4","5","6","7","8","9","","0","⌫"].map(k=>
-  k===""?`<span></span>`:`<button class="key ${k==="⌫"?"ghost":""}" data-k="${k}">${k}</button>`).join("");
+$("#pad").innerHTML=["1","2","3","4","5","6","7","8","9","✓","0","⌫"].map(k=>
+  `<button class="key ${k==="⌫"||k==="✓"?"ghost":""}" data-k="${k}"${k==="✓"?' id="padGo" aria-label="Sign in"':""}>${k}</button>`).join("");
 document.querySelectorAll("[data-k]").forEach(b=>b.onclick=()=>press(b.dataset.k));
 addEventListener("keydown",e=>{
   if(/^[0-9]$/.test(e.key))press(e.key);
   if(e.key==="Backspace")press("⌫");
+  if(e.key==="Enter")press("✓");
 });
 
 /* the three demo PINs, off the seed constant: /v1/staff is the roster and

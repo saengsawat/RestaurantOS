@@ -1397,11 +1397,11 @@ describe("reads", () => {
   /* UI-T1: the shell DESIGN.md section 5 prescribes. Navigation is a place you
    * go, so it is the left icon rail with its badge counts; the topbar is where
    * you are. The markup is duplicated per page (each page is a self-contained
-   * zero-dependency file), so the assertion runs over all six to keep the six
-   * copies from drifting apart. */
-  it("gives all six navigable pages the app shell: rail navigates, topbar identifies", async () => {
+   * zero-dependency file), so the assertion runs over all SEVEN (Settings
+   * joined in E21-T2) to keep the copies from drifting apart. */
+  it("gives all seven navigable pages the app shell: rail navigates, topbar identifies", async () => {
     const app = buildServer();
-    const screens = ["/pos", "/tables", "/kds", "/menu", "/close", "/reports"];
+    const screens = ["/pos", "/tables", "/kds", "/menu", "/close", "/reports", "/settings"];
     for (const url of screens) {
       const body = (await app.inject({ method: "GET", url })).body;
       expect(body).toContain('<nav class="navrail" aria-label="Screens">');
@@ -1411,8 +1411,8 @@ describe("reads", () => {
       for (const dest of screens) expect(body).toContain(`href="${dest}"`);
       expect(body.match(/class="nav-btn on" aria-current="page"/g)).toHaveLength(1);
       expect(body).toContain(`class="nav-btn on" aria-current="page" href="${url}"`);
-      // six icons, inline SVG in one stroke style, never emoji
-      expect(body.match(/<svg viewBox="0 0 24 24" aria-hidden="true">/g)).toHaveLength(6);
+      // seven icons, inline SVG in one stroke style, never emoji
+      expect(body.match(/<svg viewBox="0 0 24 24" aria-hidden="true">/g)).toHaveLength(7);
       // the rail carries the two live counts the data already supports
       expect(body).toContain('id="navTables"');
       expect(body).toContain('id="navKds"');
@@ -1426,6 +1426,101 @@ describe("reads", () => {
     }
     // the lock screen stays a fullscreen PIN pad: no rail, nowhere to go yet
     expect((await app.inject({ method: "GET", url: "/" })).body).not.toContain("navrail");
+  });
+
+  /* E21-T2: the demo restaurant's name is not in anybody's markup any more.
+   * Every page ships "RestaurantOS" and asks the server who it is actually
+   * serving, so a second restaurant never sees somebody else's name flash. */
+  it("takes the venue's name off the walls of all seven pages and the lock screen", async () => {
+    const app = buildServer();
+    for (const url of ["/pos", "/tables", "/kds", "/menu", "/close", "/reports", "/settings", "/"]) {
+      const body = (await app.inject({ method: "GET", url })).body;
+      expect(body, `${url} still names the demo venue`).not.toContain("<b>Osteria Nove</b>");
+      expect(body, `${url} still names the demo venue`).not.toContain("<h1>Osteria Nove</h1>");
+      expect(body, `${url} does not read the venue`).toContain('fetch("/v1/venue")');
+      expect(body).toContain("data-venue-name");
+      // the fallback is the product's name, never a guess at the restaurant's
+      expect(body).toContain('let VENUE={name:"RestaurantOS"');
+    }
+    // the lock screen's title follows the venue; the rest stay generic
+    const lock = (await app.inject({ method: "GET", url: "/" })).body;
+    expect(lock).toContain("<title>RestaurantOS</title>");
+    expect(lock).toContain('document.title=VENUE.name==="RestaurantOS"');
+    expect((await app.inject({ method: "GET", url: "/pos" })).body).toContain("<title>RestaurantOS POS · connected</title>");
+    // and the receipt prints the venue it was actually served at
+    const pos = (await app.inject({ method: "GET", url: "/pos" })).body;
+    expect(pos).toContain("<h4>${esc(VENUE.name)}</h4>");
+    expect(pos).toContain("${esc(VENUE.address)}");
+    expect(pos).not.toContain("9 Vicolo della Luna");
+  });
+
+  /* E21-T2: E21-T1 accepts 4 to 6 digit PINs, so every surface that takes one
+   * has to. The lock pad was the sharp edge: it hard-capped at four AND
+   * auto-submitted there, which locked anyone with a longer PIN out. */
+  it("lets every PIN surface take 4 to 6 digits", async () => {
+    const app = buildServer();
+    const pos = (await app.inject({ method: "GET", url: "/pos" })).body;
+    expect(pos).not.toContain('maxlength="4"');
+    expect(pos.match(/maxlength="6" placeholder="••••"/g)).toHaveLength(8);
+
+    const lock = (await app.inject({ method: "GET", url: "/" })).body;
+    expect(lock).toContain("const PIN_MIN=4,PIN_MAX=6");
+    expect(lock).toContain("if(buf.length>=PIN_MAX)return");
+    expect(lock).toContain("if(buf.length===PIN_MAX)submit()");
+    // an explicit send key, because the pad can no longer submit itself at four
+    expect(lock).toContain('id="padGo"');
+    expect(lock).toContain('if(k==="✓"){if(buf.length>=PIN_MIN)submit();return;}');
+    expect(lock).toContain('if(e.key==="Enter")press("✓")');
+
+    // the two manager gates the UI holds for a visit take the same range
+    for (const url of ["/tables", "/settings"]) {
+      const body = (await app.inject({ method: "GET", url })).body;
+      expect(body).toContain('id="pinFld" inputmode="numeric" maxlength="6"');
+      expect(body).toContain("/^[0-9]{4,6}$/.test(v)");
+    }
+  });
+
+  /* E21-T2: the Settings screen itself. */
+  it("serves /settings with the Venue form and the Team roster", async () => {
+    const app = buildServer();
+    const res = await app.inject({ method: "GET", url: "/settings" });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-type"]).toContain("text/html");
+    const body = res.body;
+
+    // venue: the three fields, saved through the manager-gated update
+    expect(body).toContain(">Venue<");
+    expect(body).toContain('id="vName"');
+    expect(body).toContain('id="vAddr"');
+    expect(body).toContain('id="vTz"');
+    expect(body).toContain('cmd("/v1/venue"');
+    // a filtered list over the runtime's IANA zones, not a 400-row select
+    expect(body).toContain('Intl.supportedValuesOf("timeZone")');
+    expect(body).toContain('class="tzlist"');
+    expect(body).not.toContain("<select");
+    // the caveat E21-T1 wrote into the engine is said out loud here too
+    expect(body).toContain("business day still buckets on the server's own clock");
+
+    // team: the roster read plus the three commands
+    expect(body).toContain(">Team<");
+    expect(body).toContain('fetch("/v1/staff")');
+    expect(body).toContain('cmd("/v1/staff"');
+    expect(body).toContain('/pin"');
+    expect(body).toContain('/deactivate"');
+    expect(body).toContain("Reset PIN");
+    expect(body).toContain("Deactivate");
+    // an initial PIN typed twice, checked here, everything else left to the engine
+    expect(body).toContain('pinPair("aPin","aPin2")');
+    expect(body).toContain("Those two PINs are not the same");
+    // a PIN is never rendered, and deactivation says what survives it
+    expect(body).not.toContain("demoPin");
+    expect(body).toContain("Every check they opened keeps their name on it");
+
+    // manager territory: gated on the first mutation, held for the visit
+    expect(body).toContain('id="ovPin"');
+    expect(body).toContain("const gated=job=>{mgrPin?job():askPin(job);}");
+    // and refusals are the engine's own sentence
+    expect(body).toContain('showErr("#vErr",r.reason)');
   });
 
   it("serves the KDS, Tables, and Close pages and the floor", async () => {

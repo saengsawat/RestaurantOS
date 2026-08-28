@@ -111,7 +111,10 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--brand);outline-offs
 .foot{font-size:11.5px;color:var(--ink-4);margin:20px 2px 0;line-height:1.55}
 
 /* detail card (Lightspeed-style popover, rendered as a modal so touch works) */
-.ov{position:fixed;inset:0;background:var(--overlay);display:none;align-items:center;justify-content:center;z-index:100;padding:16px}
+/* above the bottom tab bar's 150 (UI-T1), below the toasts' 200: on a phone
+   the rail is fixed to the bottom and would otherwise paint straight over a
+   modal's action row (E21-T2) */
+.ov{position:fixed;inset:0;background:var(--overlay);display:none;align-items:center;justify-content:center;z-index:160;padding:16px}
 .ov.open{display:flex}
 .modal{background:var(--surface);border-radius:16px;box-shadow:var(--shadow-lg);width:min(460px,100%);
   max-height:calc(var(--vph) - 32px);display:flex;flex-direction:column;animation:pop .15s ease-out}
@@ -248,11 +251,12 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--brand);outline-offs
     <a class="nav-btn" href="/menu"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5.6" cy="7" r="1.1"/><circle cx="5.6" cy="12" r="1.1"/><circle cx="5.6" cy="17" r="1.1"/><path d="M9.6 7h8.8M9.6 12h8.8M9.6 17h8.8"/></svg>Menu</a>
     <a class="nav-btn" href="/close"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="7.5" width="17" height="11" rx="2.5"/><path d="M3.5 12.6h17M10 15.8h4"/></svg>Close</a>
     <a class="nav-btn on" aria-current="page" href="/reports"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.6 19.6h16.8"/><path d="M6.6 19.6v-6.4M12 19.6V5.4M17.4 19.6v-9"/></svg>Reports</a>
+    <a class="nav-btn" href="/settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7.6h9.2M18.4 7.6h1.6M4 16.4h4.6M13.8 16.4h6.2"/><circle cx="15.6" cy="7.6" r="2.4"/><circle cx="11.2" cy="16.4" r="2.4"/></svg>Settings</a>
     <div class="rail-spacer"></div>
     <div class="rail-foot">Concept build.<br>Demo data only.</div>
   </nav>
   <header class="topbar">
-    <div class="venue"><b>Osteria Nove</b><small>RestaurantOS operator report · live from the ledger</small></div>
+    <div class="venue"><b data-venue-name>RestaurantOS</b><small>RestaurantOS operator report · live from the ledger</small></div>
     <div class="screen-title">Reports</div>
     <div class="top-meta"></div>
   </header>
@@ -273,7 +277,7 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--brand);outline-offs
   <p class="cap">Quiet hours are promotion hours; put your best servers on the dark ones.</p>
   <p class="cap" id="heatNote"></p>
 
-  <p class="foot">Every figure on this page comes from the ledger: closed checks, their lines, their payments, their shifts. Nothing here is stored as a report, it is computed on read, so a number cannot drift from the money it describes. This page formats what the server sends and does no money math of its own. Demo data only: Osteria Nove is a fictional restaurant and these are concept-build figures.</p>
+  <p class="foot">Every figure on this page comes from the ledger: closed checks, their lines, their payments, their shifts. Nothing here is stored as a report, it is computed on read, so a number cannot drift from the money it describes. This page formats what the server sends and does no money math of its own. Demo data only: this is a fictional restaurant and these are concept-build figures.</p>
 </div>
   </div>
 </div>
@@ -495,6 +499,23 @@ if(here)here.scrollIntoView({block:"nearest",inline:"end"});
 refresh().catch(()=>toast("Cannot reach the server","err"));
 /* reports change slowly, so poll gently, and never while a card is open */
 setInterval(()=>{if(!$("#ov").classList.contains("open"))refresh().catch(()=>{});},15000);
+/* ---------- the venue's own name (E21-T2) ----------
+   The markup ships "RestaurantOS" and this replaces it with whatever the
+   restaurant is actually called. The demo's name is never in the markup: a
+   page that flashed "Osteria Nove" at somebody else's restaurant would be
+   worse than one that says nothing for forty milliseconds. Identical on all
+   seven pages; failure is silent, because a header is not worth an alarm. */
+let VENUE={name:"RestaurantOS",address:"",timezone:""};
+async function loadVenue(){
+  try{
+    const v=await fetch("/v1/venue").then(r=>r.json());
+    if(v&&v.name)VENUE=v;
+  }catch(_){}
+  document.querySelectorAll("[data-venue-name]").forEach(el=>{el.textContent=VENUE.name;});
+  document.querySelectorAll("[data-venue-address]").forEach(el=>{el.textContent=VENUE.address;});
+}
+const venueReady=loadVenue();
+
 /* ---------- APP SHELL: rail badge counts (UI-T1) ----------
    Two cheap reads on the rail's own timer, so no page's existing poll
    changes shape. Identical on all six pages. Failure is silent: a badge

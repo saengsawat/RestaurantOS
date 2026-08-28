@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>RestaurantOS Settings · connected</title>
+<style>
+:root{
+  color-scheme:light;
+  --brand:#9fe870;--brand-ink:#163300;--brand-wash:rgba(159,232,112,.18);
+  --bg:#f2f1ec;--panel:#fff;--surface:#fff;--surface-2:#e9ebe4;
+  --ink:#0e0f0c;--ink-2:#3f423d;--ink-3:#5f635c;--ink-4:#787c74;
+  --info:#0a7ea4;--info-wash:rgba(10,126,164,.10);--info-line:rgba(10,126,164,.30);
+  --amber:#a16207;--amber-wash:rgba(161,98,7,.10);--amber-line:rgba(161,98,7,.30);
+  --green:#116e3b;--green-wash:rgba(17,110,59,.10);--green-line:rgba(17,110,59,.32);
+  --red:#c22f35;--red-wash:rgba(194,47,53,.09);--red-line:rgba(194,47,53,.32);
+  --line:rgba(14,15,12,.12);--line-subtle:rgba(14,15,12,.06);
+  --ring:0 0 0 1px rgba(14,15,12,.12);--shadow-lg:0 16px 40px rgba(14,15,12,.16);
+  --overlay:rgba(14,15,12,.45);
+  --font:"Inter",ui-sans-serif,system-ui,sans-serif;--mono:ui-monospace,Consolas,monospace;
+  --rail:86px;--topbar:56px;--tap:44px;--safe-b:env(safe-area-inset-bottom,0px);
+  --vph:100vh;
+}
+@supports (height:100dvh){:root{--vph:100dvh}}
+@media (prefers-color-scheme:dark){:root{
+  color-scheme:dark;
+  --bg:#0e0f0c;--panel:#161814;--surface:#1d201b;--surface-2:#282c26;
+  --ink:#f2f1ec;--ink-2:#c9cdc4;--ink-3:#9a9e94;--ink-4:#83877d;
+  --info:#4cc3e8;--info-wash:rgba(76,195,232,.12);--info-line:rgba(76,195,232,.34);
+  --amber:#e3b341;--amber-wash:rgba(227,179,65,.12);--amber-line:rgba(227,179,65,.34);
+  --green:#34d399;--green-wash:rgba(52,211,153,.11);--green-line:rgba(52,211,153,.34);
+  --red:#f0555a;--red-wash:rgba(240,85,90,.12);--red-line:rgba(240,85,90,.36);
+  --line:rgba(242,241,236,.10);--line-subtle:rgba(242,241,236,.05);
+  --ring:0 0 0 1px rgba(242,241,236,.10);--overlay:rgba(0,0,0,.6);
+}}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:var(--vph)}
+body{background:var(--bg);color:var(--ink);font:14.5px/1.45 var(--font);overflow:hidden;user-select:none;
+  -webkit-font-smoothing:antialiased;display:flex;flex-direction:column}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+.num{font-variant-numeric:tabular-nums}
+
+.chip{border-radius:999px;padding:2px 10px;font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;border:1px solid}
+.chip.green{color:var(--green);background:var(--green-wash);border-color:var(--green-line)}
+.chip.amber{color:var(--amber);background:var(--amber-wash);border-color:var(--amber-line)}
+.chip.red{color:var(--red);background:var(--red-wash);border-color:var(--red-line)}
+.chip.info{color:var(--info);background:var(--info-wash);border-color:var(--info-line)}
+.chip.mut{color:var(--ink-3);background:var(--surface-2);border-color:var(--line)}
+
+.sec-h{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);margin:16px 2px 8px}
+.course-h{font-size:11px;font-weight:700;letter-spacing:.05em;color:var(--ink-4);margin:10px 2px 4px}
+.blk{background:var(--surface);border-radius:14px;box-shadow:var(--ring);padding:2px 15px;margin-bottom:8px}
+.row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line-subtle);flex-wrap:wrap}
+.row:last-child{border-bottom:none}
+.row .nm{font-weight:600;min-width:180px;flex:1}
+.row .nm small{display:block;font-weight:400;font-size:11px;color:var(--ink-4)}
+.row .pr{font-family:var(--mono);font-weight:700;width:76px;text-align:right}
+.row.dead .nm,.row.dead .pr{color:var(--ink-4);text-decoration:line-through}
+.btn{min-height:40px;border-radius:999px;font-size:13px;font-weight:600;padding:0 14px;
+  display:inline-flex;align-items:center;justify-content:center;transition:transform .1s}
+.btn:active{transform:scale(.97)}
+@media (hover:hover){.btn:hover{filter:brightness(.96)}}
+.btn-p{background:var(--brand);color:var(--brand-ink)}
+.btn-s{background:var(--surface-2)}
+.btn-lg{min-height:46px;font-size:14.5px;padding:0 20px}
+.btn:disabled{opacity:.45;cursor:default}
+.note{font-size:12px;color:var(--ink-4);margin:6px 2px 0}
+
+/* above the bottom tab bar's 150 (UI-T1), below the toasts' 200: on a phone
+   the rail is fixed to the bottom and would otherwise paint straight over a
+   modal's action row (E21-T2) */
+.ov{position:fixed;inset:0;background:var(--overlay);display:none;align-items:center;justify-content:center;z-index:160;padding:16px}
+.ov.open{display:flex}
+.modal{background:var(--surface);border-radius:16px;box-shadow:var(--shadow-lg);width:min(420px,100%);max-height:92vh;overflow-y:auto;animation:pop .15s ease-out}
+@keyframes pop{from{transform:scale(.97);opacity:.6}to{transform:none;opacity:1}}
+.m-h{display:flex;justify-content:space-between;align-items:center;padding:15px 18px 8px}
+.m-h h3{font-size:18px;font-weight:700}
+.m-h .sub{font-size:12px;color:var(--ink-3)}
+.m-x{min-width:36px;min-height:36px;border-radius:999px;background:var(--surface-2)}
+.m-b{padding:2px 18px 6px}
+.m-f{padding:8px 18px 16px}
+.m-f .btn{width:100%}
+.fl{font-size:12.5px;font-weight:700;margin:10px 0 4px}
+.fld{width:100%;min-height:44px;border-radius:10px;border:1px solid var(--line);background:var(--panel);
+  color:var(--ink);font:inherit;padding:0 12px}
+select.fld{padding:0 8px}
+.toasts{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:200;display:flex;flex-direction:column;gap:8px;align-items:center}
+.toast{background:var(--ink);color:var(--bg);border-radius:999px;padding:9px 18px;font-size:13px;font-weight:600;max-width:92vw}
+.toast.err{background:var(--red);color:#fff}
+
+
+/* This block is emitted AFTER the shared chrome on purpose: the responsive
+   rules below override .ov and .modal, and a media query adds no specificity,
+   so source order is the only thing that decides. */
+.wrap{flex:1;overflow-y:auto;padding:16px 18px;max-width:1080px;width:100%;margin:0 auto}
+.sec-h{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);margin:18px 2px 8px}
+.sec-h:first-of-type{margin-top:8px}
+.blk{background:var(--surface);border-radius:14px;box-shadow:var(--ring);padding:2px 15px;margin-bottom:8px}
+.blk.pad{padding:6px 15px 16px}
+/* 44px is the floor DESIGN.md section 8 sets, and this page puts a
+   destructive action in a list row, which is the last place to shave it */
+.btn{min-height:var(--tap)}
+.m-x{min-width:var(--tap);min-height:var(--tap)}
+.row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line-subtle);flex-wrap:wrap}
+.row:last-child{border-bottom:none}
+.row .nm{font-weight:600;min-width:150px;flex:1}
+.row .nm small{display:block;font-weight:400;font-size:11px;color:var(--ink-4)}
+.row.off .nm{color:var(--ink-4)}
+.note{font-size:12px;color:var(--ink-4);margin:8px 2px 0;line-height:1.5}
+.acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.fl{font-size:12.5px;font-weight:700;margin:14px 0 5px}
+.fld{width:100%;min-height:var(--tap);border-radius:10px;border:1px solid var(--line);background:var(--panel);
+  color:var(--ink);font:inherit;padding:0 12px}
+/* the timezone picker: a filtered list, not a 400-row select. Typing three
+   letters of a city is faster than scrolling half the planet. */
+.tzlist{display:flex;flex-direction:column;gap:4px;margin-top:6px;max-height:216px;overflow-y:auto}
+.tzlist:empty{display:none}
+.tz{min-height:var(--tap);border-radius:10px;padding:0 12px;text-align:left;background:var(--surface-2);
+  color:var(--ink-2);font-size:13.5px;font-weight:600;transition:transform .1s}
+.tz:active{transform:scale(.98)}
+.tz.on{background:var(--brand-wash);color:var(--ink);box-shadow:inset 0 0 0 1.5px var(--brand)}
+.tzmore{font-size:11.5px;color:var(--ink-4);padding:4px 2px}
+/* the engine's own words, never a paraphrase */
+.err{display:none;margin-top:14px;padding:10px 12px;border-radius:10px;font-size:12.5px;font-weight:600;
+  color:var(--red);background:var(--red-wash);border:1px solid var(--red-line);line-height:1.45}
+.err.on{display:block}
+.btn-danger{background:transparent;border:1.5px solid var(--red);color:var(--red)}
+.confirm{padding:12px;border-radius:12px;background:var(--red-wash);border:1px solid var(--red-line);margin-top:8px}
+.confirm p{font-size:12.5px;color:var(--ink-2);line-height:1.5}
+.opts{display:flex;gap:7px;flex-wrap:wrap}
+.opt{min-height:var(--tap);border-radius:999px;padding:0 16px;font-size:13.5px;font-weight:600;
+  background:var(--surface-2);color:var(--ink-2);border:1.5px solid transparent;transition:transform .1s}
+.opt:active{transform:scale(.96)}
+.opt.on{background:var(--brand-wash);color:var(--ink);border-color:var(--brand)}
+@media (max-width:820px){
+  .ov{padding:0;align-items:flex-end}
+  .modal{width:100%;border-radius:16px 16px 0 0;padding-bottom:var(--safe-b)}
+  .row .nm{min-width:100%}
+}
+/* ============================================================
+   APP SHELL (UI-T1, DESIGN.md section 5 "App shell")
+   Navigation is a place you go, so it lives in the left icon rail with
+   its badge counts. The topbar is where you are: venue, screen, and
+   session state, nothing you navigate with. Icons are inline SVG in one
+   stroke style, never emoji.
+
+   This block is duplicated verbatim on all six navigable pages. Each
+   page is a self-contained zero-dependency file, so duplication is the
+   accepted cost; keep the block identical everywhere so extracting it
+   later is mechanical rather than a merge.
+   ============================================================ */
+/* minmax(0,1fr), not 1fr: a grid item's automatic minimum is its
+   min-content width, so one unshrinkable chip in the topbar would push
+   the whole shell wider than the phone and the page would scroll
+   sideways. The content column is allowed to be narrower than its
+   contents; the contents clip or ellipsis instead. */
+.shell{display:grid;grid-template-columns:var(--rail) minmax(0,1fr);grid-template-rows:var(--topbar) 1fr;
+  height:var(--vph);overflow:hidden}
+.navrail{grid-row:1/3;background:var(--panel);border-right:1px solid var(--line);overflow-y:auto;
+  display:flex;flex-direction:column;align-items:center;gap:4px;padding:12px 0 14px;
+  transition:background-color .25s ease,border-color .25s ease}
+.rail-logo{width:38px;height:38px;flex-shrink:0;border-radius:999px;background:var(--brand);color:var(--brand-ink);
+  display:flex;align-items:center;justify-content:center;font-weight:800;font-size:17px;margin-bottom:12px}
+.nav-btn{width:66px;min-height:var(--tap);flex-shrink:0;padding:7px 0 6px;border-radius:12px;text-decoration:none;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;position:relative;
+  color:var(--ink-3);font-size:11px;font-weight:600;transition:background-color .15s ease,color .15s ease}
+.nav-btn svg{width:23px;height:23px;fill:none;stroke:currentColor;stroke-width:1.8;
+  stroke-linecap:round;stroke-linejoin:round}
+.nav-btn:active{transform:scale(.96)}
+.nav-btn.on{background:var(--brand-wash);color:var(--ink)}
+.nav-btn:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+/* the badge sits over the icon, never over the label: text that wraps and a
+   badge that floats collide the moment the rail narrows */
+.nav-badge{position:absolute;top:2px;right:8px;min-width:18px;height:18px;padding:0 5px;border-radius:999px;
+  background:var(--red);color:#fff;font-size:11px;font-weight:700;line-height:18px;text-align:center;
+  font-variant-numeric:tabular-nums}
+.nav-badge:empty{display:none}
+.rail-spacer{flex:1}
+.rail-foot{font-size:10px;color:var(--ink-4);text-align:center;padding:0 8px;line-height:1.35}
+.topbar{display:flex;align-items:center;gap:12px;min-width:0;overflow:hidden;padding:0 16px;
+  background:var(--panel);border-bottom:1px solid var(--line);
+  transition:background-color .25s ease,border-color .25s ease}
+.venue{min-width:0}
+.venue b{display:block;font-size:15px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.venue small{display:block;font-size:10px;color:var(--ink-4);letter-spacing:.05em;text-transform:uppercase;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.screen-title{flex-shrink:0;font-size:13px;font-weight:700;color:var(--ink-2);
+  background:var(--surface-2);border-radius:999px;padding:5px 12px;white-space:nowrap}
+.top-meta{margin-left:auto;display:flex;align-items:center;gap:10px;flex-shrink:0}
+.shellbody{min-width:0;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+@media (hover:hover){
+  .nav-btn:hover{background:var(--surface-2);color:var(--ink)}
+  .nav-btn.on:hover{background:var(--brand-wash)}
+}
+@media (hover:none){.nav-btn:hover{background:none;color:var(--ink-3)}.nav-btn.on:hover{background:var(--brand-wash);color:var(--ink)}}
+@media (max-width:980px) and (min-width:821px){
+  :root{--rail:64px}
+  .nav-btn{width:52px;font-size:0;gap:0}
+  .nav-btn svg{width:25px;height:25px}
+  .rail-foot{display:none}
+}
+/* Phones: the rail becomes the bottom tab bar (DESIGN.md section 8), safe
+   area included, and the topbar stays one row. The screen title goes with
+   the rail: the active tab already says which screen you are on, and the
+   row is worth more to the session chrome than to a second label. */
+@media (max-width:820px){
+  .shell{grid-template-columns:minmax(0,1fr)}
+  .navrail{position:fixed;left:0;right:0;bottom:0;top:auto;grid-row:auto;z-index:150;overflow:visible;
+    flex-direction:row;justify-content:space-around;align-items:center;gap:2px;
+    height:calc(58px + var(--safe-b));padding:4px 4px calc(4px + var(--safe-b));
+    border-right:none;border-top:1px solid var(--line)}
+  .rail-logo,.rail-spacer,.rail-foot,.screen-title{display:none}
+  .nav-btn{width:auto;flex:1;min-height:48px;font-size:10px;gap:1px;padding:4px 0}
+  .nav-btn svg{width:21px;height:21px}
+  .shellbody{padding-bottom:calc(58px + var(--safe-b))}
+  .topbar{padding:0 12px;gap:8px}
+  .venue small{display:none}
+}
+</style>
+</head>
+<body>
+<div class="shell">
+  <!-- ===== APP SHELL: navigation rail (UI-T1). Identical markup on all six
+       navigable pages; only which entry carries "on" differs. ===== -->
+  <nav class="navrail" aria-label="Screens">
+    <div class="rail-logo" aria-hidden="true">R</div>
+    <a class="nav-btn" href="/pos"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3.5h12v17l-3-1.8-3 1.8-3-1.8-3 1.8z"/><path d="M9.2 8.6h5.6M9.2 12.6h5.6"/></svg>Service</a>
+    <a class="nav-btn" href="/tables"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="5"/><path d="M12 3.6v2.2M12 18.2v2.2M3.6 12h2.2M18.2 12h2.2"/></svg>Tables<span class="nav-badge" id="navTables"></span></a>
+    <a class="nav-btn" href="/kds"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 18.6h17"/><path d="M5.5 18.6a6.5 6.5 0 0 1 13 0"/><path d="M12 12.1V9.9"/></svg>Kitchen<span class="nav-badge" id="navKds"></span></a>
+    <a class="nav-btn" href="/menu"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5.6" cy="7" r="1.1"/><circle cx="5.6" cy="12" r="1.1"/><circle cx="5.6" cy="17" r="1.1"/><path d="M9.6 7h8.8M9.6 12h8.8M9.6 17h8.8"/></svg>Menu</a>
+    <a class="nav-btn" href="/close"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="7.5" width="17" height="11" rx="2.5"/><path d="M3.5 12.6h17M10 15.8h4"/></svg>Close</a>
+    <a class="nav-btn" href="/reports"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.6 19.6h16.8"/><path d="M6.6 19.6v-6.4M12 19.6V5.4M17.4 19.6v-9"/></svg>Reports</a>
+    <a class="nav-btn on" aria-current="page" href="/settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7.6h9.2M18.4 7.6h1.6M4 16.4h4.6M13.8 16.4h6.2"/><circle cx="15.6" cy="7.6" r="2.4"/><circle cx="11.2" cy="16.4" r="2.4"/></svg>Settings</a>
+    <div class="rail-spacer"></div>
+    <div class="rail-foot">Concept build.<br>Demo data only.</div>
+  </nav>
+  <header class="topbar">
+    <div class="venue"><b data-venue-name>RestaurantOS</b><small>RestaurantOS settings · venue and team</small></div>
+    <div class="screen-title">Settings</div>
+    <div class="top-meta"></div>
+  </header>
+  <div class="shellbody">
+<div class="wrap">
+  <p class="note">This is where the restaurant stops being a demo. The name in every header, the address on every receipt, and the people who can sign in are all data on the server, so all of it is yours to set. Every change here is manager work: the PIN is asked once and checked again on the server for each one.</p>
+
+  <div class="sec-h">Venue</div>
+  <div class="blk pad">
+    <div class="fl">Name</div>
+    <input class="fld" id="vName" maxlength="80" autocomplete="off" placeholder="What the headers say">
+    <div class="fl">Address</div>
+    <input class="fld" id="vAddr" maxlength="160" autocomplete="off" placeholder="What the receipt prints">
+    <div class="fl">Timezone</div>
+    <input class="fld" id="vTz" autocomplete="off" placeholder="Type a city, e.g. Chicago">
+    <div class="tzlist" id="tzList"></div>
+    <p class="note">The business day still buckets on the server's own clock, so changing this does not move which day a late check lands on yet. That wiring is its own ticket.</p>
+    <div class="err" id="vErr"></div>
+    <div class="acts"><button class="btn btn-p btn-lg" id="vSave">Save venue</button></div>
+  </div>
+
+  <div class="sec-h">Team</div>
+  <div class="blk" id="roster"></div>
+  <div class="acts"><button class="btn btn-s btn-lg" id="addBtn">+ Add employee</button></div>
+  <p class="note">Deactivating is soft and always will be: their PIN stops opening anything, and every check they ever opened still carries their name. PINs are stored hashed and are never shown here, not even to a manager, because the only honest answer to a forgotten PIN is a new one.</p>
+</div>
+  </div>
+</div>
+
+<!-- the manager gate, asked once and held for the visit. The server checks
+     it again on every command, which is where the real gate lives. -->
+<div class="ov" id="ovPin"><div class="modal">
+  <div class="m-h"><div><h3>Manager PIN</h3><div class="sub">Settings are manager territory</div></div><button class="m-x" data-close="ovPin">✕</button></div>
+  <div class="m-b">
+    <input class="fld" id="pinFld" inputmode="numeric" maxlength="6" placeholder="••••" autocomplete="off" aria-label="Manager PIN">
+    <p class="note">Demo manager: Marco B. · 1122</p>
+  </div>
+  <div class="m-f"><button class="btn btn-p btn-lg" id="pinGo">Continue</button></div>
+</div></div>
+
+<div class="ov" id="ovForm"><div class="modal">
+  <div class="m-h"><div><h3 id="fTitle"></h3><div class="sub" id="fSub"></div></div><button class="m-x" data-close="ovForm">✕</button></div>
+  <div class="m-b" id="fBody"></div>
+  <div class="m-f"><button class="btn btn-p btn-lg" id="fGo"></button></div>
+</div></div>
+
+<div class="toasts" id="toasts"></div>
+
+<script>
+/* ---------- the venue's own name (E21-T2) ----------
+   The markup ships "RestaurantOS" and this replaces it with whatever the
+   restaurant is actually called. The demo's name is never in the markup: a
+   page that flashed "Osteria Nove" at somebody else's restaurant would be
+   worse than one that says nothing for forty milliseconds. Identical on all
+   seven pages; failure is silent, because a header is not worth an alarm. */
+let VENUE={name:"RestaurantOS",address:"",timezone:""};
+async function loadVenue(){
+  try{
+    const v=await fetch("/v1/venue").then(r=>r.json());
+    if(v&&v.name)VENUE=v;
+  }catch(_){}
+  document.querySelectorAll("[data-venue-name]").forEach(el=>{el.textContent=VENUE.name;});
+  document.querySelectorAll("[data-venue-address]").forEach(el=>{el.textContent=VENUE.address;});
+}
+const venueReady=loadVenue();
+
+/* Settings (E21-T2): the venue and the roster, both of which stopped being
+   source code in E21-T1. Nothing here computes anything; it reads two
+   endpoints and posts four commands, and every refusal it shows is the
+   engine's own sentence. */
+const $=s=>document.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const DEVICE="settings-"+(localStorage.getItem("ros.settings")||(()=>{const d=crypto.randomUUID().slice(0,8);localStorage.setItem("ros.settings",d);return d;})());
+
+function toast(m,k){const el=document.createElement("div");el.className="toast"+(k?" "+k:"");el.textContent=m;
+  $("#toasts").appendChild(el);setTimeout(()=>el.remove(),3400);}
+
+/* the IANA list off the runtime, so nothing here is maintained by hand.
+   An engine that cannot enumerate them leaves the field free text and lets
+   the server be the judge, which it is anyway. */
+const ZONES=(()=>{try{return Intl.supportedValuesOf("timeZone");}catch(_){return [];}})();
+
+let mgrPin=null,pinThen=null,staff=[],tzPick="";
+
+function askPin(then){
+  pinThen=then;
+  $("#pinFld").value=mgrPin||"";
+  $("#ovPin").classList.add("open");
+  setTimeout(()=>$("#pinFld").focus(),60);
+}
+$("#pinGo").onclick=()=>{
+  const v=$("#pinFld").value.trim();
+  if(!/^[0-9]{4,6}$/.test(v)){toast("A PIN is 4 to 6 digits","err");return;}
+  mgrPin=v;$("#ovPin").classList.remove("open");
+  const then=pinThen;pinThen=null;if(then)then();
+};
+$("#pinFld").onkeydown=e=>{if(e.key==="Enter")$("#pinGo").click();};
+/* everything privileged goes through here, so the PIN is attached in one
+   place and a PIN the server refuses is dropped rather than retyped forever */
+async function cmd(url,body){
+  const res=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({operationId:crypto.randomUUID(),deviceId:DEVICE,managerPin:mgrPin,...body})});
+  const data=await res.json().catch(()=>({}));
+  if(!res.ok&&badManagerPin(data.reason))mgrPin=null;
+  return{ok:res.ok,reason:data.reason||"The server refused that change",data};
+}
+/* Only the two sentences the engine uses when the MANAGER's PIN is the
+   problem. Matching "PIN" loosely would throw the held PIN away over
+   "that PIN already belongs to Gia R.", which is about the employee's PIN
+   and leaves the manager perfectly well authorised. */
+const badManagerPin=r=>/requires a manager's PIN|not recognized as a manager/.test(r||"");
+/* run the job, asking for the PIN first if this is the first change of the visit */
+const gated=job=>{mgrPin?job():askPin(job);};
+
+document.addEventListener("click",e=>{
+  const b=e.target.closest&&e.target.closest("[data-close]");
+  if(b)document.getElementById(b.dataset.close).classList.remove("open");
+});
+
+/* ---------------------------- the venue ---------------------------- */
+
+function showErr(id,msg){const el=$(id);el.textContent=msg||"";el.classList.toggle("on",!!msg);}
+
+function renderTz(){
+  const q=$("#vTz").value.trim().toLowerCase();
+  if(!q||(ZONES.includes($("#vTz").value.trim())&&$("#vTz").value.trim()===tzPick)){$("#tzList").innerHTML="";return;}
+  const hits=ZONES.filter(z=>z.toLowerCase().includes(q));
+  $("#tzList").innerHTML=hits.slice(0,6).map(z=>
+    `<button class="tz ${z===tzPick?"on":""}" data-tz="${esc(z)}">${esc(z)}</button>`).join("")
+    +(hits.length>6?`<div class="tzmore">${hits.length-6} more; keep typing</div>`:"")
+    +(hits.length?"":`<div class="tzmore">No timezone matches that.</div>`);
+  document.querySelectorAll("[data-tz]").forEach(b=>b.onclick=()=>{
+    tzPick=b.dataset.tz;$("#vTz").value=tzPick;$("#tzList").innerHTML="";});
+}
+$("#vTz").oninput=renderTz;
+
+function fillVenue(){
+  $("#vName").value=VENUE.name==="RestaurantOS"?"":VENUE.name;
+  $("#vAddr").value=VENUE.address||"";
+  $("#vTz").value=VENUE.timezone||"";
+  tzPick=VENUE.timezone||"";
+  $("#tzList").innerHTML="";
+}
+
+$("#vSave").onclick=()=>gated(async()=>{
+  showErr("#vErr","");
+  const r=await cmd("/v1/venue",{
+    name:$("#vName").value,address:$("#vAddr").value,timezone:$("#vTz").value.trim()});
+  if(!r.ok){showErr("#vErr",r.reason);return;}
+  await loadVenue();   // the topbar follows immediately, like every other page will on its next load
+  fillVenue();
+  toast("Venue saved");
+});
+
+/* ---------------------------- the team ---------------------------- */
+
+async function loadStaff(){
+  staff=(await fetch("/v1/staff").then(r=>r.json())).staff;
+  renderStaff();
+}
+
+function renderStaff(){
+  $("#roster").innerHTML=staff.map(s=>`<div class="row ${s.active?"":"off"}">
+    <div class="nm">${esc(s.name)}<small>${s.active?"Signs in with their own PIN":"Deactivated; history kept"}</small></div>
+    <span class="chip ${s.role==="manager"?"info":"mut"}">${s.role}</span>
+    ${s.active?"":'<span class="chip red">Inactive</span>'}
+    ${s.active?`<button class="btn btn-s" data-pin="${esc(s.id)}">Reset PIN</button>
+       <button class="btn btn-danger" data-off="${esc(s.id)}">Deactivate</button>`:""}
+  </div>`).join("")||'<div class="row"><div class="nm">Nobody on the roster yet.</div></div>';
+  document.querySelectorAll("[data-pin]").forEach(b=>b.onclick=()=>gated(()=>resetPin(b.dataset.pin)));
+  document.querySelectorAll("[data-off]").forEach(b=>b.onclick=()=>gated(()=>deactivate(b.dataset.off)));
+}
+
+const who=id=>staff.find(s=>s.id===id)||{name:"this employee"};
+
+/* one modal, three jobs. The go callback returns the engine refusal to show
+   inline, or nothing when it worked. */
+function form(title,sub,bodyHtml,verb,go,danger){
+  $("#fTitle").textContent=title;
+  $("#fSub").textContent=sub;
+  $("#fBody").innerHTML=bodyHtml+'<div class="err" id="fErr"></div>';
+  $("#fGo").textContent=verb;
+  $("#fGo").className="btn btn-lg "+(danger?"btn-danger":"btn-p");
+  $("#fGo").onclick=async()=>{
+    showErr("#fErr","");
+    const bad=await go();
+    if(bad){showErr("#fErr",bad);return;}
+    $("#ovForm").classList.remove("open");
+    await loadStaff();
+  };
+  $("#ovForm").classList.add("open");
+  const first=$("#fBody input");
+  if(first)setTimeout(()=>first.focus(),60);
+}
+
+const pinPair=(a,b)=>`<div class="fl">PIN (4 to 6 digits)</div>
+  <input class="fld" id="${a}" inputmode="numeric" maxlength="6" placeholder="••••" autocomplete="off">
+  <div class="fl">PIN again</div>
+  <input class="fld" id="${b}" inputmode="numeric" maxlength="6" placeholder="••••" autocomplete="off">`;
+
+/* the one rule this page checks itself: typing the same new PIN twice.
+   Everything else is the engine's call, because it is the engine's rule. */
+function readPair(a,b){
+  const p1=$(a).value.trim(),p2=$(b).value.trim();
+  if(!/^[0-9]{4,6}$/.test(p1))return{err:"A PIN is 4 to 6 digits"};
+  if(p1!==p2)return{err:"Those two PINs are not the same"};
+  return{pin:p1};
+}
+
+$("#addBtn").onclick=()=>gated(()=>{
+  let role="server";
+  form("Add employee","They can sign in the moment you save",
+    `<div class="fl">Name</div>
+     <input class="fld" id="aName" maxlength="60" autocomplete="off" placeholder="As the check header should read">
+     <div class="fl">Role</div>
+     <div class="opts" id="aRole">
+       <button class="opt on" data-r="server">Server</button>
+       <button class="opt" data-r="manager">Manager</button>
+     </div>
+     ${pinPair("aPin","aPin2")}`,
+    "Add employee",
+    async()=>{
+      const p=readPair("#aPin","#aPin2");
+      if(p.err)return p.err;
+      const r=await cmd("/v1/staff",{name:$("#aName").value,role,pin:p.pin});
+      if(!r.ok)return r.reason;
+      toast($("#aName").value.trim()+" added to the team");
+    });
+  document.querySelectorAll("#aRole .opt").forEach(b=>b.onclick=()=>{
+    role=b.dataset.r;
+    document.querySelectorAll("#aRole .opt").forEach(x=>x.classList.toggle("on",x===b));});
+});
+
+function resetPin(id){
+  form("Reset "+who(id).name+"'s PIN","Their old PIN stops working the moment this saves",
+    pinPair("rPin","rPin2"),"Set new PIN",
+    async()=>{
+      const p=readPair("#rPin","#rPin2");
+      if(p.err)return p.err;
+      const r=await cmd("/v1/staff/"+encodeURIComponent(id)+"/pin",{pin:p.pin});
+      if(!r.ok)return r.reason;
+      toast(who(id).name+" has a new PIN");
+    });
+}
+
+function deactivate(id){
+  const name=who(id).name;
+  form("Deactivate "+name+"?","Their PIN stops opening anything",
+    `<div class="confirm"><p>${esc(name)} will not be able to sign in or approve anything. Every check they opened keeps their name on it, and every report they earned still counts. Bringing them back is a new PIN away.</p></div>`,
+    "Yes, deactivate "+name,
+    async()=>{
+      const r=await cmd("/v1/staff/"+encodeURIComponent(id)+"/deactivate",{});
+      if(!r.ok)return r.reason;
+      toast(name+" deactivated, history kept");
+    },true);
+}
+
+/* ------------------------------ boot ------------------------------ */
+venueReady.then(fillVenue);
+loadStaff().catch(()=>toast("Cannot reach the server","err"));
+function setViewportH(){document.documentElement.style.setProperty("--vph",window.innerHeight+"px");}
+addEventListener("resize",setViewportH);setViewportH();
+
+/* ---------- APP SHELL: rail badge counts (UI-T1) ----------
+   Two cheap reads on the rail's own timer, so no page's existing poll
+   changes shape. Identical on all six pages. Failure is silent: a badge
+   that cannot be read must never be louder than the screen behind it. */
+async function railBadges(){
+  const [checks,kds]=await Promise.all([
+    fetch("/v1/checks").then(r=>r.json()),
+    fetch("/v1/kds").then(r=>r.json()),
+  ]);
+  railBadge("navTables",(checks.checks||[]).filter(c=>c.status!=="closed"&&c.status!=="voided").length);
+  railBadge("navKds",(kds.tickets||[]).filter(t=>t.status==="open").length);
+}
+function railBadge(id,n){const el=document.getElementById(id);if(el)el.textContent=n>0?String(n):"";}
+railBadges().catch(()=>{});
+setInterval(()=>railBadges().catch(()=>{}),10000);
+</script>
+</body>
+</html>

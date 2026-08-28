@@ -16,6 +16,7 @@ const TABLES_PAGE = page("tables.html");
 const CLOSE_PAGE = page("close.html");
 const REPORTS_PAGE = page("reports.html");
 const MENU_PAGE = page("menu.html");
+const SETTINGS_PAGE = page("settings.html");
 const LOCK_PAGE = page("lock.html");
 
 interface EnvelopeBody {
@@ -110,6 +111,8 @@ export function buildServer(store: Store = new MemoryStore(), storeName = "memor
   // Phase 6 intelligence layer; bookmarks and muscle memory still land
   app.get("/insights", async (_req, reply) => reply.redirect("/reports", 302));
   app.get("/menu", async (_req, reply) => reply.type("text/html").send(MENU_PAGE));
+  // the seventh screen (E21-T2): the venue's own identity and its roster
+  app.get("/settings", async (_req, reply) => reply.type("text/html").send(SETTINGS_PAGE));
   app.get("/health/live", async () => ({ ok: true, service: "restaurantos-server", store: storeName }));
 
   /* -------------------------- sessions (E15) -------------------------- */
