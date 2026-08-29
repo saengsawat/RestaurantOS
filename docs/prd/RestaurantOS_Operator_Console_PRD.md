@@ -237,6 +237,8 @@ Do not make the system look like it automatically changes employee schedules.
 
 This prototype should show recommendations only.
 
+**How this pillar gets real numbers:** the staircase from today's clock-ins to a labor line the operator can trust is specified in [team-labor-spec.md](team-labor-spec.md) per decision D28. Three rungs: the people directory (job title separate from permission level, home contact details manager-gated), scheduling (planned shifts against the actual clock records, so planned-versus-actual hours becomes this screen's first true line item), and payroll, which RestaurantOS never computes. Hours and declared tips export as CSV for a payroll provider, the payments posture applied to labor.
+
 ---
 
 ## 6.4 Inventory & Purchasing

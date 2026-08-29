@@ -94,6 +94,18 @@ Only if he takes bookings at all (`docs/prd/reservations-spec.md` has the full p
 
 Also worth asking, because it decides whether the book is ever open on a busy night: **who actually answers the phone at 6pm, and are they standing at a terminal when they do?** A book nobody can reach during service is a paper book with extra steps.
 
+## Question deck F: team and labor (from the team and labor spec, E24)
+
+The ladder behind these questions (`docs/prd/team-labor-spec.md` has the full proposal): the people directory builds now, scheduling waits on his answers, and payroll is never computed by us. Every question carries the default we would ship.
+
+- **How does he build the schedule today, and where do staff read it?** (Default: a spreadsheet or a group chat rather than a scheduling product. If he is on 7shifts or similar, our rung 2 becomes an import rather than an editor, and we would rather import than compete.)
+- **What is his pay period, and who runs payroll?** (Default: bi-weekly, run by an outside provider or a bookkeeper. Whatever it is, we export hours and declared tips to it and never calculate for it.)
+- **Does the kitchen clock in on the POS, or somewhere else?** (Default: on the POS, same as the floor. If the kitchen punches a separate clock, our hours export is partial and the file has to say so rather than read as complete.)
+- **What does a no-call-no-show cost him, and how does he handle it?** (Default: absence is recorded against the planned shift once scheduling exists, and nothing more. Attendance discipline is a management act, not a software feature.)
+- **Who may see wages?** (Default: owner only, and moot for us since we store no wage rate at all. His answer still tells us whether the labor report may be shown in hours to a manager or only to him.)
+
+Also worth asking, because it decides whether a scheduler is even the right shape: **when the schedule changes at 3pm on a Saturday, how does the staff find out?** If the answer is the group chat, the schedule's real product is a notification, and we do not have one.
+
 ## Pilot-selection criteria (WP-0.4 draft, edit with Matt)
 
 | Criterion | Target |
