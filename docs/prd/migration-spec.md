@@ -13,6 +13,23 @@ A restaurant switching point-of-sale systems is not switching software, it is mo
 
 The two incumbent research reports name migration tooling as an open question rather than a solved one (`docs/research/Toast-deep-research-report.md`, the operator question "What existing POS data must migrate?" mapped to "Migration tooling" with no answer given). `DOCUMENTED` What we know generally about how incumbents handle this: a combination of spreadsheet-style imports for the mechanical parts (menu, staff) plus a human, an onboarding specialist or reseller, doing the parts that resist automation (the floor, the judgment calls). `INFERRED` We have no incumbent's actual export file in hand, so anything more specific than that is `UNKNOWN` until WP-0.2 or a pilot produces one.
 
+## 1a. The first real artifact: NorthStar's data-loading workbook (added 2026-08-29)
+
+Our operator advisor shared the actual Excel workbook a NorthStar (hospitality/club POS) onboarding used to set up a multi-outlet venue he works with. **The file stays out of this repository permanently** (it carries real staff names and authentication IDs; gitignored, referenced here by description only), but its structure is now our first `DOCUMENTED` evidence, and it is worth more than an export would have been: it is the TARGET vendor's fill-in template, the same role our import plays. A competitor's answer sheet to our own homework. `DOCUMENTED` [NorthStar workbook, on file offline]
+
+What it contains, and what each part confirms or corrects:
+
+| Workbook tab | Structure | What it tells us |
+|---|---|---|
+| Locations | Name, description, department code, location type (POS vs Banquet) | Multi-outlet venues are real (this one runs a dozen bars and dining rooms); our single-location V1 is a known limit, already on record |
+| Servers / Non Servers | Authentication ID, first/last name, employee number, default role | The industry loads staff credentials as PLAINTEXT spreadsheet cells. Our fresh-PINs-always rule (§2.2) is not caution, it is the fix for an observed practice |
+| Modifier Groups | Group name, **minimum, maximum**, description, then modifier + price rows | Their modifier model is our modifier model (min/max per group), and their flat sheet links groups to items BY NAME, which is exactly our `modifier_group_hint` mechanism. §2.1's approach is validated by a shipping competitor |
+| Item Groups | Name, bill code, GL account, color, kitchen printer, expeditor printer, default modifier groups | Category-level accounting codes and PRINT ROUTING live at the group level; when we meet accounting-minded operators, revenue-category mapping will be asked for |
+| Menu Items (+ a beverage twin) | Menu card, category, subcategory, name, description, item group, type, price, member price, cost, open item, price-override flag, hide-on-terminal, auto-fire, printer type, SKU, modifier groups (by name), course, location | The maximal version of our minimal template. Notable columns we chose not to have yet: SKU, cost, per-item printer routing, auto-fire flags. Notably ABSENT everywhere: floor geometry, guest data, sales history, which confirms §2.3 and §3 outright |
+| "POS Items - DO NOT USE" | A stale legacy tab left in the live template | Template versioning is a real failure mode: a customer filling the wrong tab is a vendor-made error. Our import template must be one sheet, versioned, with no dead tabs |
+
+Two conclusions worth restating with the stronger label. First, the industry's onboarding mechanism IS the spreadsheet-plus-a-human model this spec assumed (`INFERRED` upgraded to `DOCUMENTED` for at least one shipping vendor). Second, nothing in a real vendor's loading workbook migrates floor geometry, guests, or history; those are rebuilt or abandoned, exactly as §2.3 and §3 argue. One nuance the workbook does NOT answer: it shows how data gets INTO a new system, not what the OLD system exports out, so deck D's ask for a true export file stands.
+
 ## 2. What migrates, per object
 
 ### 2.1 Menu
@@ -30,6 +47,8 @@ The two incumbent research reports name migration tooling as an open question ra
 | Lightspeed | No export file reviewed | `UNKNOWN` |
 
 Recommended default: our CSV template is deliberately minimal (name/course/price/station/modifier hint) rather than an attempt to match any one incumbent's column names, because matching a schema we have not verified is worse than owning a simple one and asking Matt or a pilot operator to map their export into it by hand or with a short conversion pass. `INFERRED`
+
+The NorthStar workbook (§1a) strengthens this default from the other direction: the one real template we hold links modifier groups to items by NAME in a flat sheet, which is our `modifier_group_hint` mechanism working in a shipping product, and its maximal column set (SKU, cost, printer routing, auto-fire) is a menu of what operators may eventually ask our template to grow, not what v1 needs. `DOCUMENTED` [NorthStar workbook]
 
 ### 2.2 Staff
 

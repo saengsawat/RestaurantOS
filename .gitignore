@@ -7,3 +7,9 @@ desktop.ini
 
 # Node
 node_modules/
+
+# Operator-shared artifacts that carry real people's data (names, auth IDs).
+# Referenced by docs/prd/migration-spec.md but NEVER committed: this repo
+# feeds a public GitHub Pages site.
+docs/North Star*.xlsx
+docs/*Migration Sheet*.xlsx
