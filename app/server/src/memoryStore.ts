@@ -1,6 +1,6 @@
 /** Zero-setup Store for dev and tests. State dies with the process. */
 import { GROUPS, MENU, SNAPSHOT_ID } from "./menu.js";
-import { pinHash, STAFF, type Employee, type RosterEntry } from "./staff.js";
+import { pinHash, STAFF, type DirectoryEntry, type Employee, type RosterEntry } from "./staff.js";
 import {
   FLOOR,
   sameName,
@@ -121,15 +121,27 @@ export class MemoryStore implements Store {
 
   private venue: Venue = { ...VENUE };
   // pinHash rides alongside the roster entry and never leaves this class
-  private employees: (RosterEntry & { pinHash: string })[] = STAFF.map((s) => ({
+  private employees: (DirectoryEntry & { pinHash: string })[] = STAFF.map((s) => ({
     id: s.id, name: s.name, role: s.role, active: true, pinHash: pinHash(s.demoPin),
   }));
 
   async getVenue() { return { ...this.venue }; }
   async putVenue(venue: Venue) { this.venue = { ...venue }; }
 
-  private static roster(e: RosterEntry & { pinHash: string }): RosterEntry {
-    return { id: e.id, name: e.name, role: e.role, active: e.active };
+  /** The PUBLIC projection, and the only shape listEmployees ever returns.
+   *  Written as an explicit field list rather than a delete-these-keys so a
+   *  field added to the record later is private by default: forgetting to add
+   *  it here hides it, which is the failure direction we want (E24-T2). */
+  private static roster(e: DirectoryEntry & { pinHash: string }): RosterEntry {
+    return {
+      id: e.id, name: e.name, role: e.role, active: e.active,
+      ...(e.title !== undefined ? { title: e.title } : {}),
+    };
+  }
+
+  private static directory(e: DirectoryEntry & { pinHash: string }): DirectoryEntry {
+    const { pinHash: _hash, ...rest } = e;
+    return { ...rest };
   }
 
   async listEmployees(): Promise<RosterEntry[]> { return this.employees.map(MemoryStore.roster); }
@@ -137,7 +149,23 @@ export class MemoryStore implements Store {
     const e = this.employees.find((x) => x.id === id);
     return e ? MemoryStore.roster(e) : undefined;
   }
-  async addEmployee(employee: RosterEntry, hash: string) { this.employees.push({ ...employee, pinHash: hash }); }
+  async listDirectory(): Promise<DirectoryEntry[]> { return this.employees.map(MemoryStore.directory); }
+  async updateEmployee(id: string, patch: Partial<Omit<DirectoryEntry, "id" | "role" | "active">>) {
+    const e = this.employees.find((x) => x.id === id);
+    if (!e) return;
+    // an absent key keeps its value; a key present but undefined CLEARS, which
+    // is how the engine passes on a field the manager emptied
+    for (const key of ["title", "phone", "email", "emergencyContact", "notes"] as const) {
+      if (!(key in patch)) continue;
+      const value = patch[key];
+      if (value === undefined) delete e[key];
+      else e[key] = value;
+    }
+    // name is the one field with no cleared state: the engine refuses a blank
+    // one, because every check they ever opened prints it
+    if (patch.name !== undefined) e.name = patch.name;
+  }
+  async addEmployee(employee: DirectoryEntry, hash: string) { this.employees.push({ ...employee, pinHash: hash }); }
   async setEmployeePin(id: string, hash: string) {
     const e = this.employees.find((x) => x.id === id);
     if (e) e.pinHash = hash;

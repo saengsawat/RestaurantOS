@@ -15,7 +15,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { GROUPS, MENU, SNAPSHOT_ID } from "./menu.js";
-import { pinHash, ROLE_IDS, STAFF, type Employee, type RosterEntry } from "./staff.js";
+import { pinHash, ROLE_IDS, STAFF, type DirectoryEntry, type Employee, type RosterEntry } from "./staff.js";
 import {
   FLOOR,
   serviceDateOf,
@@ -805,10 +805,14 @@ export class PgStore implements Store {
   }
 
   /** The roster, ordered so the list a manager reads does not reshuffle
-   *  itself between two visits to the settings screen. */
+   *  itself between two visits to the settings screen.
+   *
+   *  The SELECT list is the privacy boundary (E24-T2): title is public, and
+   *  phone/email/emergency_contact/notes are simply not asked for, so no
+   *  amount of downstream serialising can leak what was never fetched. */
   async listEmployees(): Promise<RosterEntry[]> {
     const r = await this.pool.query(
-      `SELECT e.id, e.display_name, e.active, r.name AS role
+      `SELECT e.id, e.display_name, e.active, e.title, r.name AS role
        FROM employee e
        LEFT JOIN employee_role er ON er.employee_id = e.id
        LEFT JOIN role r ON r.id = er.role_id
@@ -820,6 +824,7 @@ export class PgStore implements Store {
       name: row.display_name as string,
       role: String(row.role ?? "").toLowerCase() === "manager" ? "manager" as const : "server" as const,
       active: row.active as boolean,
+      ...(row.title ? { title: row.title as string } : {}),
     }));
   }
 
@@ -827,13 +832,66 @@ export class PgStore implements Store {
     return (await this.listEmployees()).find((e) => e.id === id);
   }
 
-  async addEmployee(employee: RosterEntry, hash: string): Promise<void> {
+  /** The whole record. Same ordering as listEmployees so the gated read and
+   *  the public one line up row for row. Gating lives in the engine; this is
+   *  the only query in the file that asks for the personal columns. */
+  async listDirectory(): Promise<DirectoryEntry[]> {
+    const r = await this.pool.query(
+      `SELECT e.id, e.display_name, e.active, e.title, e.phone, e.email,
+              e.emergency_contact, e.notes, r.name AS role
+       FROM employee e
+       LEFT JOIN employee_role er ON er.employee_id = e.id
+       LEFT JOIN role r ON r.id = er.role_id
+       WHERE e.location_id = $1 ORDER BY e.created_at, e.display_name`,
+      [LOC],
+    );
+    return r.rows.map((row) => ({
+      id: row.id as string,
+      name: row.display_name as string,
+      role: String(row.role ?? "").toLowerCase() === "manager" ? "manager" as const : "server" as const,
+      active: row.active as boolean,
+      ...(row.title ? { title: row.title as string } : {}),
+      ...(row.phone ? { phone: row.phone as string } : {}),
+      ...(row.email ? { email: row.email as string } : {}),
+      ...(row.emergency_contact ? { emergencyContact: row.emergency_contact as string } : {}),
+      ...(row.notes ? { notes: row.notes as string } : {}),
+    }));
+  }
+
+  /** Only the columns the caller actually sent are written, so an untouched
+   *  field is never rewritten with a stale value from a half-filled form.
+   *  undefined clears to NULL, which is how an emptied field reads back. */
+  async updateEmployee(id: string, patch: Partial<Omit<DirectoryEntry, "id" | "role" | "active">>): Promise<void> {
+    const COLUMN: Record<string, string> = {
+      name: "display_name", title: "title", phone: "phone",
+      email: "email", emergencyContact: "emergency_contact", notes: "notes",
+    };
+    const sets: string[] = [];
+    const values: unknown[] = [];
+    for (const [key, column] of Object.entries(COLUMN)) {
+      if (!(key in patch)) continue;
+      values.push((patch as Record<string, string | undefined>)[key] ?? null);
+      sets.push(`${column} = $${values.length}`);
+    }
+    if (!sets.length) return;
+    values.push(id, LOC);
+    await this.pool.query(
+      `UPDATE employee SET ${sets.join(", ")} WHERE id = $${values.length - 1} AND location_id = $${values.length}`,
+      values,
+    );
+  }
+
+  async addEmployee(employee: DirectoryEntry, hash: string): Promise<void> {
     const c = await this.pool.connect();
     try {
       await c.query("BEGIN");
       await c.query(
-        "INSERT INTO employee (id, org_id, location_id, display_name, pin_hash, active) VALUES ($1, $2, $3, $4, $5, $6)",
-        [employee.id, ORG, LOC, employee.name, hash, employee.active],
+        `INSERT INTO employee (id, org_id, location_id, display_name, pin_hash, active,
+                               title, phone, email, emergency_contact, notes)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+        [employee.id, ORG, LOC, employee.name, hash, employee.active,
+         employee.title ?? null, employee.phone ?? null, employee.email ?? null,
+         employee.emergencyContact ?? null, employee.notes ?? null],
       );
       await c.query(
         "INSERT INTO employee_role (employee_id, role_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",

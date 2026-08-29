@@ -25,9 +25,38 @@ export interface Employee {
 
 /** An employee as the roster knows them. `active` is soft: a deactivated
  *  employee cannot sign in or approve, and every check they ever opened
- *  still carries their name. */
+ *  still carries their name.
+ *
+ *  `title` is the E24-T2 half of the two-field rule: JOB TITLE is display
+ *  vocabulary ("Sous chef", "Host"), PERMISSION LEVEL is `role`, and they are
+ *  separate fields on purpose. Giving the dishwasher a nicer title must never
+ *  hand them refund powers, so nothing in the engine ever branches on `title`.
+ *  This shape is the PUBLIC roster: safe for any device to read. */
 export interface RosterEntry extends Employee {
   active: boolean;
+  title?: string;
+}
+
+/** The whole employee record, roster plus the personal half (E24-T2).
+ *
+ *  Everything added here is PII a manager keeps in order to run a workplace:
+ *  the number you call when the line cook does not turn up, and the person to
+ *  call if something happens to them on shift. It is served ONLY by the
+ *  manager-PIN-gated directory read, never by `GET /v1/staff`. */
+export interface DirectoryEntry extends RosterEntry {
+  phone?: string;
+  email?: string;
+  /** one free-text line, name and number together, because that is how it is
+   *  written on the sheet of paper this replaces */
+  emergencyContact?: string;
+  notes?: string;
+}
+
+/** What a row calls itself when nobody has typed a title yet. The permission
+ *  role's own display name, which is true rather than blank, and the moment a
+ *  manager types "Line cook" over it the role underneath has not moved. */
+export function defaultTitle(role: Employee["role"]): string {
+  return role === "manager" ? "Manager" : "Server";
 }
 
 export interface StaffMember extends Employee {

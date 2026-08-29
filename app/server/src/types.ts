@@ -7,7 +7,7 @@
  */
 import type { CheckStatus, GroupIndex, OrderItemStatus, SelectedModifier } from "@restaurantos/domain";
 import type { MenuEntry } from "./menu.js";
-import type { Employee, RosterEntry } from "./staff.js";
+import type { DirectoryEntry, Employee, RosterEntry } from "./staff.js";
 
 export interface Envelope {
   operationId: string;
@@ -281,13 +281,25 @@ export interface Store {
   putVenue(venue: Venue): Promise<void>;
 
   /** The roster (E21-T1). Never carries a PIN or a hash: hashing happens in
-   *  the engine, and what comes back out is who works here, nothing more. */
+   *  the engine, and what comes back out is who works here, nothing more.
+   *  Since E24-T2 it also never carries the personal half: these two return
+   *  the PUBLIC shape (name, role, title, active), and a phone number can
+   *  only ever leave through listDirectory below. */
   listEmployees(): Promise<RosterEntry[]>;
   getEmployee(id: string): Promise<RosterEntry | undefined>;
-  addEmployee(employee: RosterEntry, pinHash: string): Promise<void>;
+  addEmployee(employee: DirectoryEntry, pinHash: string): Promise<void>;
   setEmployeePin(id: string, pinHash: string): Promise<void>;
   /** Deactivation is soft, always: checks.server_id still points here. */
   setEmployeeActive(id: string, active: boolean): Promise<void>;
+
+  /** The whole record, personal half included (E24-T2). The ONLY way the
+   *  contact fields leave a store, and the engine gates every call to it on a
+   *  manager's PIN. Same order as listEmployees, so the two reads line up. */
+  listDirectory(): Promise<DirectoryEntry[]>;
+  /** Edit the record. An absent key keeps its value; an empty string clears
+   *  the field, the way the venue's address clears. Never touches role,
+   *  active, or the PIN, each of which has its own command. */
+  updateEmployee(id: string, patch: Partial<Omit<DirectoryEntry, "id" | "role" | "active">>): Promise<void>;
 
   listShifts(): Promise<Shift[]>;
   putShift(shift: Shift): Promise<void>;
