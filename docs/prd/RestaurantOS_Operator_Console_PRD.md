@@ -1,4 +1,4 @@
-# RestaurantOS Lab — Operator Console Concept Prototype
+# RestaurantOS Lab: Operator Console Concept Prototype
 ## Product Requirements Document (PRD)
 
 **Document status:** Draft / Discovery Prototype  
@@ -89,7 +89,7 @@ The prototype may use a fictional Thai restaurant to make ingredient-sharing, mo
 
 Use the following framing:
 
-> RestaurantOS helps restaurant operators understand what is happening, why it is happening, and what they should do next — without requiring them to replace every system they already use.
+> RestaurantOS helps restaurant operators understand what is happening, why it is happening, and what they should do next: without requiring them to replace every system they already use.
 
 The prototype should visually reinforce:
 
@@ -583,7 +583,7 @@ Do not answer these in the prototype. They are discovery questions:
 
 ---
 
-# 16. Future Direction — Not Required for This Prototype
+# 16. Future Direction: Not Required for This Prototype
 
 Possible long-term progression:
 
