@@ -71,6 +71,17 @@ Only if the guestbook interests him (`docs/prd/guestbook-spec.md` has the full p
 
 Also worth asking, because it decides whether this gets built at all: **would his servers actually use it during a rush?** A guest record nobody attaches is worse than no guest record.
 
+## Question deck D: migration and onboarding (from the migration spec, E22)
+
+Only if he is currently on another POS or has switched before (`docs/prd/migration-spec.md` has the full proposal). Every question carries the default we would ship, so a shrug is still an answer.
+
+- **What data would he refuse to lose in a switch?** (Default: menu and the room, because service cannot start without them; staff re-enters in minutes and sales history is assumed expendable since our reports start on day one with us.)
+- **Who does the data entry today, when a menu or a roster changes?** (Default: a manager or the owner, not a dedicated administrator.)
+- **Would he trust a self-serve import, or want a human involved?** (Default: a human walks the first pilot restaurant through it once; self-serve CSV import is the target from restaurant number two onward.)
+- **How long can setup take before it kills the sale?** (Default: under a day for menu and staff combined; the floor redraw fits inside one sit-down session.)
+
+Also worth asking, because it turns every `UNKNOWN` in the migration spec into a `DOCUMENTED` one: **what does his current POS actually let him export, and can he get us a real file before this is built.**
+
 ## Pilot-selection criteria (WP-0.4 draft, edit with Matt)
 
 | Criterion | Target |
