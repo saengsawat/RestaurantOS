@@ -82,6 +82,18 @@ Only if he is currently on another POS or has switched before (`docs/prd/migrati
 
 Also worth asking, because it turns every `UNKNOWN` in the migration spec into a `DOCUMENTED` one: **what does his current POS actually let him export, and can he get us a real file before this is built.**
 
+## Question deck E: reservations (from the reservations spec, E23)
+
+Only if he takes bookings at all (`docs/prd/reservations-spec.md` has the full proposal). The principle behind every answer: a reservation is a promise, not a lock, so the floor warns and the host always overrides. Every question carries the default we would ship.
+
+- **Does his venue live on OpenTable or Resy, on a paper book, or on the phone?** (Default: the phone and a paper book, which is what our call-in book is shaped for. If he is already on a platform we still build the book, but the integration becomes the real question, and it stays integrate-never-build.)
+- **How long is a table held past its reserved time before it goes to the next party?** (Default: 15 minutes, as a soft prompt on the book row rather than an automatic release. The separate lead window that governs floor badging defaults to 45 minutes before the time.)
+- **Are large parties handled differently?** (Default: yes in practice, no in software for v1: a note and the host's attention, not a booking type of its own. A hard threshold, a party of eight needing a manager or a deposit, is worth encoding if he has one.)
+- **Does he take deposits, and for what?** (Default: none in v1. If he does take them today, we need to know whether it is a card hold or a real charge, because only one of those is a payments problem we can defer.)
+- **Who is allowed to overbook, or to seat over a held table?** (Default: anyone on the floor, with the warn-and-allow confirm and an audit entry. A manager PIN here would mean a host hunting for a manager mid-rush.)
+
+Also worth asking, because it decides whether the book is ever open on a busy night: **who actually answers the phone at 6pm, and are they standing at a terminal when they do?** A book nobody can reach during service is a paper book with extra steps.
+
 ## Pilot-selection criteria (WP-0.4 draft, edit with Matt)
 
 | Criterion | Target |

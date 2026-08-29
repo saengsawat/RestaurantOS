@@ -614,6 +614,7 @@ Possible future capabilities:
 - Approval-based automated actions
 - Guest intelligence (the guestbook): per-guest favorites, spend, visit cadence, preferred section and server, specified in [guestbook-spec.md](guestbook-spec.md) as a Phase 6 addition sourced from competitor observation (Lightspeed Restaurant's Guestbook), identity ladder per decision D20
 - Migration and onboarding: bringing a restaurant off its old POS (menu, staff, floor, guests), specified in [migration-spec.md](migration-spec.md), spec-only per decision D26 until a real customer export exists
+- Reservations: the staff-entered call-in book, floor badges that warn rather than lock, and seating that prefills covers and feeds the guestbook's phone rung, specified in [reservations-spec.md](reservations-spec.md) per decision D27; online booking stays integrate-never-build
 
 These are **not commitments**.
 
