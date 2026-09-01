@@ -24,7 +24,7 @@ import {
   type SplitPortion,
 } from "@restaurantos/domain";
 import type { MenuEntry } from "./menu.js";
-import { PIN_RULE, pinHash, STAFF, type Employee, type RosterEntry } from "./staff.js";
+import { defaultTitle, PIN_RULE, pinHash, STAFF, type DirectoryEntry, type Employee, type RosterEntry } from "./staff.js";
 import { randomUUID } from "node:crypto";
 import { sameName, serviceDateOf, TABLE_SHAPES, type CashEvent, type CheckAggregate, type DrawerSession, type Envelope, type FloorTable, type Guest, type KitchenTicket, type MenuSnapshot, type OrderLine, type Store, type TableShape, type Venue } from "./types.js";
 import type { GroupIndex } from "@restaurantos/domain";
@@ -344,9 +344,28 @@ export class Engine {
    *  restart signs everyone out, which is the honest behavior. */
   private sessions = new Map<string, Employee>();
 
-  /** The roster: who works here. Never a PIN, never a hash (E21-T1). */
+  /** The roster: who works here. Never a PIN, never a hash (E21-T1), and
+   *  since E24-T2 never a phone number, an address, or an emergency contact
+   *  either. This is the read every device on the floor is allowed to make,
+   *  so what it carries is exactly what a service screen needs: a name, the
+   *  permission role, the job title, and whether they still work here. */
   async staff(): Promise<RosterEntry[]> {
-    return this.store.listEmployees();
+    return (await this.store.listEmployees()).map((e) => ({ ...e, title: e.title ?? defaultTitle(e.role) }));
+  }
+
+  /**
+   * The people directory (E24-T2): the same roster with the personal half
+   * attached, and the only door it comes out of.
+   *
+   * The PIN is checked on EVERY call and nothing is cached: a manager who
+   * walked away from the terminal has not left the directory open behind
+   * them. A wrong PIN gets the same sentence every other manager gate uses,
+   * so a server who taps the row learns nothing from the wording.
+   */
+  async directory(pin: unknown): Promise<{ ok: true; staff: DirectoryEntry[] } | { ok: false; reason: string }> {
+    if (!(await this.manager(pin))) return { ok: false, reason: this.managerRefusal(pin, "reading the staff directory") };
+    const staff = await this.store.listDirectory();
+    return { ok: true, staff: staff.map((e) => ({ ...e, title: e.title ?? defaultTitle(e.role) })) };
   }
 
   /** The three demo PINs, straight off the seed constant, for the lock screen
@@ -1593,9 +1612,35 @@ export class Engine {
     return undefined;
   }
 
+  /** The optional detail fields, trimmed, with an emptied one becoming absent
+   *  rather than an empty string. Only keys the caller actually sent come
+   *  back, so a half-filled form never blanks a field it did not show. */
+  private static details(input: Record<string, unknown>): Partial<DirectoryEntry> {
+    const out: Record<string, string | undefined> = {};
+    for (const key of ["title", "phone", "email", "emergencyContact", "notes"] as const) {
+      if (typeof input[key] !== "string") continue;
+      const value = (input[key] as string).trim();
+      out[key] = value || undefined;
+    }
+    return out as Partial<DirectoryEntry>;
+  }
+
+  /**
+   * Hire somebody.
+   *
+   * `role` is the PERMISSION level and stays the two-value enum it has always
+   * been: it gates sign-in, approvals, and the last-manager guard. A kitchen
+   * hire who never touches the POS is role "server" with no expectation of
+   * ever signing in, and their `title` says "Line cook", which is the thing
+   * the room actually calls them. Widening the permission enum is a different
+   * ticket, and a promotion deserves its own flow.
+   */
   async addEmployee(
     envelope: Envelope,
-    input: { managerPin?: string; name?: string; role?: string; pin?: string },
+    input: {
+      managerPin?: string; name?: string; role?: string; pin?: string;
+      title?: string; phone?: string; email?: string; emergencyContact?: string; notes?: string;
+    },
   ): Promise<CommandOutcome> {
     const replay = await this.store.opResult(envelope.operationId);
     if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
@@ -1608,9 +1653,53 @@ export class Engine {
     const bad = await this.pinError(input.pin);
     if (bad) return refuse(bad);
 
-    const employee: RosterEntry = { id: randomUUID(), name, role: input.role, active: true };
+    const employee: DirectoryEntry = {
+      id: randomUUID(), name, role: input.role, active: true,
+      ...Engine.details(input as Record<string, unknown>),
+    };
     await this.store.addEmployee(employee, pinHash(input.pin as string));
-    return this.remember(envelope, { kind: "applied", employee }, "employee", employee.id);
+    // the applied result is the PUBLIC shape: a hire that echoed the new
+    // person's home number back over the wire would undo the gate on the
+    // read, and the manager who just typed it does not need it read back
+    const { phone: _phone, email: _email, emergencyContact: _ec, notes: _notes, ...roster } = employee;
+    return this.remember(envelope, { kind: "applied", employee: { ...roster, title: roster.title ?? defaultTitle(roster.role) } }, "employee", employee.id);
+  }
+
+  /**
+   * Edit the record: the job title, the contact details, and the name.
+   *
+   * NOT the role, and not `active`: a promotion changes what a PIN can
+   * approve and deserves its own thought, and letting somebody go already has
+   * its own command with the last-manager guard on it.
+   */
+  async updateEmployee(
+    envelope: Envelope,
+    input: {
+      managerPin?: string; employeeId?: string; name?: string;
+      title?: string; phone?: string; email?: string; emergencyContact?: string; notes?: string;
+    },
+  ): Promise<CommandOutcome> {
+    const replay = await this.store.opResult(envelope.operationId);
+    if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
+    const id = String(input.employeeId ?? "");
+    const refuse = (reason: string) => this.remember(envelope, { kind: "rejected", reason }, "employee", id);
+
+    if (!(await this.manager(input.managerPin))) return refuse(this.managerRefusal(input.managerPin, "editing an employee"));
+    const employee = await this.store.getEmployee(id);
+    if (!employee) return refuse(`no employee ${id}`);
+
+    const patch: Partial<Omit<DirectoryEntry, "id" | "role" | "active">> = Engine.details(input as Record<string, unknown>);
+    if (input.name !== undefined) {
+      const name = input.name.trim();
+      // the one field that cannot be cleared: every check they ever opened
+      // shows this, and a blank check header helps nobody
+      if (!name) return refuse("an employee needs a name");
+      patch.name = name;
+    }
+
+    await this.store.updateEmployee(employee.id, patch);
+    const updated = (await this.store.getEmployee(employee.id))!;
+    return this.remember(envelope, { kind: "applied", employee: { ...updated, title: updated.title ?? defaultTitle(updated.role) } }, "employee", employee.id);
   }
 
   /** Change somebody's PIN. Nobody's old PIN survives this, which is the

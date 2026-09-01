@@ -544,4 +544,82 @@ describe.skipIf(!PGBIN)("PostgreSQL persistence (E4)", () => {
     // roster events, never history edits
     expect((await app3.inject({ method: "GET", url: `/v1/checks/${lucaCheck}` })).json().check.serverName).toBe("Luca P.");
   }, 60_000);
+
+  /* ------------------- the people directory (E24-T2) -------------------
+   * The gate and the two rules are proven against the memory store in
+   * api.test.ts. What only Postgres can prove: the five columns migration
+   * 0008 adds actually hold their values across a restart, and the public
+   * roster query cannot leak them because it never selects them. */
+
+  it("round-trips a title and contact details through real columns and a restart", async () => {
+    const app = buildServer(store, "postgres");
+    const MGR = "1122";
+    const PERSONAL = { phone: "917-555-0143", email: "nok@example.com",
+      emergencyContact: "Preeda (sister) 917-555-0198", notes: "Certified food handler, Tuesdays off" };
+    const directory = (a: ReturnType<typeof buildServer>, pin?: string) =>
+      a.inject({ method: "POST", url: "/v1/staff/directory",
+        payload: pin === undefined ? {} : { managerPin: pin } });
+
+    // 0008 landed, and it is the columns the ticket named
+    for (const column of ["title", "phone", "email", "emergency_contact", "notes"]) {
+      expect(sql(`SELECT count(*) FROM information_schema.columns
+                  WHERE table_name = 'employee' AND column_name = '${column}'`), column).toBe("1");
+    }
+    // and NOT the ones D28 says are a payroll provider's business, not ours
+    for (const column of ["wage_minor", "wage_rate", "ssn", "tax_id", "bank_account"]) {
+      expect(sql(`SELECT count(*) FROM information_schema.columns
+                  WHERE table_name = 'employee' AND column_name = '${column}'`), column).toBe("0");
+    }
+
+    /* --- the line cook this rung exists for: never signs in, and the room
+           calls him something the permission enum has no word for --- */
+    const hired = await app.inject({ method: "POST", url: "/v1/staff",
+      payload: ENV({ managerPin: MGR, name: "Nok S.", role: "server", pin: "4455", title: "Line cook", ...PERSONAL }) });
+    expect(hired.statusCode).toBe(200);
+    const nok = hired.json().employee as { id: string };
+
+    // the details are in real columns, not a JSON blob on the side
+    expect(sql(`SELECT title FROM employee WHERE id = '${nok.id}'`)).toBe("Line cook");
+    expect(sql(`SELECT phone FROM employee WHERE id = '${nok.id}'`)).toBe(PERSONAL.phone);
+    expect(sql(`SELECT emergency_contact FROM employee WHERE id = '${nok.id}'`)).toBe(PERSONAL.emergencyContact);
+    // the role is still the permission level, in its own table, untouched
+    expect(sql(`SELECT r.name FROM employee_role er JOIN role r ON r.id = er.role_id
+                WHERE er.employee_id = '${nok.id}'`)).toBe("Server");
+
+    /* --- an edit: some fields change, one clears, the rest hold --- */
+    const edit = await app.inject({ method: "POST", url: `/v1/staff/${nok.id}`,
+      payload: ENV({ managerPin: MGR, title: "Sous chef", phone: "917-555-0111", notes: "" }) });
+    expect(edit.statusCode).toBe(200);
+    expect(sql(`SELECT notes IS NULL FROM employee WHERE id = '${nok.id}'`)).toBe("t");
+    expect(sql(`SELECT email FROM employee WHERE id = '${nok.id}'`)).toBe(PERSONAL.email);
+
+    /* THE RESTART --- */
+    await store.end();
+    store = new PgStore(url);
+    await store.init();
+    const app4 = buildServer(store, "postgres");
+
+    const back = (await directory(app4, MGR)).json().staff.find((s: { id: string }) => s.id === nok.id);
+    expect(back).toMatchObject({
+      name: "Nok S.", role: "server", active: true, title: "Sous chef",
+      phone: "917-555-0111", email: PERSONAL.email, emergencyContact: PERSONAL.emergencyContact,
+    });
+    expect(back.notes).toBeUndefined();
+
+    // the public roster carries the title and not one personal field, and the
+    // gate is the engine's, so both stores refuse in the same sentence
+    const publicRoster = (await app4.inject({ method: "GET", url: "/v1/staff" })).json().staff;
+    expect(publicRoster.find((s: { id: string }) => s.id === nok.id).title).toBe("Sous chef");
+    for (const secret of [PERSONAL.email, PERSONAL.emergencyContact, "917-555-0111"]) {
+      expect(JSON.stringify(publicRoster), secret).not.toContain(secret);
+    }
+    const asServer = await directory(app4, "2468");
+    expect(asServer.statusCode).toBe(422);
+    expect(asServer.json().reason).toBe("PIN not recognized as a manager");
+    expect((await directory(app4)).json().reason).toBe("reading the staff directory requires a manager's PIN");
+
+    // an untitled hire still reads as its role, computed and never stored
+    expect(sql("SELECT title IS NULL FROM employee WHERE display_name = 'Gia R.'")).toBe("t");
+    expect(publicRoster.find((s: { name: string }) => s.name === "Gia R.").title).toBe("Server");
+  }, 60_000);
 });

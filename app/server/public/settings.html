@@ -112,6 +112,24 @@ select.fld{padding:0 8px}
 .fl{font-size:12.5px;font-weight:700;margin:14px 0 5px}
 .fld{width:100%;min-height:var(--tap);border-radius:10px;border:1px solid var(--line);background:var(--panel);
   color:var(--ink);font:inherit;padding:0 12px}
+textarea.fld{padding:10px 12px;min-height:76px;resize:vertical;line-height:1.5}
+/* the personal half of an employee record (E24-T2): folded away until a
+   manager asks, and it arrives from its own PIN-checked read, never from
+   the roster the rest of the page is drawn from */
+.det{flex-basis:100%;border-top:1px solid var(--line-subtle);margin-top:4px;padding-top:12px}
+.det dl{display:grid;grid-template-columns:150px minmax(0,1fr);gap:7px 12px;margin:0}
+.det dt{font-size:11.5px;font-weight:700;color:var(--ink-4);letter-spacing:.03em;padding-top:1px}
+.det dd{margin:0;font-size:13.5px;color:var(--ink-2);line-height:1.45;overflow-wrap:anywhere;white-space:pre-wrap}
+.det dd.none{color:var(--ink-4)}
+/* not an error: nothing is wrong, the page simply has not been told who is
+   asking. Muted, not red. */
+.lock{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:11px 13px;border-radius:10px;
+  background:var(--surface-2);font-size:12.5px;color:var(--ink-3);line-height:1.5}
+.lock p{flex:1;min-width:200px}
+/* the five-second hire stays five seconds: everything optional is behind
+   this fold, closed on open */
+.fold{display:none}
+.fold.on{display:block}
 /* the timezone picker: a filtered list, not a 400-row select. Typing three
    letters of a city is faster than scrolling half the planet. */
 .tzlist{display:flex;flex-direction:column;gap:4px;margin-top:6px;max-height:216px;overflow-y:auto}
@@ -137,6 +155,8 @@ select.fld{padding:0 8px}
   .ov{padding:0;align-items:flex-end}
   .modal{width:100%;border-radius:16px 16px 0 0;padding-bottom:var(--safe-b)}
   .row .nm{min-width:100%}
+  .det dl{grid-template-columns:minmax(0,1fr);gap:2px}
+  .det dt{margin-top:8px}
 }
 /* ============================================================
    APP SHELL (UI-T1, DESIGN.md section 5 "App shell")
@@ -261,6 +281,8 @@ select.fld{padding:0 8px}
   <div class="sec-h">Team</div>
   <div class="blk" id="roster"></div>
   <div class="acts"><button class="btn btn-s btn-lg" id="addBtn">+ Add employee</button></div>
+  <p class="note">A job title is what the room calls somebody; the role chip beside it is what they may do. They are separate on purpose, so giving the dishwasher a better title never hands them the void button.</p>
+  <p class="note">Phone, email, and emergency contact are manager-only. They are fetched under a manager PIN that is checked again on every read, and they never travel with the roster the rest of the app uses. No wage, tax, or bank detail is kept here at all: that belongs to a payroll provider, not to us.</p>
   <p class="note">Deactivating is soft and always will be: their PIN stops opening anything, and every check they ever opened still carries their name. PINs are stored hashed and are never shown here, not even to a manager, because the only honest answer to a forgotten PIN is a new one.</p>
 </div>
   </div>
@@ -320,6 +342,10 @@ function toast(m,k){const el=document.createElement("div");el.className="toast"+
 const ZONES=(()=>{try{return Intl.supportedValuesOf("timeZone");}catch(_){return [];}})();
 
 let mgrPin=null,pinThen=null,staff=[],tzPick="";
+/* the directory (E24-T2) is held only for this visit and only in this page's
+   memory: never localStorage, never a cookie, and it is dropped the moment a
+   PIN is refused. `open` is which rows the manager has unfolded. */
+let dir=null;const open=new Set();
 
 function askPin(then){
   pinThen=then;
@@ -395,19 +421,80 @@ $("#vSave").onclick=()=>gated(async()=>{
 
 async function loadStaff(){
   staff=(await fetch("/v1/staff").then(r=>r.json())).staff;
+  // only worth a round trip when a row is open AND we have a PIN to send
+  if(open.size&&mgrPin)await loadDirectory();
   renderStaff();
 }
 
+/* The gated read (E24-T2). The PIN goes in the BODY, not the URL, and it goes
+   again on every single call: the server caches nothing, so a manager who
+   walked away has not left the directory open behind them. A refusal drops
+   the held PIN and the page falls back to the locked state. */
+async function loadDirectory(){
+  if(!mgrPin){dir=null;return false;}
+  try{
+    const res=await fetch("/v1/staff/directory",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({managerPin:mgrPin})});
+    const data=await res.json().catch(()=>({}));
+    if(!res.ok){if(badManagerPin(data.reason))mgrPin=null;dir=null;return false;}
+    dir=new Map((data.staff||[]).map(s=>[s.id,s]));
+    return true;
+  }catch(_){dir=null;return false;}
+}
+
+/* One field of the personal half. An empty one says so rather than showing a
+   blank line, because "no emergency contact on file" is information a manager
+   wants to notice. */
+const detRow=(label,value)=>`<dt>${label}</dt>`+
+  (value?`<dd>${esc(value)}</dd>`:`<dd class="none">Not on file</dd>`);
+
+function detail(s){
+  const d=dir&&dir.get(s.id);
+  if(!d)return `<div class="det"><div class="lock">
+      <p>Phone, email, and emergency contact are manager-only. Enter a manager PIN to read them.</p>
+      <button class="btn btn-s" data-unlock="1">Enter manager PIN</button>
+    </div></div>`;
+  return `<div class="det">
+    <dl>
+      ${detRow("Job title",d.title)}
+      ${detRow("Phone",d.phone)}
+      ${detRow("Email",d.email)}
+      ${detRow("Emergency contact",d.emergencyContact)}
+      ${detRow("Notes",d.notes)}
+    </dl>
+    <div class="acts"><button class="btn btn-s" data-edit="${esc(s.id)}">Edit details</button></div>
+  </div>`;
+}
+
 function renderStaff(){
-  $("#roster").innerHTML=staff.map(s=>`<div class="row ${s.active?"":"off"}">
-    <div class="nm">${esc(s.name)}<small>${s.active?"Signs in with their own PIN":"Deactivated; history kept"}</small></div>
+  $("#roster").innerHTML=staff.map(s=>{
+    const shown=open.has(s.id);
+    return `<div class="row ${s.active?"":"off"}">
+    <div class="nm">${esc(s.name)}<small>${esc(s.title||"")} · ${s.active?"Signs in with their own PIN":"Deactivated; history kept"}</small></div>
     <span class="chip ${s.role==="manager"?"info":"mut"}">${s.role}</span>
     ${s.active?"":'<span class="chip red">Inactive</span>'}
+    <button class="btn btn-s" data-more="${esc(s.id)}" aria-expanded="${shown}">${shown?"Hide details":"Details"}</button>
     ${s.active?`<button class="btn btn-s" data-pin="${esc(s.id)}">Reset PIN</button>
        <button class="btn btn-danger" data-off="${esc(s.id)}">Deactivate</button>`:""}
-  </div>`).join("")||'<div class="row"><div class="nm">Nobody on the roster yet.</div></div>';
+    ${shown?detail(s):""}
+  </div>`;}).join("")||'<div class="row"><div class="nm">Nobody on the roster yet.</div></div>';
   document.querySelectorAll("[data-pin]").forEach(b=>b.onclick=()=>gated(()=>resetPin(b.dataset.pin)));
   document.querySelectorAll("[data-off]").forEach(b=>b.onclick=()=>gated(()=>deactivate(b.dataset.off)));
+  document.querySelectorAll("[data-edit]").forEach(b=>b.onclick=()=>gated(()=>editDetails(b.dataset.edit)));
+  document.querySelectorAll("[data-more]").forEach(b=>b.onclick=()=>toggleDetail(b.dataset.more));
+  // opening the fold is NOT a privileged act: it shows the locked state and
+  // asks only if the manager decides they want to read it
+  document.querySelectorAll("[data-unlock]").forEach(b=>b.onclick=()=>
+    askPin(async()=>{await loadDirectory();renderStaff();}));
+}
+
+async function toggleDetail(id){
+  if(open.has(id))open.delete(id);
+  else{
+    open.add(id);
+    if(mgrPin&&!dir)await loadDirectory();
+  }
+  renderStaff();
 }
 
 const who=id=>staff.find(s=>s.id===id)||{name:"this employee"};
@@ -446,6 +533,31 @@ function readPair(a,b){
   return{pin:p1};
 }
 
+/* The optional half of a person, one shape shared by the hire form and the
+   edit form so the two never drift. Blank is a valid answer to all of it. */
+const detailFields=(p,v={})=>`<div class="fl">Job title</div>
+  <input class="fld" id="${p}Title" maxlength="60" autocomplete="off"
+    placeholder="Line cook, Sous chef, Host" value="${esc(v.title||"")}">
+  <div class="fl">Phone</div>
+  <input class="fld" id="${p}Phone" type="tel" maxlength="40" autocomplete="off"
+    placeholder="The number you call at 4pm" value="${esc(v.phone||"")}">
+  <div class="fl">Email</div>
+  <input class="fld" id="${p}Email" type="email" maxlength="120" autocomplete="off" value="${esc(v.email||"")}">
+  <div class="fl">Emergency contact</div>
+  <input class="fld" id="${p}Emg" maxlength="120" autocomplete="off"
+    placeholder="Name and number, one line" value="${esc(v.emergencyContact||"")}">
+  <div class="fl">Notes</div>
+  <textarea class="fld" id="${p}Notes" maxlength="500"
+    placeholder="Availability, certifications, anything a manager needs">${esc(v.notes||"")}</textarea>`;
+
+const readDetails=p=>({
+  title:$("#"+p+"Title").value,
+  phone:$("#"+p+"Phone").value,
+  email:$("#"+p+"Email").value,
+  emergencyContact:$("#"+p+"Emg").value,
+  notes:$("#"+p+"Notes").value,
+});
+
 $("#addBtn").onclick=()=>gated(()=>{
   let role="server";
   form("Add employee","They can sign in the moment you save",
@@ -456,19 +568,48 @@ $("#addBtn").onclick=()=>gated(()=>{
        <button class="opt on" data-r="server">Server</button>
        <button class="opt" data-r="manager">Manager</button>
      </div>
-     ${pinPair("aPin","aPin2")}`,
+     <p class="note">Role is what they may DO: a manager can approve a void, close the day, and change these settings. It is not their job title. A line cook who never touches a terminal is a server here, and their title says what the room calls them.</p>
+     ${pinPair("aPin","aPin2")}
+     <div class="acts"><button class="btn btn-s" id="aMore" aria-expanded="false">+ More details</button></div>
+     <div class="fold" id="aFold">${detailFields("a")}</div>`,
     "Add employee",
     async()=>{
       const p=readPair("#aPin","#aPin2");
       if(p.err)return p.err;
-      const r=await cmd("/v1/staff",{name:$("#aName").value,role,pin:p.pin});
+      const r=await cmd("/v1/staff",{name:$("#aName").value,role,pin:p.pin,...readDetails("a")});
       if(!r.ok)return r.reason;
       toast($("#aName").value.trim()+" added to the team");
     });
   document.querySelectorAll("#aRole .opt").forEach(b=>b.onclick=()=>{
     role=b.dataset.r;
     document.querySelectorAll("#aRole .opt").forEach(x=>x.classList.toggle("on",x===b));});
+  $("#aMore").onclick=()=>{
+    const on=$("#aFold").classList.toggle("on");
+    $("#aMore").setAttribute("aria-expanded",String(on));
+    $("#aMore").textContent=on?"- Fewer details":"+ More details";
+    if(on)$("#aTitle").focus();
+  };
 });
+
+/* Edit in place. Role is deliberately absent: a promotion changes what a PIN
+   can approve, and that deserves its own flow rather than a field on a form
+   somebody opened to fix a phone number. */
+function editDetails(id){
+  const d=(dir&&dir.get(id))||who(id);
+  form("Edit "+d.name,"Contact details are manager-only, on every read",
+    `<div class="fl">Name</div>
+     <input class="fld" id="eName" maxlength="60" autocomplete="off" value="${esc(d.name||"")}">
+     ${detailFields("e",d)}
+     <p class="note">Their role stays ${esc(d.role||"")} and their PIN is untouched; both have their own buttons on the row.</p>`,
+    "Save details",
+    async()=>{
+      const r=await cmd("/v1/staff/"+encodeURIComponent(id),{name:$("#eName").value,...readDetails("e")});
+      if(!r.ok)return r.reason;
+      // the reload the form helper runs next re-reads the directory too, so
+      // the row redraws from the server rather than from what was typed
+      toast($("#eName").value.trim()+" updated");
+    });
+}
 
 function resetPin(id){
   form("Reset "+who(id).name+"'s PIN","Their old PIN stops working the moment this saves",

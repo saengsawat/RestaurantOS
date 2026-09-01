@@ -143,6 +143,29 @@ export function buildServer(store: Store = new MemoryStore(), storeName = "memor
 
   app.get("/v1/staff/demo-pins", async () => ({ staff: engine.demoPins() }));
 
+  /** The gated directory read (E24-T2). A POST because the manager's PIN is
+   *  the body of the request, and a PIN does not belong in a URL that lands
+   *  in a log, a history list, or a referrer header. */
+  app.post("/v1/staff/directory", async (req, reply) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const result = await engine.directory(body.managerPin);
+    if (!result.ok) return reply.code(422).send({ status: "REJECTED", reason: result.reason });
+    return { staff: result.staff };
+  });
+
+  /** The optional detail fields (E24-T2), forwarded only when the caller sent
+   *  them as strings, so an omitted field keeps its value and an empty string
+   *  clears it. Same shape as guestFields above, same reason. */
+  function detailFields(body: Record<string, unknown>) {
+    return {
+      ...(typeof body.title === "string" ? { title: body.title } : {}),
+      ...(typeof body.phone === "string" ? { phone: body.phone } : {}),
+      ...(typeof body.email === "string" ? { email: body.email } : {}),
+      ...(typeof body.emergencyContact === "string" ? { emergencyContact: body.emergencyContact } : {}),
+      ...(typeof body.notes === "string" ? { notes: body.notes } : {}),
+    };
+  }
+
   app.post("/v1/staff", async (req, reply) => {
     const body = (req.body ?? {}) as EnvelopeBody & Record<string, unknown>;
     const envelope = readEnvelope(body);
@@ -153,6 +176,19 @@ export function buildServer(store: Store = new MemoryStore(), storeName = "memor
       ...(body.role !== undefined ? { role: String(body.role) } : {}),
       // the PIN stays a string: Number("0123") would silently become 123
       ...(typeof body.pin === "string" ? { pin: body.pin } : {}),
+      ...detailFields(body),
+    }));
+  });
+
+  app.post("/v1/staff/:id", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = (req.body ?? {}) as EnvelopeBody & Record<string, unknown>;
+    const envelope = readEnvelope(body);
+    if ("error" in envelope) return reply.code(400).send({ status: "BAD_REQUEST", reason: envelope.error });
+    return respond(reply, await engine.updateEmployee(envelope, {
+      ...managerPin(body), employeeId: id,
+      ...(typeof body.name === "string" ? { name: body.name } : {}),
+      ...detailFields(body),
     }));
   });
 

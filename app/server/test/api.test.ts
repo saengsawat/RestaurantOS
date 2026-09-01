@@ -688,7 +688,9 @@ describe("hiring, PINs, and letting somebody go (E21-T1)", () => {
     const staff = await roster(app);
     expect(staff.map((s) => s.name)).toEqual(["Gia R.", "Marco B.", "Sofia T."]);
     expect(staff.every((s) => s.active)).toBe(true);
-    for (const s of staff) expect(Object.keys(s).sort()).toEqual(["active", "id", "name", "role"]);
+    // E24-T2 added exactly one public field, the job title. The personal half
+    // of the record has its own gated read and must never appear here.
+    for (const s of staff) expect(Object.keys(s).sort()).toEqual(["active", "id", "name", "role", "title"]);
     expect(JSON.stringify(staff)).not.toContain("2468");
 
     // the demo PINs the lock screen prints on purpose live on their own route
@@ -838,6 +840,150 @@ describe("hiring, PINs, and letting somebody go (E21-T1)", () => {
       payload: { operationId: "anon-opens-0003", deviceId: "term-anon", tableName: "Table 7", covers: 2 } });
     expect(third.json().check.serverName).toBe("Marco B."); // no servers left: any active employee
     expect(third.json().check.serverId).toBeTruthy();
+  });
+});
+
+/* --------------------- the people directory (E24-T2) ---------------------
+   Rung 1 of the D28 ladder. Two rules under test more than any feature: a
+   job TITLE is not a permission LEVEL, and the personal half of a record
+   leaves the server through exactly one PIN-checked door. */
+describe("the people directory (E24-T2)", () => {
+  const MGR = "1122";
+  const SERVER = "2468"; // Gia R., a server: the wrong PIN for this read
+  const PERSONAL = { phone: "917-555-0143", email: "nok@example.com",
+    emergencyContact: "Preeda (sister) 917-555-0198", notes: "Certified food handler, Tuesdays off" };
+
+  const roster = async (app: ReturnType<typeof buildServer>) =>
+    (await app.inject({ method: "GET", url: "/v1/staff" })).json().staff as
+      { id: string; name: string; role: string; active: boolean; title?: string }[];
+
+  const directory = (app: ReturnType<typeof buildServer>, pin?: string) =>
+    app.inject({ method: "POST", url: "/v1/staff/directory",
+      payload: pin === undefined ? {} : { managerPin: pin } });
+
+  /** the demo hire this whole rung exists for: a line cook who will never
+   *  sign in, whose title says what the room calls him */
+  const hireCook = (app: ReturnType<typeof buildServer>, n: number, extra: Record<string, unknown> = {}) =>
+    app.inject({ method: "POST", url: "/v1/staff",
+      payload: { ...ENV(n), managerPin: MGR, name: "Nok S.", role: "server", pin: "4455",
+        title: "Line cook", ...PERSONAL, ...extra } });
+
+  it("hires with details, and the title never moves the permission role", async () => {
+    const app = buildServer();
+    const res = await hireCook(app, 1);
+    expect(res.statusCode).toBe(200);
+
+    // the title is what the room calls him; the ROLE is what he may do
+    expect(res.json().employee).toMatchObject({ name: "Nok S.", role: "server", title: "Line cook", active: true });
+
+    // the hire's own response is the public shape: it does not read the home
+    // number back over the wire just because a manager typed it
+    for (const secret of Object.values(PERSONAL)) expect(JSON.stringify(res.json())).not.toContain(secret);
+
+    // and the role still means exactly what it meant: a cook's PIN approves nothing
+    const check = await openCheck(app);
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items`,
+      payload: { ...ENV(2), itemId: "acqua", quantity: 1, seatNo: 1 } });
+    const state = (await app.inject({ method: "GET", url: `/v1/checks/${check.id}` })).json().check;
+    const refused = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items/${state.lines[0].id}/void`,
+      payload: { ...ENV(3), reason: "sent back", managerPin: "4455" } });
+    expect(refused.json().reason).toBe("PIN not recognized as a manager");
+  });
+
+  it("keeps every personal field off the public roster, however it got there", async () => {
+    const app = buildServer();
+    await hireCook(app, 1);
+    const staff = await roster(app);
+
+    const nok = staff.find((s) => s.name === "Nok S.")!;
+    expect(nok.title).toBe("Line cook"); // the title IS public: it is a job, not a secret
+    for (const s of staff) expect(Object.keys(s).sort()).toEqual(["active", "id", "name", "role", "title"]);
+    // the whole payload, not just the one row, so a leak anywhere fails here
+    for (const secret of Object.values(PERSONAL)) expect(JSON.stringify(staff)).not.toContain(secret);
+
+    // a title nobody typed is the role's own display name, never a blank
+    expect(staff.find((s) => s.name === "Gia R.")!.title).toBe("Server");
+    expect(staff.find((s) => s.name === "Marco B.")!.title).toBe("Manager");
+  });
+
+  it("serves the directory to a manager, and to nobody else", async () => {
+    const app = buildServer();
+    await hireCook(app, 1);
+
+    const bare = await directory(app);
+    expect(bare.statusCode).toBe(422);
+    expect(bare.json().reason).toBe("reading the staff directory requires a manager's PIN");
+    expect(JSON.stringify(bare.json())).not.toContain(PERSONAL.phone);
+
+    const asServer = await directory(app, SERVER);
+    expect(asServer.statusCode).toBe(422);
+    expect(asServer.json().reason).toBe("PIN not recognized as a manager");
+    expect(JSON.stringify(asServer.json())).not.toContain(PERSONAL.phone);
+
+    const wrong = await directory(app, "0000");
+    expect(wrong.statusCode).toBe(422);
+
+    const ok = await directory(app, MGR);
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json().staff.find((s: { name: string }) => s.name === "Nok S."))
+      .toMatchObject({ role: "server", title: "Line cook", ...PERSONAL });
+    // still never a hash, on the read that shows everything else
+    expect(JSON.stringify(ok.json())).not.toContain("4455");
+
+    // the gate is per CALL, not per session: the PIN must come again
+    const again = await directory(app);
+    expect(again.statusCode).toBe(422);
+  });
+
+  it("edits a record in place, leaving role, PIN, and active alone", async () => {
+    const app = buildServer();
+    const nok = (await hireCook(app, 1)).json().employee;
+
+    const edit = await app.inject({ method: "POST", url: `/v1/staff/${nok.id}`,
+      payload: { ...ENV(2), managerPin: MGR, title: "Sous chef", phone: "917-555-0111", notes: "" } });
+    expect(edit.statusCode).toBe(200);
+    expect(edit.json().employee).toMatchObject({ name: "Nok S.", role: "server", title: "Sous chef", active: true });
+
+    const entry = (await directory(app, MGR)).json().staff.find((s: { id: string }) => s.id === nok.id);
+    expect(entry.title).toBe("Sous chef");
+    expect(entry.phone).toBe("917-555-0111");
+    expect(entry.notes).toBeUndefined();                       // an emptied field clears
+    expect(entry.email).toBe(PERSONAL.email);                  // an untouched one survives
+    expect(entry.emergencyContact).toBe(PERSONAL.emergencyContact);
+
+    // the promotion that did not happen: he is still a server, and his PIN
+    // still signs him in
+    const session = await app.inject({ method: "POST", url: "/v1/session",
+      payload: { deviceId: "term-nok", pin: "4455" } });
+    expect(session.json().employee.role).toBe("server");
+  });
+
+  it("refuses an edit without a manager, for a stranger, or with a blank name", async () => {
+    const app = buildServer();
+    const nok = (await hireCook(app, 1)).json().employee;
+
+    const bare = await app.inject({ method: "POST", url: `/v1/staff/${nok.id}`,
+      payload: { ...ENV(2), title: "Chef de cuisine" } });
+    expect(bare.statusCode).toBe(422);
+    expect(bare.json().reason).toBe("editing an employee requires a manager's PIN");
+
+    const nobody = await app.inject({ method: "POST", url: "/v1/staff/not-a-real-id",
+      payload: { ...ENV(3), managerPin: MGR, title: "Chef" } });
+    expect(nobody.json().reason).toBe("no employee not-a-real-id");
+
+    const blank = await app.inject({ method: "POST", url: `/v1/staff/${nok.id}`,
+      payload: { ...ENV(4), managerPin: MGR, name: "   " } });
+    expect(blank.json().reason).toBe("an employee needs a name");
+
+    // the refused edits changed nothing
+    const entry = (await directory(app, MGR)).json().staff.find((s: { id: string }) => s.id === nok.id);
+    expect(entry).toMatchObject({ name: "Nok S.", title: "Line cook" });
+
+    // and a replayed edit is the same edit, not a second one
+    const op = { ...ENV(5), managerPin: MGR, title: "Sous chef" };
+    const first = await app.inject({ method: "POST", url: `/v1/staff/${nok.id}`, payload: op });
+    const retry = await app.inject({ method: "POST", url: `/v1/staff/${nok.id}`, payload: op });
+    expect(retry.json()).toEqual(first.json());
   });
 });
 
@@ -1521,6 +1667,43 @@ describe("reads", () => {
     expect(body).toContain("const gated=job=>{mgrPin?job():askPin(job);}");
     // and refusals are the engine's own sentence
     expect(body).toContain('showErr("#vErr",r.reason)');
+  });
+
+  /* E24-T2: the Team rows grow the people directory. */
+  it("the Settings Team rows carry the gated directory (E24-T2)", async () => {
+    const app = buildServer();
+    const body = (await app.inject({ method: "GET", url: "/settings" })).body;
+
+    // the fold, and the gated read behind it. A POST, because the PIN is the
+    // body: it must not sit in a URL that lands in a log or a history list
+    expect(body).toContain('data-more="');
+    expect(body).toContain('fetch("/v1/staff/directory"');
+    expect(body).toContain('body:JSON.stringify({managerPin:mgrPin})');
+    expect(body).toContain('class="det"');
+
+    // the inline locked state: not an error, just a question nobody answered
+    expect(body).toContain('class="lock"');
+    expect(body).toContain("Enter manager PIN");
+    expect(body).toContain('data-unlock="1"');
+
+    // edit in place, through the update command, with role deliberately absent
+    expect(body).toContain('cmd("/v1/staff/"+encodeURIComponent(id)');
+    expect(body).toContain('data-edit="');
+    expect(body).toContain("Emergency contact");
+
+    // the fold on the hire form, so the five-second hire stays five seconds
+    expect(body).toContain('id="aMore"');
+    expect(body).toContain('class="fold"');
+    expect(body).toContain("+ More details");
+
+    // the two rules, said out loud on the page and not only in the spec
+    expect(body).toContain("A job title is what the room calls somebody");
+    expect(body).toContain("Phone, email, and emergency contact are manager-only");
+    // no wage, tax, or bank field anywhere on this page: that is rung 3, and
+    // rung 3 exports to a payroll provider rather than storing any of it
+    for (const forbidden of ["wageMinor", "id=\"aWage\"", "id=\"eWage\"", "Social security", "Bank account"]) {
+      expect(body, `${forbidden} has no business on the directory`).not.toContain(forbidden);
+    }
   });
 
   it("serves the KDS, Tables, and Close pages and the floor", async () => {
