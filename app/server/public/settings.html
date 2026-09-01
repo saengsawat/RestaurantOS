@@ -274,6 +274,17 @@ textarea.fld{padding:10px 12px;min-height:76px;resize:vertical;line-height:1.5}
     <input class="fld" id="vTz" autocomplete="off" placeholder="Type a city, e.g. Chicago">
     <div class="tzlist" id="tzList"></div>
     <p class="note">The business day still buckets on the server's own clock, so changing this does not move which day a late check lands on yet. That wiring is its own ticket.</p>
+    <div class="fl">Pay period</div>
+    <div class="opts" id="vPeriod">
+      <button class="opt" data-p="weekly">Weekly</button>
+      <button class="opt" data-p="biweekly">Every two weeks</button>
+      <button class="opt" data-p="semimonthly">Twice a month</button>
+    </div>
+    <div id="vAnchorWrap">
+      <div class="fl">Cycle starts</div>
+      <input class="fld" id="vAnchor" type="date">
+      <p class="note">Any past start date works; the cycles count forward and backward from it. Twice a month needs no anchor: it runs the 1st to the 15th, then the 16th to the end of the month.</p>
+    </div>
     <div class="err" id="vErr"></div>
     <div class="acts"><button class="btn btn-p btn-lg" id="vSave">Save venue</button></div>
   </div>
@@ -284,6 +295,15 @@ textarea.fld{padding:10px 12px;min-height:76px;resize:vertical;line-height:1.5}
   <p class="note">A job title is what the room calls somebody; the role chip beside it is what they may do. They are separate on purpose, so giving the dishwasher a better title never hands them the void button.</p>
   <p class="note">Phone, email, and emergency contact are manager-only. They are fetched under a manager PIN that is checked again on every read, and they never travel with the roster the rest of the app uses. No wage, tax, or bank detail is kept here at all: that belongs to a payroll provider, not to us.</p>
   <p class="note">Deactivating is soft and always will be: their PIN stops opening anything, and every check they ever opened still carries their name. PINs are stored hashed and are never shown here, not even to a manager, because the only honest answer to a forgotten PIN is a new one.</p>
+
+  <div class="sec-h">Payroll export</div>
+  <div class="blk pad">
+    <div class="row"><div class="nm">Last completed period<small id="pPeriod">Reading the calendar...</small></div>
+      <button class="btn btn-s" id="pGo">Download hours CSV</button></div>
+    <div class="err" id="pErr"></div>
+    <p class="note">Hours and declared tips only. Your payroll provider applies wage and overtime rules; this system never calculates pay.</p>
+    <p class="note">The file covers the last period that finished, because the one running now is still being worked. A shift somebody is still clocked into is left out and named at the bottom of the file rather than counted short.</p>
+  </div>
 </div>
   </div>
 </div>
@@ -399,22 +419,71 @@ function renderTz(){
 }
 $("#vTz").oninput=renderTz;
 
+/* the pay period (E24-T3). WHEN the venue pays, never what: there is no wage
+   field on this page and rung 3 is the reason there never will be one. */
+let period=VENUE.payPeriod||"biweekly";
+function renderPeriod(){
+  document.querySelectorAll("#vPeriod .opt").forEach(b=>b.classList.toggle("on",b.dataset.p===period));
+  // twice a month anchors itself on the 1st and the 16th, so the date field
+  // would be a control that does nothing
+  $("#vAnchorWrap").style.display=period==="semimonthly"?"none":"";
+}
+document.querySelectorAll("#vPeriod .opt").forEach(b=>b.onclick=()=>{period=b.dataset.p;renderPeriod();});
+
 function fillVenue(){
   $("#vName").value=VENUE.name==="RestaurantOS"?"":VENUE.name;
   $("#vAddr").value=VENUE.address||"";
   $("#vTz").value=VENUE.timezone||"";
   tzPick=VENUE.timezone||"";
   $("#tzList").innerHTML="";
+  period=VENUE.payPeriod||"biweekly";
+  $("#vAnchor").value=VENUE.payPeriodAnchor||"";
+  renderPeriod();
 }
 
 $("#vSave").onclick=()=>gated(async()=>{
   showErr("#vErr","");
   const r=await cmd("/v1/venue",{
-    name:$("#vName").value,address:$("#vAddr").value,timezone:$("#vTz").value.trim()});
+    name:$("#vName").value,address:$("#vAddr").value,timezone:$("#vTz").value.trim(),
+    payPeriod:period,...($("#vAnchor").value?{payPeriodAnchor:$("#vAnchor").value}:{})});
   if(!r.ok){showErr("#vErr",r.reason);return;}
   await loadVenue();   // the topbar follows immediately, like every other page will on its next load
   fillVenue();
+  await loadPeriod();  // the boundaries move with the setting
   toast("Venue saved");
+});
+
+/* ------------------------- the payroll export ------------------------- */
+
+async function loadPeriod(){
+  try{
+    const p=(await fetch("/v1/payroll/period").then(r=>r.json())).period;
+    $("#pPeriod").textContent=p.start+" through "+p.end;
+    return p;
+  }catch(_){$("#pPeriod").textContent="Cannot reach the server";return null;}
+}
+
+/* The PIN goes with the request every time, the way the staff directory read
+   works: a payroll file is every employee's schedule in one place. */
+$("#pGo").onclick=()=>gated(async()=>{
+  showErr("#pErr","");
+  const res=await fetch("/v1/staff/hours-export",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({managerPin:mgrPin})});
+  if(!res.ok){
+    const data=await res.json().catch(()=>({}));
+    if(badManagerPin(data.reason))mgrPin=null;
+    showErr("#pErr",data.reason||"The server refused that export");
+    return;
+  }
+  const csv=await res.text();
+  const name=(res.headers.get("content-disposition")||"").match(/filename="([^"]+)"/);
+  const url=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));
+  const a=document.createElement("a");
+  a.href=url;a.download=name?name[1]:"hours.csv";
+  document.body.appendChild(a);a.click();a.remove();
+  // revoke on the next tick, so the click has actually taken the blob
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+  toast("Hours exported");
 });
 
 /* ---------------------------- the team ---------------------------- */
@@ -638,6 +707,7 @@ function deactivate(id){
 /* ------------------------------ boot ------------------------------ */
 venueReady.then(fillVenue);
 loadStaff().catch(()=>toast("Cannot reach the server","err"));
+loadPeriod();
 function setViewportH(){document.documentElement.style.setProperty("--vph",window.innerHeight+"px");}
 addEventListener("resize",setViewportH);setViewportH();
 

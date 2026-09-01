@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildServer } from "../src/server.js";
+import { MemoryStore } from "../src/memoryStore.js";
+import { lastCompletedPeriod, periodContaining, VENUE, type Shift, type Venue } from "../src/types.js";
 
 const ENV = (n: number, extra: Record<string, unknown> = {}) => ({
   operationId: `op-${n}-${Math.random().toString(36).slice(2)}`,
@@ -624,19 +626,23 @@ describe("the venue is data now (E21-T1)", () => {
       name: "Osteria Nove",
       address: "9 Vicolo della Luna, New York",
       timezone: "America/New_York",
+      // E24-T3 added WHEN the venue pays. Never what it pays: there is no
+      // wage field here and rung 3 is the reason there is not going to be one
+      payPeriod: "biweekly",
+      payPeriodAnchor: "2026-01-05",
     });
 
     const res = await app.inject({ method: "POST", url: "/v1/venue",
       payload: { ...ENV(1), managerPin: MGR, name: "Trattoria Sedici", address: "16 Elm St, Austin", timezone: "America/Chicago" } });
     expect(res.statusCode).toBe(200);
-    expect(res.json().venue).toEqual({ name: "Trattoria Sedici", address: "16 Elm St, Austin", timezone: "America/Chicago" });
+    expect(res.json().venue).toEqual({ name: "Trattoria Sedici", address: "16 Elm St, Austin", timezone: "America/Chicago", payPeriod: "biweekly", payPeriodAnchor: "2026-01-05" });
     expect((await app.inject({ method: "GET", url: "/v1/venue" })).json().name).toBe("Trattoria Sedici");
 
     // an omitted field is left alone; a blank address is a real edit, because
     // a kitchen with no street frontage is a real thing
     const partial = await app.inject({ method: "POST", url: "/v1/venue",
       payload: { ...ENV(2), managerPin: MGR, address: "" } });
-    expect(partial.json().venue).toEqual({ name: "Trattoria Sedici", address: "", timezone: "America/Chicago" });
+    expect(partial.json().venue).toEqual({ name: "Trattoria Sedici", address: "", timezone: "America/Chicago", payPeriod: "biweekly", payPeriodAnchor: "2026-01-05" });
   });
 
   it("refuses the edit without a manager, and refuses a name or a timezone it cannot honor", async () => {
@@ -3400,6 +3406,245 @@ describe("per-course hold and fire (E8-T3)", () => {
       const res = await courseCmd(app, checkId, action, "DOLCI");
       expect(res.statusCode).toBe(422);
       expect(res.json().reason).toMatch(/on a closed check/);
+    }
+  });
+});
+
+/* --------------- the payroll hours export (E24-T3) ---------------
+   Rung 3 of the D28 ladder, and the point of it is what it does NOT do.
+   Every assertion below is about hours and declared tips; not one of them
+   is about money owed, because this system never works that out. */
+describe("the payroll hours export (E24-T3)", () => {
+  const MGR = "1122";
+  const GIA = "33333333-3333-3333-3333-333333333333";
+  const MARCO = "66666666-6666-4666-8666-666666666666";
+  const SOFIA = "77777777-7777-4777-8777-777777777777";
+  const HEADER = "employee_id,employee_name,title,period_start,period_end,regular_hours,declared_tips,shift_count";
+  const POSTURE = "# hours and declared tips only; wage, overtime, and tax rules are the payroll provider's";
+
+  /** a local-time instant, because the whole calendar runs on server-local */
+  const at = (y: number, m: number, d: number, h: number, min = 0) => new Date(y, m - 1, d, h, min).toISOString();
+
+  const shift = (id: string, name: string, clockIn: string, clockOut?: string, tips?: number): Shift => ({
+    id: `sh-${id}-${clockIn}`, employeeId: id, employeeName: name, clockIn,
+    ...(clockOut ? { clockOut } : {}),
+    ...(tips !== undefined ? { declaredTipsMinor: tips } : {}),
+  });
+
+  /** a server whose clock records are planted rather than lived through, so a
+   *  period boundary can actually be crossed inside a test */
+  const withShifts = async (shifts: Shift[]) => {
+    const store = new MemoryStore();
+    await store.init();
+    for (const s of shifts) await store.putShift(s);
+    return buildServer(store);
+  };
+
+  const setPeriod = (app: ReturnType<typeof buildServer>, n: number, body: Record<string, unknown>) =>
+    app.inject({ method: "POST", url: "/v1/venue", payload: { ...ENV(n), managerPin: MGR, ...body } });
+
+  // null means "send no PIN at all": passing undefined would take the default
+  const csvFor = async (app: ReturnType<typeof buildServer>, periodEnd?: string, pin: string | null = MGR) => {
+    const res = await app.inject({ method: "POST", url: "/v1/staff/hours-export",
+      payload: { ...(pin === null ? {} : { managerPin: pin }), ...(periodEnd ? { periodEnd } : {}) } });
+    return { code: res.statusCode, type: res.headers["content-type"] as string,
+      disposition: res.headers["content-disposition"] as string,
+      lines: res.statusCode === 200 ? res.body.trimEnd().split("\n") : [], raw: res.body };
+  };
+
+  it("finds the right period at every month edge, for all three kinds", () => {
+    const venue = (payPeriod: Venue["payPeriod"], payPeriodAnchor = "2026-01-05"): Venue =>
+      ({ ...VENUE, payPeriod, payPeriodAnchor });
+
+    // twice a month: the 1st to the 15th, then the 16th to whatever the month
+    // happens to end on, which is where a hand-rolled calendar goes wrong
+    const semi = venue("semimonthly");
+    expect(periodContaining(semi, "2026-02-14")).toEqual({ start: "2026-02-01", end: "2026-02-15" });
+    expect(periodContaining(semi, "2026-02-16")).toEqual({ start: "2026-02-16", end: "2026-02-28" }); // 28 days
+    expect(periodContaining(semi, "2028-02-20")).toEqual({ start: "2028-02-16", end: "2028-02-29" }); // leap year
+    expect(periodContaining(semi, "2026-01-31")).toEqual({ start: "2026-01-16", end: "2026-01-31" }); // 31 days
+    expect(periodContaining(semi, "2026-04-30")).toEqual({ start: "2026-04-16", end: "2026-04-30" }); // 30 days
+
+    // weekly and biweekly count from the anchor and do not care about months
+    const weekly = venue("weekly");
+    expect(periodContaining(weekly, "2026-01-05")).toEqual({ start: "2026-01-05", end: "2026-01-11" });
+    expect(periodContaining(weekly, "2026-02-02")).toEqual({ start: "2026-02-02", end: "2026-02-08" });
+    // a date BEFORE the anchor belongs to the cycle that ran before it, which
+    // is the case a truncating division silently gets wrong
+    expect(periodContaining(weekly, "2026-01-04")).toEqual({ start: "2025-12-29", end: "2026-01-04" });
+
+    const bi = venue("biweekly");
+    expect(periodContaining(bi, "2026-01-19")).toEqual({ start: "2026-01-19", end: "2026-02-01" }); // over a month end
+    expect(lastCompletedPeriod(bi, "2026-01-20")).toEqual({ start: "2026-01-05", end: "2026-01-18" });
+    // today's period is never the answer: it is still being worked
+    expect(lastCompletedPeriod(bi, "2026-01-18")).toEqual({ start: "2025-12-22", end: "2026-01-04" });
+  });
+
+  it("exports the period as CSV, one row per employee who worked", async () => {
+    const app = await withShifts([
+      shift(GIA, "Gia R.", at(2026, 3, 3, 16), at(2026, 3, 3, 23, 30), 12_000),
+      shift(GIA, "Gia R.", at(2026, 3, 4, 17), at(2026, 3, 4, 22), 8_000),
+      shift(SOFIA, "Sofia T.", at(2026, 3, 5, 18), at(2026, 3, 5, 23, 15), 4_550),
+    ]);
+    await setPeriod(app, 1, { payPeriod: "weekly", payPeriodAnchor: "2026-03-02" });
+    // a title set on rung 1 flows into the file; one nobody typed stays blank,
+    // because a payroll file should carry what a manager wrote, not a fallback
+    await app.inject({ method: "POST", url: `/v1/staff/${GIA}`,
+      payload: { ...ENV(2), managerPin: MGR, title: "Bartender" } });
+
+    const { code, type, disposition, lines } = await csvFor(app, "2026-03-08");
+    expect(code).toBe(200);
+    expect(type).toContain("text/csv");
+    expect(disposition).toBe('attachment; filename="hours-2026-03-02-to-2026-03-08.csv"');
+
+    expect(lines).toEqual([
+      HEADER,
+      `${GIA},Gia R.,Bartender,2026-03-02,2026-03-08,12.50,200.00,2`,
+      `${SOFIA},Sofia T.,,2026-03-02,2026-03-08,5.25,45.50,1`,
+      POSTURE,
+    ]);
+    // Marco worked none of it, so he is not in the file at all
+    expect(lines.some((l) => l.includes(MARCO))).toBe(false);
+
+    // the absence that IS the specification: no overtime column, anywhere
+    expect(lines[0]).not.toContain("overtime");
+    for (const forbidden of ["wage", "rate", "gross", "net_pay", "tax"]) {
+      expect(lines[0], `${forbidden} has no business in this file`).not.toContain(forbidden);
+    }
+  });
+
+  it("splits a shift that runs past midnight into the period each half falls in", async () => {
+    const app = await withShifts([
+      // on at 8pm on payday, off at 2am the next morning: 4 hours this period,
+      // 2 hours the next, and not one of them counted twice
+      shift(GIA, "Gia R.", at(2026, 3, 8, 20), at(2026, 3, 9, 2), 9_000),
+    ]);
+    await setPeriod(app, 1, { payPeriod: "weekly", payPeriodAnchor: "2026-03-02" });
+
+    const first = (await csvFor(app, "2026-03-08")).lines[1]!.split(",");
+    expect(first.slice(3, 8)).toEqual(["2026-03-02", "2026-03-08", "4.00", "90.00", "1"]);
+
+    const second = (await csvFor(app, "2026-03-09")).lines[1]!.split(",");
+    // the hours follow the clock, but the declared tips do NOT get split: one
+    // amount was declared once, and halving it would be inventing a figure
+    expect(second.slice(3, 8)).toEqual(["2026-03-09", "2026-03-15", "2.00", "0.00", "1"]);
+  });
+
+  it("names an open shift in a footer instead of quietly paying it short", async () => {
+    const app = await withShifts([
+      shift(SOFIA, "Sofia T.", at(2026, 3, 3, 17), at(2026, 3, 3, 22), 5_000),
+      shift(GIA, "Gia R.", at(2026, 3, 4, 16)), // still on the clock
+    ]);
+    await setPeriod(app, 1, { payPeriod: "weekly", payPeriodAnchor: "2026-03-02" });
+
+    const { lines } = await csvFor(app, "2026-03-08");
+    expect(lines).toEqual([
+      HEADER,
+      `${SOFIA},Sofia T.,,2026-03-02,2026-03-08,5.00,50.00,1`,
+      `# 1 open shift excluded: Gia R., clocked in ${at(2026, 3, 4, 16)}`,
+      POSTURE,
+    ]);
+    // she is named, and she is NOT given a row with a truncated total
+    expect(lines.some((l) => l.startsWith(GIA))).toBe(false);
+
+    const two = await withShifts([
+      shift(GIA, "Gia R.", at(2026, 3, 4, 16)),
+      shift(SOFIA, "Sofia T.", at(2026, 3, 5, 16)),
+    ]);
+    await setPeriod(two, 2, { payPeriod: "weekly", payPeriodAnchor: "2026-03-02" });
+    const both = (await csvFor(two, "2026-03-08")).lines;
+    expect(both[1]).toContain("2 open shifts excluded: Gia R.");
+    expect(both[1]).toContain("Sofia T.");
+  });
+
+  it("pays somebody who was let go, and skips somebody who did not work", async () => {
+    const app = await withShifts([
+      shift(SOFIA, "Sofia T.", at(2026, 3, 3, 17), at(2026, 3, 3, 22), 5_000),
+    ]);
+    await setPeriod(app, 1, { payPeriod: "weekly", payPeriodAnchor: "2026-03-02" });
+
+    const out = await app.inject({ method: "POST", url: `/v1/staff/${SOFIA}/deactivate`,
+      payload: { ...ENV(2), managerPin: MGR } });
+    expect(out.statusCode).toBe(200);
+
+    // she does not work here any more and she is still owed for last week
+    const { lines } = await csvFor(app, "2026-03-08");
+    expect(lines[1]).toBe(`${SOFIA},Sofia T.,,2026-03-02,2026-03-08,5.00,50.00,1`);
+    // Gia and Marco are active and worked nothing: no rows, not zero rows
+    expect(lines).toHaveLength(3);
+  });
+
+  it("asks for a manager on every single call", async () => {
+    const app = await withShifts([shift(GIA, "Gia R.", at(2026, 3, 3, 17), at(2026, 3, 3, 22), 1_000)]);
+
+    const bare = await csvFor(app, undefined, null);
+    expect(bare.code).toBe(422);
+    expect(JSON.parse(bare.raw).reason).toBe("exporting hours requires a manager's PIN");
+
+    const asServer = await csvFor(app, undefined, "2468");
+    expect(asServer.code).toBe(422);
+    expect(JSON.parse(asServer.raw).reason).toBe("PIN not recognized as a manager");
+
+    expect((await csvFor(app, "2026-03-08")).code).toBe(200);
+    // nothing was cached by that success: the next call asks again
+    expect((await csvFor(app, "2026-03-08", null)).code).toBe(422);
+  });
+
+  it("declares the same tips the day report does, over the same span", async () => {
+    const today = new Date();
+    const y = today.getFullYear(), m = today.getMonth() + 1, d = today.getDate();
+    const ymdToday = `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    const app = await withShifts([
+      shift(GIA, "Gia R.", new Date(y, m - 1, d, 9).toISOString(), new Date(y, m - 1, d, 15).toISOString(), 7_300),
+      shift(SOFIA, "Sofia T.", new Date(y, m - 1, d, 10).toISOString(), new Date(y, m - 1, d, 16).toISOString(), 4_200),
+    ]);
+    // a period wide enough to hold today, with nothing else worked inside it,
+    // so the two spans really are the same span
+    await setPeriod(app, 1, { payPeriod: "weekly", payPeriodAnchor: ymdToday });
+
+    const { lines } = await csvFor(app, ymdToday);
+    const exported = lines.slice(1, -1).reduce((a, l) => a + Number(l.split(",")[6]), 0);
+    const dayReport = (await app.inject({ method: "GET", url: "/v1/insights/servers" })).json();
+    expect(exported).toBeCloseTo(dayReport.declaredTipsTotalMinor / 100, 2);
+    expect(exported).toBe(115);
+  });
+
+  it("refuses a pay period it cannot honour, and keeps the one it had", async () => {
+    const app = buildServer();
+    const bad = await setPeriod(app, 1, { payPeriod: "fortnightly" });
+    expect(bad.statusCode).toBe(422);
+    expect(bad.json().reason).toBe("pay period must be one of weekly, biweekly, semimonthly");
+
+    const badDate = await setPeriod(app, 2, { payPeriodAnchor: "2026-02-30" });
+    expect(badDate.json().reason).toBe("2026-02-30 is not a date (use YYYY-MM-DD)");
+
+    const venue = (await app.inject({ method: "GET", url: "/v1/venue" })).json();
+    expect(venue.payPeriod).toBe("biweekly");
+    expect(venue.payPeriodAnchor).toBe("2026-01-05");
+
+    const ok = await setPeriod(app, 3, { payPeriod: "semimonthly", payPeriodAnchor: "2026-03-02" });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json().venue).toMatchObject({ payPeriod: "semimonthly", payPeriodAnchor: "2026-03-02" });
+    // the read the Settings screen names the period with follows the setting
+    const period = (await app.inject({ method: "GET", url: "/v1/payroll/period?on=2026-05-20" })).json().period;
+    expect(period).toEqual({ start: "2026-05-16", end: "2026-05-31" });
+  });
+
+  it("the Settings screen carries the picker and the download, and no wage field", async () => {
+    const body = (await buildServer().inject({ method: "GET", url: "/settings" })).body;
+
+    expect(body).toContain('id="vPeriod"');
+    for (const kind of ["weekly", "biweekly", "semimonthly"]) expect(body).toContain(`data-p="${kind}"`);
+    expect(body).toContain('id="vAnchor"');
+    expect(body).toContain(">Payroll export<");
+    expect(body).toContain('fetch("/v1/staff/hours-export"');
+    expect(body).toContain('fetch("/v1/payroll/period")');
+    expect(body).toContain('id="pGo"');
+    // the posture, on the screen, in one sentence
+    expect(body).toContain("Your payroll provider applies wage and overtime rules; this system never calculates pay.");
+    // and nowhere to type a wage, which is the whole design
+    for (const forbidden of ['id="vWage"', 'id="eWage"', "wageMinor", "hourlyRate"]) {
+      expect(body, `${forbidden} has no business on this page`).not.toContain(forbidden);
     }
   });
 });

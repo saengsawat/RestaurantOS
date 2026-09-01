@@ -194,6 +194,85 @@ export function serviceDateOf(iso: string): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+/* ---------------------- pay periods (E24-T3) ----------------------
+   Calendar arithmetic on plain YYYY-MM-DD strings, in SERVER-LOCAL time,
+   the same clock serviceDateOf buckets the business day on. The venue's
+   stored timezone still does not drive day bucketing (see updateVenue);
+   wiring both to it is one ticket, and doing half of it here would put a
+   shift and its own service date on different calendars. */
+
+/** A pay period as two inclusive calendar dates. The period covers
+ *  `start` 00:00:00 through `end` 23:59:59.999, local. */
+export interface PayPeriod {
+  start: string;
+  end: string;
+}
+
+const DAY_MS = 86_400_000;
+
+/** Local midnight on a YYYY-MM-DD. Built field by field rather than parsed,
+ *  because `new Date("2026-02-28")` is UTC midnight and would shift the day
+ *  west of Greenwich. */
+export function dateAt(ymd: string): Date {
+  const [y, m, d] = ymd.split("-").map(Number);
+  return new Date(y!, (m ?? 1) - 1, d ?? 1);
+}
+
+export function ymd(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+export function addDays(ymdStr: string, days: number): string {
+  const d = dateAt(ymdStr);
+  d.setDate(d.getDate() + days);
+  return ymd(d);
+}
+
+/** Whole days from a to b, DST-safe: both ends are snapped to UTC noon so a
+ *  23 or 25 hour day still divides into exactly one. */
+function daysBetween(a: string, b: string): number {
+  const at = dateAt(a), bt = dateAt(b);
+  const utc = (d: Date) => Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), 12);
+  return Math.round((utc(bt) - utc(at)) / DAY_MS);
+}
+
+export function isValidYmd(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  // round-tripping catches the impossible ones: 2026-02-30 becomes March 2
+  return ymd(dateAt(value)) === value;
+}
+
+/** The period the given date falls inside. */
+export function periodContaining(venue: Venue, date: string): PayPeriod {
+  if (venue.payPeriod === "semimonthly") {
+    const d = dateAt(date);
+    if (d.getDate() <= 15) {
+      return { start: ymd(new Date(d.getFullYear(), d.getMonth(), 1)), end: ymd(new Date(d.getFullYear(), d.getMonth(), 15)) };
+    }
+    // day 0 of next month is the last day of this one, which is how February
+    // gets 28 or 29 without anybody writing down which
+    return { start: ymd(new Date(d.getFullYear(), d.getMonth(), 16)), end: ymd(new Date(d.getFullYear(), d.getMonth() + 1, 0)) };
+  }
+  const length = venue.payPeriod === "weekly" ? 7 : 14;
+  const anchor = isValidYmd(venue.payPeriodAnchor) ? venue.payPeriodAnchor : VENUE.payPeriodAnchor;
+  // floor, not truncate: a date BEFORE the anchor belongs to a cycle that
+  // ran before it, and -3/14 truncating to 0 would put it in the wrong one
+  const index = Math.floor(daysBetween(anchor, date) / length);
+  const start = addDays(anchor, index * length);
+  return { start, end: addDays(start, length - 1) };
+}
+
+/** The period before this one. */
+export function periodBefore(venue: Venue, period: PayPeriod): PayPeriod {
+  return periodContaining(venue, addDays(period.start, -1));
+}
+
+/** The latest period that has finished. Today's period is still being worked,
+ *  so exporting it would hand a provider a half-written paycheck. */
+export function lastCompletedPeriod(venue: Venue, today: string): PayPeriod {
+  return periodBefore(venue, periodContaining(venue, today));
+}
+
 /** One signed movement of physical cash (E14). Append-only: a mistake is
  *  corrected by a compensating event, never an edit. */
 export interface CashEvent {
@@ -384,10 +463,21 @@ export interface Shift {
 /** Who the restaurant is (E21-T1). Three fields, all editable, because
  *  "Osteria Nove" being a string literal in the source is exactly what stops
  *  a second restaurant from existing. */
+/** How often the venue pays (E24-T3). Three kinds because those are the three
+ *  US restaurants actually run; the provider that turns hours into money knows
+ *  about the rest. */
+export const PAY_PERIODS = ["weekly", "biweekly", "semimonthly"] as const;
+export type PayPeriodKind = (typeof PAY_PERIODS)[number];
+
 export interface Venue {
   name: string;
   address: string;
   timezone: string;
+  /** default biweekly, the most common of the three (team-labor-spec §4) */
+  payPeriod: PayPeriodKind;
+  /** YYYY-MM-DD, the day a weekly or biweekly cycle starts counting from.
+   *  Semimonthly ignores it: the 1st and the 16th are the anchor. */
+  payPeriodAnchor: string;
 }
 
 /** The demo venue, seeded into whichever store is active. It stays the seed
@@ -397,6 +487,9 @@ export const VENUE: Venue = {
   name: "Osteria Nove",
   address: "9 Vicolo della Luna, New York",
   timezone: "America/New_York",
+  payPeriod: "biweekly",
+  // a Monday, so the demo's cycles start where a restaurant week does
+  payPeriodAnchor: "2026-01-05",
 };
 
 /** Osteria Nove's room, seeded into whichever store is active. */

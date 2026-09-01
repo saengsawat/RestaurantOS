@@ -136,7 +136,30 @@ export function buildServer(store: Store = new MemoryStore(), storeName = "memor
       ...(body.name !== undefined ? { name: String(body.name) } : {}),
       ...(body.address !== undefined ? { address: String(body.address) } : {}),
       ...(body.timezone !== undefined ? { timezone: String(body.timezone) } : {}),
+      ...(body.payPeriod !== undefined ? { payPeriod: String(body.payPeriod) } : {}),
+      ...(body.payPeriodAnchor !== undefined ? { payPeriodAnchor: String(body.payPeriodAnchor) } : {}),
     }));
+  });
+
+  /** The pay period the export would cover, so the Settings screen can name
+   *  it before anybody asks for the file. Not gated: it is two dates, and the
+   *  file behind them is. */
+  app.get("/v1/payroll/period", async (req) => {
+    const { on } = req.query as { on?: string };
+    return { period: await engine.payPeriodFor(on) };
+  });
+
+  /** Hours and declared tips for one period (E24-T3). A POST because the
+   *  manager's PIN is the body, checked on every call, exactly as the staff
+   *  directory read is. The response is the file itself. */
+  app.post("/v1/staff/hours-export", async (req, reply) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const result = await engine.hoursExport(body.managerPin, typeof body.periodEnd === "string" ? body.periodEnd : undefined);
+    if (!result.ok) return reply.code(422).send({ status: "REJECTED", reason: result.reason });
+    return reply
+      .type("text/csv; charset=utf-8")
+      .header("content-disposition", `attachment; filename="hours-${result.period.start}-to-${result.period.end}.csv"`)
+      .send(result.csv);
   });
 
   app.get("/v1/staff", async () => ({ staff: await engine.staff() }));

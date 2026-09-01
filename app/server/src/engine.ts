@@ -26,7 +26,7 @@ import {
 import type { MenuEntry } from "./menu.js";
 import { defaultTitle, PIN_RULE, pinHash, STAFF, type DirectoryEntry, type Employee, type RosterEntry } from "./staff.js";
 import { randomUUID } from "node:crypto";
-import { sameName, serviceDateOf, TABLE_SHAPES, type CashEvent, type CheckAggregate, type DraftGroup, type DrawerSession, type Envelope, type FloorTable, type Guest, type KitchenTicket, type MenuDraft, type MenuSnapshot, type OrderLine, type Store, type TableShape, type Venue } from "./types.js";
+import { addDays, dateAt, isValidYmd, lastCompletedPeriod, PAY_PERIODS, periodContaining, sameName, serviceDateOf, TABLE_SHAPES, type CashEvent, type CheckAggregate, type DraftGroup, type DrawerSession, type Envelope, type FloorTable, type Guest, type KitchenTicket, type MenuDraft, type MenuSnapshot, type OrderLine, type PayPeriod, type PayPeriodKind, type Store, type TableShape, type Venue } from "./types.js";
 import type { GroupIndex } from "@restaurantos/domain";
 
 export const TAX_RATE = { num: 8_875, den: 100_000 };
@@ -1797,7 +1797,7 @@ export class Engine {
    */
   async updateVenue(
     envelope: Envelope,
-    input: { managerPin?: string; name?: string; address?: string; timezone?: string },
+    input: { managerPin?: string; name?: string; address?: string; timezone?: string; payPeriod?: string; payPeriodAnchor?: string },
   ): Promise<CommandOutcome> {
     const replay = await this.store.opResult(envelope.operationId);
     if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
@@ -1819,9 +1819,132 @@ export class Engine {
       if (!Engine.knownTimezone(tz)) return refuse(`${tz} is not a timezone this machine knows`);
       venue.timezone = tz;
     }
+    // when the venue pays (E24-T3). Never how much: there is no wage here and
+    // there is not going to be one, because rung 3 exports to a provider
+    if (input.payPeriod !== undefined) {
+      const kind = input.payPeriod.trim() as PayPeriodKind;
+      if (!PAY_PERIODS.includes(kind)) return refuse(`pay period must be one of ${PAY_PERIODS.join(", ")}`);
+      venue.payPeriod = kind;
+    }
+    if (input.payPeriodAnchor !== undefined) {
+      const anchor = input.payPeriodAnchor.trim();
+      if (!isValidYmd(anchor)) return refuse(`${anchor} is not a date (use YYYY-MM-DD)`);
+      venue.payPeriodAnchor = anchor;
+    }
 
     await this.store.putVenue(venue);
     return this.remember(envelope, { kind: "applied", venue }, "venue", "venue");
+  }
+
+  /* ------------------ the hours export (E24-T3, D28 rung 3) ------------------
+     The payments posture applied to labor: own the data, export cleanly.
+     RestaurantOS is the best possible source of truth for hours worked and
+     tips declared, because it captured them at the terminal while service
+     happened. It is the worst possible place to decide what they are worth,
+     so nothing below multiplies anything by a wage. There is no wage to
+     multiply by: rung 1 deliberately refused to store one. */
+
+  /** The period an export covers. `on` is any date inside it; with none, the
+   *  last period that actually finished, because today's is still being
+   *  worked and exporting it hands a provider half a paycheck. */
+  async payPeriodFor(on?: string): Promise<PayPeriod> {
+    const venue = await this.store.getVenue();
+    return on && isValidYmd(on)
+      ? periodContaining(venue, on)
+      : lastCompletedPeriod(venue, serviceDate());
+  }
+
+  /**
+   * Hours and declared tips for one pay period, as CSV.
+   *
+   * Manager-gated on every call, like the directory read: a payroll file is
+   * every employee's schedule in one place. Computed on read and stored
+   * nowhere (D19), so it can never drift from the clock records it comes from.
+   */
+  async hoursExport(
+    pin: unknown,
+    on?: string,
+  ): Promise<{ ok: true; period: PayPeriod; csv: string } | { ok: false; reason: string }> {
+    if (!(await this.manager(pin))) return { ok: false, reason: this.managerRefusal(pin, "exporting hours") };
+
+    const period = await this.payPeriodFor(on);
+    const from = dateAt(period.start).getTime();
+    // through the last millisecond of the end date, so a shift that runs to
+    // 23:59 on payday is inside the period rather than half outside it
+    const to = dateAt(addDays(period.end, 1)).getTime();
+
+    const [shifts, roster] = await Promise.all([this.store.listShifts(), this.store.listEmployees()]);
+    // the PUBLIC roster: a payroll file needs a name and a job title, and has
+    // no business carrying anybody's home phone number (E24-T2)
+    const known = new Map(roster.map((e) => [e.id, e]));
+
+    interface Row { id: string; name: string; title: string; ms: number; tipsMinor: number; shifts: number }
+    const rows = new Map<string, Row>();
+    const openShifts: { name: string; clockIn: string }[] = [];
+
+    for (const shift of shifts) {
+      const start = Date.parse(shift.clockIn);
+      if (!Number.isFinite(start)) continue;
+
+      if (!shift.clockOut) {
+        // still on the clock. Excluded and NAMED: a quietly short paycheck is
+        // the exact failure this whole rung exists to prevent
+        if (start < to) openShifts.push({ name: shift.employeeName, clockIn: shift.clockIn });
+        continue;
+      }
+      const end = Date.parse(shift.clockOut);
+      if (!Number.isFinite(end) || end <= start) continue;
+
+      // a shift spanning a boundary contributes only the part inside THIS
+      // period; the other end is counted when that period is exported
+      const overlap = Math.min(end, to) - Math.max(start, from);
+      if (overlap <= 0) continue;
+
+      const employee = known.get(shift.employeeId);
+      let row = rows.get(shift.employeeId);
+      if (!row) {
+        row = {
+          id: shift.employeeId,
+          name: employee?.name ?? shift.employeeName,
+          title: employee?.title ?? "",
+          ms: 0, tipsMinor: 0, shifts: 0,
+        };
+        rows.set(shift.employeeId, row);
+      }
+      row.ms += overlap;
+      row.shifts += 1;
+      // tips land in the period the shift STARTED, the same key the day
+      // report groups them by, so the two numbers agree for the same span.
+      // Splitting a single declared amount across a midnight would be
+      // inventing a figure nobody declared.
+      if (serviceDateOf(shift.clockIn) >= period.start && serviceDateOf(shift.clockIn) <= period.end) {
+        row.tipsMinor += shift.declaredTipsMinor ?? 0;
+      }
+    }
+
+    const lines = ["employee_id,employee_name,title,period_start,period_end,regular_hours,declared_tips,shift_count"];
+    for (const row of [...rows.values()].sort((a, b) => a.name.localeCompare(b.name))) {
+      // an employee who worked no hours this period gets no row at all; a
+      // DEACTIVATED one who did gets a row, because they worked and they
+      // are owed for it
+      lines.push([
+        csvField(row.id), csvField(row.name), csvField(row.title),
+        period.start, period.end,
+        (row.ms / 3_600_000).toFixed(2),
+        (row.tipsMinor / 100).toFixed(2),
+        String(row.shifts),
+      ].join(","));
+    }
+
+    if (openShifts.length) {
+      const who = openShifts.map((s) => `${s.name}, clocked in ${s.clockIn}`).join("; ");
+      lines.push(`# ${openShifts.length} open shift${openShifts.length === 1 ? "" : "s"} excluded: ${who}`);
+    }
+    // the posture, in the file itself, because the file outlives the screen
+    // that produced it and somebody will open it in a year and wonder
+    lines.push("# hours and declared tips only; wage, overtime, and tax rules are the payroll provider's");
+
+    return { ok: true, period, csv: lines.join("\n") + "\n" };
   }
 
   /** The PIN must be unambiguous across ACTIVE employees: sign-in identifies
@@ -2704,6 +2827,13 @@ export class Engine {
 
 function serviceDate(): string {
   return serviceDateOf(new Date().toISOString());
+}
+
+/** One CSV cell. Quoted only when it has to be, because a payroll provider's
+ *  importer is somebody else's parser and the safest file is the plainest
+ *  one. A name with a comma in it ("Smith, Jr.") must not become two columns. */
+function csvField(value: string): string {
+  return /[",\n\r]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
 }
 
 function describeSelections(groups: GroupIndex, sels: readonly SelectedModifier[]): string {

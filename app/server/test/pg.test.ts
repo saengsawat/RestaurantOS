@@ -471,6 +471,7 @@ describe.skipIf(!PGBIN)("PostgreSQL persistence (E4)", () => {
     /* --- the venue seeded from the demo values, then edited --- */
     expect((await app.inject({ method: "GET", url: "/v1/venue" })).json()).toEqual({
       name: "Osteria Nove", address: "9 Vicolo della Luna, New York", timezone: "America/New_York",
+      payPeriod: "biweekly", payPeriodAnchor: "2026-01-05",
     });
     const bad = await app.inject({ method: "POST", url: "/v1/venue",
       payload: ENV({ managerPin: MGR, timezone: "America/Atlantis" }) });
@@ -526,6 +527,7 @@ describe.skipIf(!PGBIN)("PostgreSQL persistence (E4)", () => {
 
     expect((await app3.inject({ method: "GET", url: "/v1/venue" })).json()).toEqual({
       name: "Trattoria Sedici", address: "16 Elm St, Austin", timezone: "America/Chicago",
+      payPeriod: "biweekly", payPeriodAnchor: "2026-01-05",
     });
 
     const after = await roster(app3);
@@ -694,5 +696,66 @@ describe.skipIf(!PGBIN)("PostgreSQL persistence (E4)", () => {
       .flatMap((t: { items: { name: string; mods: string }[] }) => t.items)
       .find((i: { name: string }) => i.name === "Ragu alla Bolognese");
     expect(fired.mods).toBe("Spaghetti, Thai hot");
+  }, 60_000);
+
+  /* ------------- the pay period setting (E24-T3) -------------
+   * The export's arithmetic is proven against the memory store in
+   * api.test.ts. What only Postgres can prove: migration 0009's columns
+   * exist, hold the setting across a restart, and hold NO wage beside it. */
+
+  it("keeps the pay period across a restart, and stores no wage next to it", async () => {
+    const app = buildServer(store, "postgres");
+    const MGR = "1122";
+
+    // 0009 landed with the two columns, and the backfill gave an existing
+    // database a sensible answer rather than a NULL
+    for (const column of ["pay_period", "pay_period_anchor"]) {
+      expect(sql(`SELECT count(*) FROM information_schema.columns
+                  WHERE table_name = 'location' AND column_name = '${column}'`), column).toBe("1");
+    }
+    // and STILL nothing that turns hours into money, on either table
+    for (const column of ["wage_minor", "wage_rate", "hourly_rate", "ssn", "tax_id", "bank_account"]) {
+      expect(sql(`SELECT count(*) FROM information_schema.columns
+                  WHERE table_name IN ('location', 'employee') AND column_name = '${column}'`), column).toBe("0");
+    }
+
+    const seeded = (await app.inject({ method: "GET", url: "/v1/venue" })).json();
+    expect(seeded.payPeriod).toBe("biweekly");
+    expect(seeded.payPeriodAnchor).toBe("2026-01-05");
+
+    const set = await app.inject({ method: "POST", url: "/v1/venue",
+      payload: ENV({ managerPin: MGR, payPeriod: "semimonthly", payPeriodAnchor: "2026-03-02" }) });
+    expect(set.statusCode).toBe(200);
+    expect(sql("SELECT pay_period FROM location")).toBe("semimonthly");
+
+    await store.end();
+    store = new PgStore(url);
+    await store.init();
+    const app7 = buildServer(store, "postgres");
+
+    const back = (await app7.inject({ method: "GET", url: "/v1/venue" })).json();
+    // the seed must not overwrite a real setting on boot, the same rule the
+    // roster learned in E21-T1
+    expect(back.payPeriod).toBe("semimonthly");
+    // a DATE column comes back as a Date object; it must still be the day
+    // that was typed, not yesterday in some other timezone
+    expect(back.payPeriodAnchor).toBe("2026-03-02");
+
+    const period = (await app7.inject({ method: "GET", url: "/v1/payroll/period?on=2026-02-20" })).json().period;
+    expect(period).toEqual({ start: "2026-02-16", end: "2026-02-28" });
+
+    // the export runs against real shift rows and refuses without a manager
+    const bare = await app7.inject({ method: "POST", url: "/v1/staff/hours-export", payload: {} });
+    expect(bare.statusCode).toBe(422);
+    const csv = await app7.inject({ method: "POST", url: "/v1/staff/hours-export",
+      payload: { managerPin: MGR, periodEnd: "2026-02-20" } });
+    expect(csv.statusCode).toBe(200);
+    expect(csv.headers["content-type"]).toContain("text/csv");
+    expect(csv.body.split("\n")[0])
+      .toBe("employee_id,employee_name,title,period_start,period_end,regular_hours,declared_tips,shift_count");
+    // no overtime COLUMN, which is the specification. The word appears once
+    // more in the file, in the footer that says whose job overtime is.
+    expect(csv.body.split("\n")[0]).not.toContain("overtime");
+    expect(csv.body).toContain("wage, overtime, and tax rules are the payroll provider's");
   }, 60_000);
 });

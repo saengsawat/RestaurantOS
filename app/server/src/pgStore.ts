@@ -19,6 +19,7 @@ import { pinHash, ROLE_IDS, STAFF, type DirectoryEntry, type Employee, type Rost
 import {
   FLOOR,
   serviceDateOf,
+  ymd,
   TABLE_SHAPES,
   VENUE,
   type Availability,
@@ -789,20 +790,27 @@ export class PgStore implements Store {
   /* ------------------- venue and roster (E21-T1) ------------------- */
 
   async getVenue(): Promise<Venue> {
-    const r = await this.pool.query("SELECT name, address, timezone FROM location WHERE id = $1", [LOC]);
+    const r = await this.pool.query(
+      "SELECT name, address, timezone, pay_period, pay_period_anchor FROM location WHERE id = $1", [LOC]);
     const row = r.rows[0];
+    const anchor = row?.pay_period_anchor as Date | string | null | undefined;
     return {
       name: (row?.name as string) ?? VENUE.name,
       // NULL only on a database seeded before 0007 backfilled it
       address: (row?.address as string) ?? VENUE.address,
       timezone: (row?.timezone as string) ?? VENUE.timezone,
+      // same for 0009: fall back rather than invent a period out of nothing
+      payPeriod: (row?.pay_period as Venue["payPeriod"]) ?? VENUE.payPeriod,
+      // a DATE column comes back as a Date; the rest of the system speaks
+      // YYYY-MM-DD strings, and it must stay the LOCAL day pg handed us
+      payPeriodAnchor: anchor instanceof Date ? ymd(anchor) : (anchor ?? VENUE.payPeriodAnchor),
     };
   }
 
   async putVenue(venue: Venue): Promise<void> {
     await this.pool.query(
-      "UPDATE location SET name = $1, address = $2, timezone = $3 WHERE id = $4",
-      [venue.name, venue.address, venue.timezone, LOC],
+      "UPDATE location SET name = $1, address = $2, timezone = $3, pay_period = $4, pay_period_anchor = $5 WHERE id = $6",
+      [venue.name, venue.address, venue.timezone, venue.payPeriod, venue.payPeriodAnchor, LOC],
     );
   }
 
