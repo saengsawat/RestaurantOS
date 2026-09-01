@@ -142,11 +142,39 @@ export interface MenuSnapshot {
   publishedAt: string;
 }
 
-/** The in-progress menu edit (E5 v0: one draft document per location; the
- *  relational editor tables in schema §4 replace this in E5-full). */
+/** One modifier group as the DRAFT carries it (E5-T2). Structurally the
+ *  domain's ModifierGroup with a mutable options array, so composing the
+ *  published GroupIndex at publish time is a copy and not a translation. */
+export interface DraftGroup {
+  id: string;
+  name: string;
+  /** 0 = optional group */
+  minSelect: number;
+  /** null = unlimited */
+  maxSelect: number | null;
+  options: {
+    id: string;
+    name: string;
+    priceMinor: number;
+    isDefault?: boolean;
+    /** choosing this option opens these groups (the nesting modifiers.ts walks) */
+    childGroupIds?: string[];
+  }[];
+}
+
+/** The in-progress menu edit (E5 v0: one draft document per location; per D29
+ *  it STAYS a document, and relational draft storage waits until a real menu
+ *  import demands it).
+ *
+ *  `groups` is optional on purpose (E5-T2): a draft written before modifier
+ *  groups became editable has no such field, and it must keep behaving as it
+ *  did, publishing against the active snapshot's graph rather than losing it.
+ *  Per-item assignment is `MenuEntry.modifierGroupIds`, which already existed;
+ *  E5-T2 gives it a command and validates it against the draft's own groups. */
 export interface MenuDraft {
   basedOnVersion: number;
   items: MenuEntry[];
+  groups?: DraftGroup[];
 }
 
 /** Live 86 board (E5): hot state, deliberately OUTSIDE the snapshot, because

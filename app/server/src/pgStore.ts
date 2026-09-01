@@ -473,6 +473,8 @@ export class PgStore implements Store {
     );
     if (!tickets.rowCount) return [];
     const ids = tickets.rows.map((r) => r.id as string);
+    // the live graph, so a manager-authored option name reaches the rail
+    const groups = (await this.getActiveSnapshot()).groups;
     const items = await this.pool.query(
       `SELECT kti.ticket_id, kti.order_item_id, kti.done, oi.captured_name, oi.quantity, oi.station_key, oi.selections, oi.status AS oi_status
        FROM kitchen_ticket_item kti JOIN order_item oi ON oi.id = kti.order_item_id
@@ -496,7 +498,7 @@ export class PgStore implements Store {
             name: i.captured_name as string,
             quantity: i.quantity as number,
             station: (i.station_key as string | null) ?? "",
-            mods: describeFromSnapshot(sel.modifiers ?? []),
+            mods: describeFromSnapshot(groups, sel.modifiers ?? []),
             allergy: false,
             done: i.done as boolean,
             // derived, not stored: the order item's own status is the truth
@@ -1100,14 +1102,27 @@ function snapUuidFor(snapshotId: string): string {
   return snapshotId === SNAPSHOT_ID ? SNAP : uuidFrom("snapshot:" + snapshotId);
 }
 
-import type { SelectedModifier } from "@restaurantos/domain";
-import { GROUPS as MENU_GROUPS } from "./menu.js";
+import type { GroupIndex, SelectedModifier } from "@restaurantos/domain";
 
-function describeFromSnapshot(sels: readonly SelectedModifier[]): string {
+/** Modifier names for the kitchen rail, resolved against a group index the
+ *  caller supplies (E5-T2).
+ *
+ *  This used to read the seed GROUPS constant, which was the last place in
+ *  the running system that believed the modifier graph was source code. Once
+ *  a manager authors their own groups, that constant knows none of their
+ *  names and the rail would print nothing beside a dish. It now takes the
+ *  ACTIVE snapshot's graph, which is what the engine already uses when it
+ *  builds the same string at fire time, so the two stores finally agree.
+ *
+ *  Known limit, deliberate: a line fired before a publish is described by the
+ *  newer graph, and a renamed option reads as its new name. Capturing the
+ *  string on the ticket row is the honest fix and it needs a column, so it
+ *  belongs to the ticket that adds one, not to this one. */
+function describeFromSnapshot(groups: GroupIndex, sels: readonly SelectedModifier[]): string {
   const names: string[] = [];
   const walk = (list: readonly SelectedModifier[]) => {
     for (const s of list) {
-      const option = MENU_GROUPS[s.groupId]?.options.find((o) => o.id === s.modifierId);
+      const option = groups[s.groupId]?.options.find((o) => o.id === s.modifierId);
       if (option) names.push(option.name);
       if (s.children) walk(s.children);
     }

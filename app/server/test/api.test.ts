@@ -1308,6 +1308,285 @@ describe("menu drafts, publishing, and the 86 board (E5)", () => {
   });
 });
 
+/* ------------- modifier groups become editable (E5-T2) -------------
+   The menu stops being half source code. Everything below drives the same
+   draft-then-publish flow the items already used, and the point of the
+   end-to-end case is that modifiers.ts refuses an order because a MANAGER
+   said the choice was required, not because a developer did. */
+describe("the manager writes the modifier graph (E5-T2)", () => {
+  const MGR = "1122";
+  const group = (app: ReturnType<typeof buildServer>, n: number, body: Record<string, unknown>) =>
+    app.inject({ method: "POST", url: "/v1/menu/draft/group", payload: { ...ENV(n), managerPin: MGR, ...body } });
+  const assign = (app: ReturnType<typeof buildServer>, n: number, itemId: string, groupIds: string[]) =>
+    app.inject({ method: "POST", url: "/v1/menu/draft/assign", payload: { ...ENV(n), managerPin: MGR, itemId, groupIds } });
+  const publish = (app: ReturnType<typeof buildServer>, n: number) =>
+    app.inject({ method: "POST", url: "/v1/menu/publish", payload: { ...ENV(n), managerPin: MGR } });
+  const draftOf = async (app: ReturnType<typeof buildServer>) =>
+    (await app.inject({ method: "GET", url: "/v1/menu/draft" })).json().draft;
+
+  /** the group this epic exists for: a house rule no developer wrote down */
+  const SPICE = { groupId: "spice", name: "Spice level", minSelect: 1, maxSelect: 1,
+    options: [{ name: "Mild", priceMinor: 0 }, { name: "Thai hot", priceMinor: 0 }] };
+
+  it("starts a draft holding the whole live graph, not just the items", async () => {
+    const app = buildServer();
+    await app.inject({ method: "POST", url: "/v1/menu/draft/item",
+      payload: { ...ENV(1), itemId: "acqua", name: "Acqua Panna", priceMinor: 650, course: "BEVERAGE", station: "BAR" } });
+    const draft = await draftOf(app);
+    // the seed GROUPS is the first snapshot's content now, so it arrives
+    // through the draft rather than being read live from the source
+    expect(draft.groups.map((g: { id: string }) => g.id).sort())
+      .toEqual(["additions", "cooked", "pasta", "size", "temp"]);
+    expect(draft.groups.find((g: { id: string }) => g.id === "pasta"))
+      .toMatchObject({ name: "Pasta", minSelect: 1, maxSelect: 1 });
+  });
+
+  it("refuses every malformed group, and says which rule was broken", async () => {
+    const app = buildServer();
+    const bare = await app.inject({ method: "POST", url: "/v1/menu/draft/group", payload: { ...ENV(1), ...SPICE } });
+    expect(bare.statusCode).toBe(422);
+    expect(bare.json().reason).toBe("editing modifier groups requires a manager's PIN");
+    const asServer = await app.inject({ method: "POST", url: "/v1/menu/draft/group",
+      payload: { ...ENV(2), managerPin: "2468", ...SPICE } });
+    expect(asServer.json().reason).toBe("PIN not recognized as a manager");
+
+    for (const [patch, reason] of [
+      [{ name: "   " }, "a modifier group needs a name"],
+      [{ minSelect: -1 }, "minSelect must be a non-negative integer"],
+      [{ minSelect: 1, maxSelect: 0 }, "maxSelect 0 would make the group unpickable; remove the group instead"],
+      [{ minSelect: 2, maxSelect: 1 }, "maxSelect 1 is below minSelect 2"],
+      [{ options: [{ name: "  ", priceMinor: 0 }] }, "every option needs a name"],
+      [{ options: [{ name: "Extra chilli", priceMinor: -50 }] }, 'option "Extra chilli" needs a non-negative whole price'],
+      [{ options: [{ name: "Mild", priceMinor: 0 }, { name: "mild", priceMinor: 100 }] },
+        'two options on this group are both called "mild"'],
+    ] as [Record<string, unknown>, string][]) {
+      const res = await group(app, 3, { ...SPICE, ...patch });
+      expect(res.statusCode, reason).toBe(422);
+      expect(res.json().reason).toBe(reason);
+    }
+    // nothing malformed reached the draft
+    expect(await draftOf(app)).toBeNull();
+
+    // unlimited IS a valid answer, and so is a purely optional group
+    const open = await group(app, 4, { groupId: "sides", name: "Sides", minSelect: 0, maxSelect: null,
+      options: [{ name: "Sticky rice", priceMinor: 300 }] });
+    expect(open.statusCode).toBe(200);
+    expect(open.json().menu.draft.groups.find((g: { id: string }) => g.id === "sides").maxSelect).toBeNull();
+  });
+
+  it("edits a group in place and never lets a removal strand a reference", async () => {
+    const app = buildServer();
+    await group(app, 1, SPICE);
+    // an edit replaces rather than duplicates, and ids come off the names
+    const edited = await group(app, 2, { ...SPICE, name: "Heat", options: [...SPICE.options, { name: "Extra hot", priceMinor: 100 }] });
+    const groups = edited.json().menu.draft.groups;
+    expect(groups.filter((g: { id: string }) => g.id === "spice")).toHaveLength(1);
+    expect(groups.find((g: { id: string }) => g.id === "spice").name).toBe("Heat");
+    expect(groups.find((g: { id: string }) => g.id === "spice").options.map((o: { id: string }) => o.id))
+      .toEqual(["mild", "thai-hot", "extra-hot"]);
+
+    await assign(app, 3, "ragu", ["spice"]);
+    await assign(app, 4, "cacio", ["spice"]);
+
+    const held = await app.inject({ method: "POST", url: "/v1/menu/draft/group/remove",
+      payload: { ...ENV(5), managerPin: MGR, groupId: "spice" } });
+    expect(held.statusCode).toBe(422);
+    // it names the dishes, because "in use" without a list is a scavenger hunt
+    expect(held.json().reason).toBe("spice is still on Ragu alla Bolognese, Cacio e Pepe; take it off those items first");
+
+    // the same guard one level down: an option that OPENS the group
+    await assign(app, 6, "ragu", []);
+    await assign(app, 7, "cacio", []);
+    await group(app, 8, { groupId: "additions", name: "Additions", minSelect: 0, maxSelect: null,
+      options: [{ name: "Add shrimp", priceMinor: 800, childGroupIds: ["spice"] }] });
+    const nested = await app.inject({ method: "POST", url: "/v1/menu/draft/group/remove",
+      payload: { ...ENV(9), managerPin: MGR, groupId: "spice" } });
+    expect(nested.json().reason).toBe("spice is still opened by an option on Additions; change those options first");
+
+    await group(app, 10, { groupId: "additions", name: "Additions", minSelect: 0, maxSelect: null,
+      options: [{ name: "Add shrimp", priceMinor: 800 }] });
+    const freed = await app.inject({ method: "POST", url: "/v1/menu/draft/group/remove",
+      payload: { ...ENV(11), managerPin: MGR, groupId: "spice" } });
+    expect(freed.statusCode).toBe(200);
+    expect(freed.json().menu.draft.groups.some((g: { id: string }) => g.id === "spice")).toBe(false);
+
+    const stranger = await app.inject({ method: "POST", url: "/v1/menu/draft/group/remove",
+      payload: { ...ENV(12), managerPin: MGR, groupId: "spice" } });
+    expect(stranger.json().reason).toBe("no modifier group spice on the draft");
+  });
+
+  it("assigns groups in order, refuses unknown ones, and an empty array clears", async () => {
+    const app = buildServer();
+    await group(app, 1, SPICE);
+
+    const unknown = await assign(app, 2, "ragu", ["spice", "wine-pairing"]);
+    expect(unknown.statusCode).toBe(422);
+    expect(unknown.json().reason).toBe("unknown modifier group(s): wine-pairing");
+
+    const nobody = await assign(app, 3, "not-a-dish", ["spice"]);
+    expect(nobody.json().reason).toBe("no item not-a-dish on the draft");
+
+    // order is the order the server is asked, so it is preserved verbatim
+    const ordered = await assign(app, 4, "ragu", ["spice", "pasta", "additions"]);
+    expect(ordered.json().menu.draft.items.find((m: { id: string }) => m.id === "ragu").modifierGroupIds)
+      .toEqual(["spice", "pasta", "additions"]);
+
+    const cleared = await assign(app, 5, "ragu", []);
+    expect(cleared.json().menu.draft.items.find((m: { id: string }) => m.id === "ragu").modifierGroupIds).toEqual([]);
+
+    // and the item command validates against the DRAFT's graph, so a group
+    // created moments ago is assignable before it is published
+    const viaItem = await app.inject({ method: "POST", url: "/v1/menu/draft/item",
+      payload: { ...ENV(6), itemId: "ragu", name: "Ragu alla Bolognese", priceMinor: 2400,
+        course: "PRIMI", station: "SAUTE", groupIds: ["spice"] } });
+    expect(viaItem.statusCode).toBe(200);
+    expect(viaItem.json().menu.draft.items.find((m: { id: string }) => m.id === "ragu").modifierGroupIds).toEqual(["spice"]);
+  });
+
+  it("publishes the manager's graph, and the order refusal comes from their rule", async () => {
+    const app = buildServer();
+    await group(app, 1, SPICE);
+    await assign(app, 2, "ragu", ["spice"]);
+
+    // service is still on v1, where "spice" does not exist at all
+    expect((await app.inject({ method: "GET", url: "/v1/menu" })).json().groups.spice).toBeUndefined();
+
+    const pub = await publish(app, 3);
+    expect(pub.statusCode).toBe(200);
+    const live = (await app.inject({ method: "GET", url: "/v1/menu" })).json();
+    expect(live.version).toBe(2);
+    expect(live.groups.spice).toMatchObject({ name: "Spice level", minSelect: 1, maxSelect: 1 });
+    expect(live.groups.spice.options.map((o: { id: string }) => o.id)).toEqual(["mild", "thai-hot"]);
+
+    // END TO END: the kitchen's own rule now refuses an order, and the words
+    // come from modifiers.ts running over data a person typed
+    const check = await openCheck(app);
+    const bare = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items`,
+      payload: { ...ENV(4), itemId: "ragu", quantity: 1, seatNo: 1 } });
+    expect(bare.statusCode).toBe(422);
+    // the structured error is modifiers.ts's own, unchanged by this ticket,
+    // reporting a shortfall against a minimum a manager set this morning
+    expect(bare.json().modifierErrors).toEqual([{ code: "too_few", groupId: "spice", min: 1, got: 0 }]);
+
+    const chosen = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items`,
+      payload: { ...ENV(5), itemId: "ragu", quantity: 1, seatNo: 1, modifiers: [{ groupId: "spice", modifierId: "thai-hot" }] } });
+    expect(chosen.statusCode).toBe(200);
+    // and a manager-authored PRICE reaches the money
+    await group(app, 6, { groupId: "sides", name: "Sides", minSelect: 0, maxSelect: 2,
+      options: [{ name: "Sticky rice", priceMinor: 350 }] });
+    await assign(app, 7, "cacio", ["sides"]);
+    await publish(app, 8);
+    const priced = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items`,
+      payload: { ...ENV(9), itemId: "cacio", quantity: 1, seatNo: 1, modifiers: [{ groupId: "sides", modifierId: "sticky-rice" }] } });
+    expect(priced.statusCode).toBe(200);
+    const line = priced.json().check.lines.at(-1);
+    expect(line.modifierPriceMinor).toBe(350);
+    expect(line.unitPriceMinor + line.modifierPriceMinor).toBe(2100 + 350);
+  });
+
+  it("a line ordered under the old graph survives the group being deleted", async () => {
+    const app = buildServer();
+    const check = await openCheck(app);
+    // ordered under v1's "pasta", captured with its selection and its price
+    const before = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items`,
+      payload: { ...ENV(1), itemId: "ragu", quantity: 1, seatNo: 1, modifiers: [{ groupId: "pasta", modifierId: "gf" }] } });
+    expect(before.statusCode).toBe(200);
+    expect(before.json().check.lines[0].modifierPriceMinor).toBe(200);
+
+    // the manager takes "pasta" off every dish and deletes it outright
+    await assign(app, 2, "ragu", []);
+    await assign(app, 3, "cacio", []);
+    const removed = await app.inject({ method: "POST", url: "/v1/menu/draft/group/remove",
+      payload: { ...ENV(4), managerPin: MGR, groupId: "pasta" } });
+    expect(removed.statusCode).toBe(200);
+    expect((await publish(app, 5)).statusCode).toBe(200);
+    expect((await app.inject({ method: "GET", url: "/v1/menu" })).json().groups.pasta).toBeUndefined();
+
+    // FR-9: the old line is captured, not revalidated. Its selection, its
+    // price, and its snapshot id are all exactly where it left them.
+    const still = (await app.inject({ method: "GET", url: `/v1/checks/${check.id}` })).json().check;
+    expect(still.lines[0].modifiers).toEqual([{ groupId: "pasta", modifierId: "gf" }]);
+    expect(still.lines[0].modifierPriceMinor).toBe(200);
+    expect(still.lines[0].menuSnapshotId).toBe("snap-0001");
+
+    // it still fires, still pays, still closes: a deleted group cannot strand
+    // a guest who is sitting at the table eating the dish
+    expect((await app.inject({ method: "POST", url: `/v1/checks/${check.id}/send`, payload: ENV(6) })).statusCode).toBe(200);
+    const due = (await app.inject({ method: "GET", url: `/v1/checks/${check.id}` })).json().check.totals.dueMinor as number;
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/payments`,
+      payload: { ...ENV(7), method: "card", amountMinor: due } });
+    expect((await app.inject({ method: "POST", url: `/v1/checks/${check.id}/close`, payload: ENV(8) })).statusCode).toBe(200);
+
+    // ordering it fresh is a different question, and now correctly refused
+    const fresh = await openCheck(app);
+    const now = await app.inject({ method: "POST", url: `/v1/checks/${fresh.id}/items`,
+      payload: { ...ENV(9), itemId: "ragu", quantity: 1, seatNo: 1, modifiers: [{ groupId: "pasta", modifierId: "gf" }] } });
+    expect(now.statusCode).toBe(422);
+  });
+
+  it("refuses to publish a menu holding an item nobody could ever order", async () => {
+    const app = buildServer();
+    // a required group with no options: correct-looking, and unsellable
+    await group(app, 1, { groupId: "cut", name: "Cut", minSelect: 1, maxSelect: 1, options: [] });
+    await assign(app, 2, "bistecca", ["cut"]);
+    const refused = await publish(app, 3);
+    expect(refused.statusCode).toBe(422);
+    expect(refused.json().reason)
+      .toBe('cannot publish: Bistecca Fiorentina requires "Cut", which has no options, so it could never be ordered');
+    expect((await app.inject({ method: "GET", url: "/v1/menu" })).json().version).toBe(1); // nothing published
+
+    // the same trap one level down, reached through an option
+    await group(app, 4, { groupId: "cut", name: "Cut", minSelect: 1, maxSelect: 1,
+      options: [{ name: "Bone in", priceMinor: 0, childGroupIds: ["ageing"] }] });
+    await group(app, 5, { groupId: "ageing", name: "Ageing", minSelect: 1, maxSelect: 1, options: [] });
+    const nested = await publish(app, 6);
+    expect(nested.json().reason).toContain('requires "Ageing", which has no options');
+
+    // an OPTIONAL group with no options is merely pointless, never a refusal:
+    // the item orders fine, so it is the manager's call to make
+    await group(app, 7, { groupId: "ageing", name: "Ageing", minSelect: 0, maxSelect: 1, options: [] });
+    const ok = await publish(app, 8);
+    expect(ok.statusCode).toBe(200);
+    const check = await openCheck(app);
+    expect((await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items`,
+      payload: { ...ENV(9), itemId: "bistecca", quantity: 1, seatNo: 1,
+        modifiers: [{ groupId: "cut", modifierId: "bone-in" }] } })).statusCode).toBe(200);
+  });
+
+  it("replays a dropped group command instead of applying it twice", async () => {
+    const app = buildServer();
+    const op = { ...ENV(1), managerPin: MGR, ...SPICE };
+    const first = await app.inject({ method: "POST", url: "/v1/menu/draft/group", payload: op });
+    const retry = await app.inject({ method: "POST", url: "/v1/menu/draft/group", payload: op });
+    expect(first.statusCode).toBe(200);
+    expect(retry.json()).toEqual(first.json());
+    expect((await draftOf(app)).groups.filter((g: { id: string }) => g.id === "spice")).toHaveLength(1);
+  });
+
+  it("publishes a pre-E5-T2 draft against the live graph, as it always did", async () => {
+    const app = buildServer();
+    // a draft document written before groups were editable carries no `groups`
+    const legacy = await app.inject({ method: "POST", url: "/v1/menu/draft/item",
+      payload: { ...ENV(1), itemId: "ragu", name: "Ragu alla Bolognese", priceMinor: 2700,
+        course: "PRIMI", station: "SAUTE", modifierGroupIds: ["pasta", "additions"] } });
+    expect(legacy.statusCode).toBe(200);
+    const draft = legacy.json().menu.draft;
+    delete draft.groups;
+    // put it back the way an older build would have left it
+    await app.inject({ method: "POST", url: "/v1/menu/draft/discard", payload: ENV(2) });
+    await app.inject({ method: "POST", url: "/v1/menu/draft/item",
+      payload: { ...ENV(3), itemId: "ragu", name: "Ragu alla Bolognese", priceMinor: 2700,
+        course: "PRIMI", station: "SAUTE", modifierGroupIds: ["pasta", "additions"] } });
+
+    expect((await publish(app, 4)).statusCode).toBe(200);
+    const live = (await app.inject({ method: "GET", url: "/v1/menu" })).json();
+    expect(live.version).toBe(2);
+    // the graph came through the publish intact rather than being lost
+    expect(Object.keys(live.groups).sort()).toEqual(["additions", "cooked", "pasta", "size", "temp"]);
+    expect(live.items.find((i: { id: string }) => i.id === "ragu").priceMinor).toBe(2700);
+  });
+});
+
 describe("cash drawers and the business day (E14/E16)", () => {
   it("cash needs a till; the drawer ledger balances; close counts over/short and freezes it", async () => {
     const app = buildServer();

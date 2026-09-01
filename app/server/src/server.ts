@@ -438,7 +438,60 @@ export function buildServer(store: Store = new MemoryStore(), storeName = "memor
       priceMinor: Number(body.priceMinor),
       course: String(body.course ?? ""),
       station: String(body.station ?? ""),
-      ...(Array.isArray(body.modifierGroupIds) ? { modifierGroupIds: body.modifierGroupIds.map(String) } : {}),
+      // groupIds is the name E5-T2 gave the same field on the group commands;
+      // both spellings are accepted so one vocabulary works across the editor
+      ...(Array.isArray(body.modifierGroupIds) ? { modifierGroupIds: body.modifierGroupIds.map(String) }
+        : Array.isArray(body.groupIds) ? { modifierGroupIds: body.groupIds.map(String) } : {}),
+    }));
+  });
+
+  /* modifier groups on the draft (E5-T2): the menu's shape, not just its
+     items, edited behind the same manager gate publishing already uses */
+
+  app.post("/v1/menu/draft/group", async (req, reply) => {
+    const body = (req.body ?? {}) as EnvelopeBody & Record<string, unknown>;
+    const envelope = readEnvelope(body);
+    if ("error" in envelope) return reply.code(400).send({ status: "BAD_REQUEST", reason: envelope.error });
+    const options = Array.isArray(body.options)
+      ? body.options.map((raw) => {
+          const o = (raw ?? {}) as Record<string, unknown>;
+          return {
+            ...(typeof o.id === "string" ? { id: o.id } : {}),
+            name: String(o.name ?? ""),
+            priceMinor: Number(o.priceMinor ?? 0),
+            ...(o.isDefault === true ? { isDefault: true } : {}),
+            ...(Array.isArray(o.childGroupIds) ? { childGroupIds: o.childGroupIds.map(String) } : {}),
+          };
+        })
+      : [];
+    return respond(reply, await engine.upsertDraftGroup(envelope, {
+      ...managerPin(body),
+      ...(typeof body.groupId === "string" ? { groupId: body.groupId } : {}),
+      name: String(body.name ?? ""),
+      ...(body.minSelect !== undefined ? { minSelect: Number(body.minSelect) } : {}),
+      // null is meaningful here (unlimited), so it must survive the read
+      ...(body.maxSelect !== undefined ? { maxSelect: body.maxSelect === null ? null : Number(body.maxSelect) } : {}),
+      options,
+    }));
+  });
+
+  app.post("/v1/menu/draft/group/remove", async (req, reply) => {
+    const body = (req.body ?? {}) as EnvelopeBody & Record<string, unknown>;
+    const envelope = readEnvelope(body);
+    if ("error" in envelope) return reply.code(400).send({ status: "BAD_REQUEST", reason: envelope.error });
+    return respond(reply, await engine.removeDraftGroup(envelope, {
+      ...managerPin(body), groupId: String(body.groupId ?? ""),
+    }));
+  });
+
+  app.post("/v1/menu/draft/assign", async (req, reply) => {
+    const body = (req.body ?? {}) as EnvelopeBody & Record<string, unknown>;
+    const envelope = readEnvelope(body);
+    if ("error" in envelope) return reply.code(400).send({ status: "BAD_REQUEST", reason: envelope.error });
+    return respond(reply, await engine.assignItemGroups(envelope, {
+      ...managerPin(body), itemId: String(body.itemId ?? ""),
+      // an absent array is not an empty one: only a sent array clears
+      ...(Array.isArray(body.groupIds) ? { groupIds: body.groupIds.map(String) } : {}),
     }));
   });
 

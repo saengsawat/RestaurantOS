@@ -26,7 +26,7 @@ import {
 import type { MenuEntry } from "./menu.js";
 import { defaultTitle, PIN_RULE, pinHash, STAFF, type DirectoryEntry, type Employee, type RosterEntry } from "./staff.js";
 import { randomUUID } from "node:crypto";
-import { sameName, serviceDateOf, TABLE_SHAPES, type CashEvent, type CheckAggregate, type DrawerSession, type Envelope, type FloorTable, type Guest, type KitchenTicket, type MenuSnapshot, type OrderLine, type Store, type TableShape, type Venue } from "./types.js";
+import { sameName, serviceDateOf, TABLE_SHAPES, type CashEvent, type CheckAggregate, type DraftGroup, type DrawerSession, type Envelope, type FloorTable, type Guest, type KitchenTicket, type MenuDraft, type MenuSnapshot, type OrderLine, type Store, type TableShape, type Venue } from "./types.js";
 import type { GroupIndex } from "@restaurantos/domain";
 
 export const TAX_RATE = { num: 8_875, den: 100_000 };
@@ -1022,11 +1022,83 @@ export class Engine {
 
   /* ------------------------------ menu (E5) ------------------------------ */
 
-  private async draftOrStart(): Promise<{ basedOnVersion: number; items: MenuEntry[] }> {
+  /** A fresh draft is a deep copy of what is live, groups included (E5-T2).
+   *  The seed GROUPS constant is no longer read here or anywhere else at run
+   *  time: it is the content of the FIRST snapshot, and every draft after
+   *  that starts from whatever the manager last published. */
+  private async draftOrStart(): Promise<MenuDraft> {
     const existing = await this.store.getDraft();
     if (existing) return existing;
     const active = await this.store.getActiveSnapshot();
-    return { basedOnVersion: active.version, items: active.items.map((m) => ({ ...m })) };
+    return {
+      basedOnVersion: active.version,
+      items: active.items.map((m) => ({ ...m })),
+      groups: Engine.groupsToDraft(active.groups),
+    };
+  }
+
+  /** The published GroupIndex as an editable, ordered list. Deep enough that
+   *  editing a draft option can never reach back into a published snapshot. */
+  private static groupsToDraft(groups: GroupIndex): DraftGroup[] {
+    return Object.values(groups).map((g) => ({
+      id: g.id, name: g.name, minSelect: g.minSelect, maxSelect: g.maxSelect,
+      options: g.options.map((o) => ({
+        id: o.id, name: o.name, priceMinor: o.priceMinor,
+        ...(o.isDefault ? { isDefault: true } : {}),
+        ...(o.childGroupIds?.length ? { childGroupIds: [...o.childGroupIds] } : {}),
+      })),
+    }));
+  }
+
+  /** The graph a draft edits against. A draft written before E5-T2 carries no
+   *  `groups`, so it falls back to the live one and behaves exactly as it did
+   *  before: nothing breaks mid-flight. */
+  private static draftGroups(draft: MenuDraft, active: MenuSnapshot): DraftGroup[] {
+    return draft.groups ?? Engine.groupsToDraft(active.groups);
+  }
+
+  /** A url-safe id from a human name, the same slug rule menu items use. */
+  private static slug(name: string): string {
+    return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  }
+
+  /**
+   * Items that could never be ordered under this graph, one sentence each
+   * (E5-T2, the sharp edge).
+   *
+   * A required group (minSelect >= 1) is correct and useful: it is how
+   * "Temperature" stops a steak reaching the grill unspecified. But a
+   * required group with NO options can never be satisfied, so modifiers.ts
+   * reports too_few on every attempt and the dish silently cannot be sold.
+   * A group an item names that does not exist is the same failure wearing a
+   * different error code. Publish refuses either, naming the items, because
+   * the alternative is a manager discovering it from a server at the pass.
+   *
+   * Child groups count: nesting means an option can open a group, and an
+   * empty required one down there breaks the option rather than the item,
+   * which is just as unsellable.
+   */
+  private static unorderableItems(items: readonly MenuEntry[], groups: GroupIndex): string[] {
+    const problems: string[] = [];
+    for (const item of items) {
+      const seen = new Set<string>();
+      const queue = [...item.modifierGroupIds];
+      while (queue.length) {
+        const groupId = queue.shift()!;
+        if (seen.has(groupId)) continue;
+        seen.add(groupId);
+        const group = groups[groupId];
+        if (!group) {
+          problems.push(`${item.name} asks for a modifier group that does not exist (${groupId})`);
+          continue;
+        }
+        if (group.minSelect >= 1 && group.options.length === 0) {
+          problems.push(`${item.name} requires "${group.name}", which has no options, so it could never be ordered`);
+        }
+        for (const option of group.options) for (const child of option.childGroupIds ?? []) queue.push(child);
+      }
+    }
+    return problems;
   }
 
   /** Add or edit an item on the DRAFT. Service never sees a draft; only
@@ -1047,12 +1119,16 @@ export class Engine {
     if (!courses.includes(input.course)) {
       return this.remember(envelope, { kind: "rejected", reason: `course must be one of ${courses.join(", ")}` }, "menu_draft", "draft");
     }
+    const draft = await this.draftOrStart();
+    // validated against the DRAFT's graph, not the live one (E5-T2): a group
+    // the manager just created is assignable before it is published, and one
+    // they just removed is not assignable even though it is still live
     const groupIds = input.modifierGroupIds ?? [];
-    const unknown = groupIds.filter((g) => !active.groups[g]);
+    const known = new Set(Engine.draftGroups(draft, active).map((g) => g.id));
+    const unknown = groupIds.filter((g) => !known.has(g));
     if (unknown.length) {
       return this.remember(envelope, { kind: "rejected", reason: `unknown modifier group(s): ${unknown.join(", ")}` }, "menu_draft", "draft");
     }
-    const draft = await this.draftOrStart();
     const id = input.itemId?.trim() || name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
     const entry: MenuEntry = {
       id, name, priceMinor: input.priceMinor,
@@ -1073,6 +1149,137 @@ export class Engine {
     const at = draft.items.findIndex((m) => m.id === input.itemId);
     if (at < 0) return this.remember(envelope, { kind: "rejected", reason: `no item ${input.itemId} on the draft` }, "menu_draft", "draft");
     draft.items.splice(at, 1);
+    await this.store.putDraft(draft);
+    return this.remember(envelope, { kind: "applied", menu: { draft } }, "menu_draft", "draft");
+  }
+
+  /* --------------- modifier groups on the draft (E5-T2) ---------------
+     The menu is a program a manager writes: reusable groups, how many
+     choices each demands, what each option costs. Until now that program
+     was source code and only its items were editable. These three commands
+     put the whole graph behind the same draft-then-publish gate the items
+     already use, and modifiers.ts never learns the difference: it keeps
+     receiving a GroupIndex, one that a person authored instead of a
+     developer. */
+
+  /** Create or edit a group on the draft. Manager-gated at the publish tier,
+   *  because a group is menu structure and structure is what publishing
+   *  freezes. */
+  async upsertDraftGroup(
+    envelope: Envelope,
+    input: {
+      managerPin?: string; groupId?: string; name?: string;
+      minSelect?: number; maxSelect?: number | null;
+      options?: { id?: string; name?: string; priceMinor?: number; isDefault?: boolean; childGroupIds?: string[] }[];
+    },
+  ): Promise<CommandOutcome> {
+    const replay = await this.store.opResult(envelope.operationId);
+    if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
+    const refuse = (reason: string) => this.remember(envelope, { kind: "rejected", reason }, "menu_draft", "draft");
+
+    if (!(await this.manager(input.managerPin))) return refuse(this.managerRefusal(input.managerPin, "editing modifier groups"));
+
+    const name = (input.name ?? "").trim();
+    if (!name) return refuse("a modifier group needs a name");
+
+    const minSelect = input.minSelect ?? 0;
+    if (!Number.isSafeInteger(minSelect) || minSelect < 0) return refuse("minSelect must be a non-negative integer");
+    // null is unlimited, which is a real answer ("Additions"); 0 is not, since
+    // a group nobody may ever pick from is a group that should not exist
+    const maxSelect = input.maxSelect === undefined ? null : input.maxSelect;
+    if (maxSelect !== null) {
+      if (!Number.isSafeInteger(maxSelect)) return refuse("maxSelect must be a whole number, or null for unlimited");
+      if (maxSelect === 0) return refuse("maxSelect 0 would make the group unpickable; remove the group instead");
+      if (maxSelect < minSelect) return refuse(`maxSelect ${maxSelect} is below minSelect ${minSelect}`);
+    }
+
+    const options: DraftGroup["options"] = [];
+    const seen = new Set<string>();
+    for (const raw of input.options ?? []) {
+      const optionName = (raw.name ?? "").trim();
+      if (!optionName) return refuse("every option needs a name");
+      if (!Number.isSafeInteger(raw.priceMinor ?? 0) || (raw.priceMinor ?? 0) < 0) {
+        return refuse(`option "${optionName}" needs a non-negative whole price`);
+      }
+      // case-insensitive, because "Large" and "large" on one group is a
+      // server picking the wrong one at speed, not a useful distinction
+      const key = optionName.toLowerCase();
+      if (seen.has(key)) return refuse(`two options on this group are both called "${optionName}"`);
+      seen.add(key);
+      options.push({
+        id: (raw.id ?? "").trim() || Engine.slug(optionName),
+        name: optionName,
+        priceMinor: raw.priceMinor ?? 0,
+        ...(raw.isDefault ? { isDefault: true } : {}),
+        ...(raw.childGroupIds?.length ? { childGroupIds: [...raw.childGroupIds] } : {}),
+      });
+    }
+
+    const active = await this.store.getActiveSnapshot();
+    const draft = await this.draftOrStart();
+    const groups = Engine.draftGroups(draft, active);
+    const id = (input.groupId ?? "").trim() || Engine.slug(name);
+    const group: DraftGroup = { id, name, minSelect, maxSelect, options };
+    const at = groups.findIndex((g) => g.id === id);
+    if (at >= 0) groups[at] = group; else groups.push(group);
+
+    draft.groups = groups;
+    await this.store.putDraft(draft);
+    return this.remember(envelope, { kind: "applied", menu: { draft } }, "menu_draft", "draft");
+  }
+
+  /** Remove a group. Refused while anything still points at it, because a
+   *  dangling reference publishes into a menu whose items cannot be ordered
+   *  at all (modifiers.ts reports group_not_defined and the line is refused). */
+  async removeDraftGroup(envelope: Envelope, input: { managerPin?: string; groupId?: string }): Promise<CommandOutcome> {
+    const replay = await this.store.opResult(envelope.operationId);
+    if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
+    const refuse = (reason: string) => this.remember(envelope, { kind: "rejected", reason }, "menu_draft", "draft");
+
+    if (!(await this.manager(input.managerPin))) return refuse(this.managerRefusal(input.managerPin, "editing modifier groups"));
+    const id = (input.groupId ?? "").trim();
+    const active = await this.store.getActiveSnapshot();
+    const draft = await this.draftOrStart();
+    const groups = Engine.draftGroups(draft, active);
+    if (!groups.some((g) => g.id === id)) return refuse(`no modifier group ${id} on the draft`);
+
+    const usedBy = draft.items.filter((m) => m.modifierGroupIds.includes(id)).map((m) => m.name);
+    if (usedBy.length) return refuse(`${id} is still on ${usedBy.join(", ")}; take it off those items first`);
+    // the same reference one level down: an option that opens this group
+    const openedBy = groups
+      .filter((g) => g.id !== id && g.options.some((o) => o.childGroupIds?.includes(id)))
+      .map((g) => g.name);
+    if (openedBy.length) return refuse(`${id} is still opened by an option on ${openedBy.join(", ")}; change those options first`);
+
+    draft.groups = groups.filter((g) => g.id !== id);
+    await this.store.putDraft(draft);
+    return this.remember(envelope, { kind: "applied", menu: { draft } }, "menu_draft", "draft");
+  }
+
+  /** Set which groups an item asks for, in the order the server is asked.
+   *  An empty array clears them, which is how a dish stops having choices. */
+  async assignItemGroups(
+    envelope: Envelope,
+    input: { managerPin?: string; itemId?: string; groupIds?: string[] },
+  ): Promise<CommandOutcome> {
+    const replay = await this.store.opResult(envelope.operationId);
+    if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
+    const refuse = (reason: string) => this.remember(envelope, { kind: "rejected", reason }, "menu_draft", "draft");
+
+    if (!(await this.manager(input.managerPin))) return refuse(this.managerRefusal(input.managerPin, "editing modifier groups"));
+    const itemId = (input.itemId ?? "").trim();
+    const active = await this.store.getActiveSnapshot();
+    const draft = await this.draftOrStart();
+    const item = draft.items.find((m) => m.id === itemId);
+    if (!item) return refuse(`no item ${itemId} on the draft`);
+
+    const groupIds = input.groupIds ?? [];
+    const known = new Set(Engine.draftGroups(draft, active).map((g) => g.id));
+    const unknown = groupIds.filter((g) => !known.has(g));
+    if (unknown.length) return refuse(`unknown modifier group(s): ${unknown.join(", ")}`);
+
+    item.modifierGroupIds = groupIds;
+    draft.groups = Engine.draftGroups(draft, active);
     await this.store.putDraft(draft);
     return this.remember(envelope, { kind: "applied", menu: { draft } }, "menu_draft", "draft");
   }
@@ -1099,11 +1306,26 @@ export class Engine {
       return this.remember(envelope, { kind: "rejected", reason: this.managerRefusal(input.managerPin, "publishing the menu") }, "menu_snapshot", "publish");
     }
     const active = await this.store.getActiveSnapshot();
+    // the graph the manager authored becomes the snapshot's own (E5-T2).
+    // modifiers.ts is untouched: it receives a GroupIndex exactly as before,
+    // one composed from the draft instead of from a constant in the source
+    const groups: GroupIndex = Object.fromEntries(
+      Engine.draftGroups(draft, active).map((g) => [g.id, {
+        id: g.id, name: g.name, minSelect: g.minSelect, maxSelect: g.maxSelect,
+        options: g.options.map((o) => ({ ...o })),
+      }]),
+    );
+
+    const broken = Engine.unorderableItems(draft.items, groups);
+    if (broken.length) {
+      return this.remember(envelope, { kind: "rejected", reason: `cannot publish: ${broken.join("; ")}` }, "menu_snapshot", "publish");
+    }
+
     const snapshot: MenuSnapshot = {
       id: `snap-${String(active.version + 1).padStart(4, "0")}`,
       version: active.version + 1,
       items: draft.items,
-      groups: active.groups,
+      groups,
       publishedAt: new Date().toISOString(),
     };
     await this.store.putSnapshot(snapshot);

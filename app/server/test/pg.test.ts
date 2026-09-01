@@ -622,4 +622,77 @@ describe.skipIf(!PGBIN)("PostgreSQL persistence (E4)", () => {
     expect(sql("SELECT title IS NULL FROM employee WHERE display_name = 'Gia R.'")).toBe("t");
     expect(publicRoster.find((s: { name: string }) => s.name === "Gia R.").title).toBe("Server");
   }, 60_000);
+
+  /* ------------- the modifier graph on the draft (E5-T2) -------------
+   * The rules are proven against the memory store in api.test.ts. What only
+   * Postgres can prove: the draft document actually carries the manager's
+   * groups through the JSONB column and a restart, and the published
+   * snapshot's graph is the one that comes back, not the seed constant. */
+
+  it("round-trips a manager-authored modifier graph through the draft document and a restart", async () => {
+    const app = buildServer(store, "postgres");
+    const MGR = "1122";
+
+    const group = await app.inject({ method: "POST", url: "/v1/menu/draft/group",
+      payload: ENV({ managerPin: MGR, groupId: "spice", name: "Spice level", minSelect: 1, maxSelect: 1,
+        options: [{ name: "Mild", priceMinor: 0 }, { name: "Thai hot", priceMinor: 250 }] }) });
+    expect(group.statusCode).toBe(200);
+    await app.inject({ method: "POST", url: "/v1/menu/draft/assign",
+      payload: ENV({ managerPin: MGR, itemId: "ragu", groupIds: ["spice", "pasta"] }) });
+
+    // it is really in the document column, not held in a process somewhere
+    expect(sql("SELECT document->'groups'->0->>'id' IS NOT NULL FROM menu_draft")).toBe("t");
+    expect(sql(`SELECT count(*) FROM menu_draft WHERE document::text LIKE '%Thai hot%'`)).toBe("1");
+
+    /* the draft survives a restart unpublished, which is the whole point of
+       storing it rather than keeping it in memory */
+    await store.end();
+    store = new PgStore(url);
+    await store.init();
+    const app5 = buildServer(store, "postgres");
+
+    const draft = (await app5.inject({ method: "GET", url: "/v1/menu/draft" })).json().draft;
+    expect(draft.groups.find((g: { id: string }) => g.id === "spice"))
+      .toMatchObject({ name: "Spice level", minSelect: 1, maxSelect: 1 });
+    expect(draft.items.find((m: { id: string }) => m.id === "ragu").modifierGroupIds).toEqual(["spice", "pasta"]);
+
+    /* publish, and the SNAPSHOT carries the graph too */
+    const before = (await app5.inject({ method: "GET", url: "/v1/menu" })).json().version as number;
+    const pub = await app5.inject({ method: "POST", url: "/v1/menu/publish", payload: ENV({ managerPin: MGR }) });
+    expect(pub.statusCode).toBe(200);
+    expect((await app5.inject({ method: "GET", url: "/v1/menu/draft" })).json().draft).toBeNull();
+
+    await store.end();
+    store = new PgStore(url);
+    await store.init();
+    const app6 = buildServer(store, "postgres");
+    const live = (await app6.inject({ method: "GET", url: "/v1/menu" })).json();
+    expect(live.version).toBe(before + 1);
+    expect(live.groups.spice.options.map((o: { id: string }) => o.id)).toEqual(["mild", "thai-hot"]);
+
+    // and the manager's rule is what refuses the order, through real rows
+    const check = await app6.inject({ method: "POST", url: "/v1/checks", payload: ENV({ tableName: "Table 9", covers: 2 }) });
+    const checkId = check.json().check.id as string;
+    const bare = await app6.inject({ method: "POST", url: `/v1/checks/${checkId}/items`,
+      payload: ENV({ itemId: "ragu", quantity: 1, seatNo: 1, modifiers: [{ groupId: "pasta", modifierId: "spag" }] }) });
+    expect(bare.statusCode).toBe(422);
+    expect(bare.json().modifierErrors).toEqual([{ code: "too_few", groupId: "spice", min: 1, got: 0 }]);
+
+    const priced = await app6.inject({ method: "POST", url: `/v1/checks/${checkId}/items`,
+      payload: ENV({ itemId: "ragu", quantity: 1, seatNo: 1,
+        modifiers: [{ groupId: "pasta", modifierId: "spag" }, { groupId: "spice", modifierId: "thai-hot" }] }) });
+    expect(priced.statusCode).toBe(200);
+    expect(priced.json().check.lines.at(-1).modifierPriceMinor).toBe(250);
+
+    /* the kitchen rail names the manager's option, which is what the seed
+       GROUPS constant could never have done: it has never heard of "Thai hot" */
+    await app6.inject({ method: "POST", url: `/v1/checks/${checkId}/send`, payload: ENV() });
+    // scoped to THIS check: earlier tests in this file share the database and
+    // left their own Ragu on the rail
+    const fired = (await app6.inject({ method: "GET", url: "/v1/kds" })).json().tickets
+      .filter((t: { checkId: string }) => t.checkId === checkId)
+      .flatMap((t: { items: { name: string; mods: string }[] }) => t.items)
+      .find((i: { name: string }) => i.name === "Ragu alla Bolognese");
+    expect(fired.mods).toBe("Spaghetti, Thai hot");
+  }, 60_000);
 });
