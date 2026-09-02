@@ -1593,6 +1593,74 @@ describe("the manager writes the modifier graph (E5-T2)", () => {
   });
 });
 
+/* E5-T3: the page that puts E5-T2's commands behind a manager's hands. No
+ * engine or route under test here, page-serve assertions only: the groups
+ * section markup exists, and the sheets that write to it (group edit, item
+ * assignment, publish's diff) are wired into the served script. */
+describe("modifier groups on the Menu screen (E5-T3)", () => {
+  it("serves the modifier-groups section, the item editor's chips, and the publish diff", async () => {
+    const app = buildServer();
+    const page = (await app.inject({ method: "GET", url: "/menu" })).body;
+
+    // the groups section sits beside the items, under Draft
+    expect(page).toContain('<div class="course-h">Modifier groups</div>');
+    expect(page).toContain('<div id="draftGroups"></div>');
+    expect(page).toContain('id="btnAddGroup"');
+    expect(page).toContain("+ Add group");
+    // one row per group: name, min-max badge, option count, price range
+    expect(page).toContain("function renderGroupsBlock()");
+    expect(page).toContain("g.minSelect");
+    expect(page).toContain("priceRange(g)");
+    expect(page).toContain("data-editgroup=");
+
+    // the tap-to-edit sheet: name, min/max steppers, options, remove-group
+    expect(page).toContain("function groupForm(src)");
+    expect(page).toContain('data-gmin="-1"');
+    expect(page).toContain('data-gmax="1"');
+    expect(page).toContain("btnAddOpt");
+    expect(page).toContain("data-optdel=");
+    expect(page).toContain("btnRemoveGroup");
+    expect(page).toContain("removeGroupFromDraft");
+    expect(page).toContain("/v1/menu/draft/group/remove");
+
+    // item assignment: chips on the item editor, ordered by tap, and a
+    // plain "requires: X" line for anything with minSelect >= 1
+    expect(page).toContain('class="gchip');
+    expect(page).toContain("data-gchip=");
+    expect(page).toContain('class="ord"');
+    expect(page).toContain("requires: ");
+
+    // draft-vs-live badging matches the item chips already on the page
+    expect(page).toContain('<span class="chip green">new</span>');
+    expect(page).toContain('<span class="chip amber">changed</span>');
+
+    // publish stays one gesture, and its confirmation carries the diff plus
+    // the engine's own refusal text, inline rather than only a toast
+    expect(page).toContain("function publishForm()");
+    expect(page).toContain("function diffSummary()");
+    expect(page).toContain("<b>Items:</b>");
+    expect(page).toContain("<b>Groups:</b>");
+    expect(page).toContain('id="fErr"');
+    expect(page).toContain("showFormErr");
+
+    // the page formats, it never re-implements modifier math: no min/max
+    // choice-counting logic lives here, only display and the engine's calls
+    expect(page).not.toContain("too_few");
+    expect(page).not.toContain("too_many");
+  });
+
+  it("still serves everything menu.html shipped before this ticket (existing menu markup untouched)", async () => {
+    const app = buildServer();
+    const page = (await app.inject({ method: "GET", url: "/menu" })).body;
+    expect(page).toContain("Live now · 86 board");
+    expect(page).toContain('id="live"></div>');
+    expect(page).toContain('id="draft"></div>');
+    expect(page).toContain("86 it");
+    expect(page).toContain("Set count");
+    expect(page.match(/<svg viewBox="0 0 24 24" aria-hidden="true">/g)).toHaveLength(7);
+  });
+});
+
 describe("cash drawers and the business day (E14/E16)", () => {
   it("cash needs a till; the drawer ledger balances; close counts over/short and freezes it", async () => {
     const app = buildServer();

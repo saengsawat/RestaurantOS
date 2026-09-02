@@ -94,6 +94,27 @@ select.fld{padding:0 8px}
 .toasts{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:200;display:flex;flex-direction:column;gap:8px;align-items:center}
 .toast{background:var(--ink);color:var(--bg);border-radius:999px;padding:9px 18px;font-size:13px;font-weight:600;max-width:92vw}
 .toast.err{background:var(--red);color:#fff}
+
+/* modifier groups (E5-T3): group-assignment chips on the item editor, group
+   sheet steppers and option rows, all held to the same 44px touch floor as
+   the rest of the shell even though the surrounding .btn class predates it */
+.chipwrap{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 4px}
+.gchip{min-height:44px;padding:0 14px;border-radius:999px;border:1px solid var(--line);background:var(--surface-2);
+  color:var(--ink-2);font-size:13px;font-weight:600;display:inline-flex;align-items:center;gap:6px;transition:transform .1s}
+.gchip:active{transform:scale(.97)}
+.gchip.on{background:var(--brand-wash);border-color:var(--brand);color:var(--ink)}
+.gchip .ord{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;border-radius:999px;
+  background:var(--brand);color:var(--brand-ink);font-size:10.5px;font-weight:800}
+.stepper{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:10px;overflow:hidden;margin:2px 0}
+.stepper button{min-width:44px;min-height:44px;background:var(--surface-2);font-size:16px;font-weight:700}
+.stepper button:active{transform:scale(.96)}
+.stepper .sv{min-width:40px;text-align:center;font-family:var(--mono);font-weight:700}
+.optrow{display:flex;align-items:center;gap:8px;margin:6px 0}
+.optrow input{flex:1;min-height:44px}
+.optrow .op{width:88px;flex:none}
+.inline-err{display:none;margin:8px 2px 0;padding:10px 12px;border-radius:10px;background:var(--red-wash);
+  border:1px solid var(--red-line);color:var(--red);font-size:12.5px}
+.inline-err.show{display:block}
 /* ============================================================
    APP SHELL (UI-T1, DESIGN.md section 5 "App shell")
    Navigation is a place you go, so it lives in the left icon rail with
@@ -205,6 +226,9 @@ select.fld{padding:0 8px}
   <div id="live"></div>
 
   <div class="sec-h">Draft</div>
+  <div class="course-h">Modifier groups</div>
+  <div id="draftGroups"></div>
+  <div class="course-h" style="margin-top:14px">Items</div>
   <div id="draft"></div>
 </div>
   </div>
@@ -213,6 +237,7 @@ select.fld{padding:0 8px}
 <div class="ov" id="ovForm"><div class="modal">
   <div class="m-h"><div><h3 id="fTitle"></h3><div class="sub" id="fSub"></div></div><button class="m-x" onclick="document.getElementById('ovForm').classList.remove('open')">✕</button></div>
   <div class="m-b" id="fBody"></div>
+  <div class="inline-err" id="fErr"></div>
   <div class="m-f"><button class="btn btn-p btn-lg" id="fGo"></button></div>
 </div></div>
 
@@ -228,6 +253,9 @@ const DEVICE="menu-"+(localStorage.getItem("ros.menu")||(()=>{const d=crypto.ran
 const COURSES=["BEVERAGE","ANTIPASTI","PRIMI","SECONDI","DOLCI"];
 const STATIONS=["FORNO","SAUTE","GRILL","FREDDO","BAR"];
 let menu=null,draftInfo=null;
+// modifier-group editor state (E5-T3), reset each time a sheet opens
+let selectedGroupIds=[],iName="",iPrice="",iCourse="",iStation="";
+let gName="",gOpts=[],gMin=0,gMax=1,gMaxUnlimited=true;
 
 function toast(m,k){const el=document.createElement("div");el.className="toast"+(k?" "+k:"");el.textContent=m;
   $("#toasts").appendChild(el);setTimeout(()=>el.remove(),3400);}
@@ -236,7 +264,10 @@ async function cmd(path,body){
   const res=await fetch(path,{method:"POST",headers:{"Content-Type":"application/json"},
     body:JSON.stringify({operationId:crypto.randomUUID(),deviceId:DEVICE,...body})});
   const data=await res.json().catch(()=>({}));
-  if(!res.ok){toast(data.reason||"refused","err");throw new Error("refused");}
+  // the reason rides the thrown error too, not just the toast, so a sheet
+  // that wants to keep the manager's own words on screen (not a 3.4s toast)
+  // can show it inline once the toast has already fired
+  if(!res.ok){const reason=data.reason||"refused";toast(reason,"err");throw new Error(reason);}
   return data;
 }
 
@@ -250,6 +281,70 @@ async function refresh(){
 
 function availOf(id){return (menu.availability||[]).find(a=>a.itemId===id);}
 
+/* The graph the DRAFT edits against: the draft's own ordered groups once one
+   exists, else the live published graph read as a list (mirrors the engine's
+   own Engine.draftGroups fallback, so the page shows exactly what a save
+   would validate against before any draft exists). */
+function currentGroups(){
+  const live=(menu&&menu.groups)||{};
+  const d=draftInfo&&draftInfo.draft;
+  const list=d?(d.groups||Object.values(live)):Object.values(live);
+  return {live,list};
+}
+function groupSig(g){return JSON.stringify({n:g.name,mn:g.minSelect,mx:g.maxSelect,
+  o:g.options.map(o=>({n:o.name,p:o.priceMinor}))});}
+/** A group's price span for the summary row: "no options" is the exact
+ *  condition publish refuses when the group is also required. */
+function priceRange(g){
+  if(!g.options.length)return"no options";
+  const prices=g.options.map(o=>o.priceMinor);
+  const lo=Math.min(...prices),hi=Math.max(...prices);
+  if(lo===hi)return lo===0?"included":money(lo);
+  return money(lo)+"–"+money(hi);
+}
+/** What an item's row says about its assigned groups: name, and "requires"
+ *  only for the ones that actually block the order (minSelect >= 1). */
+function groupLabel(item,list){
+  if(!item.modifierGroupIds.length)return"";
+  const names=item.modifierGroupIds.map(id=>{
+    const g=list.find(x=>x.id===id);
+    if(!g)return id;
+    return(g.minSelect>=1?"requires: ":"")+g.name;
+  });
+  return" · "+names.join(", ");
+}
+/** Draft vs. live, computed on the page from the two reads it already holds,
+ *  since publish itself carries no diff (E5-T3: the confirmation sheet's). */
+function diffSummary(){
+  const d=draftInfo&&draftInfo.draft;
+  if(!d)return{items:{added:[],edited:[],removed:[]},groups:{added:[],edited:[],removed:[]}};
+  const liveItems=Object.fromEntries(menu.items.map(i=>[i.id,i]));
+  const draftItems=Object.fromEntries(d.items.map(i=>[i.id,i]));
+  const itemsAdded=d.items.filter(i=>!liveItems[i.id]).map(i=>i.name);
+  const itemsRemoved=menu.items.filter(i=>!draftItems[i.id]).map(i=>i.name);
+  const itemsEdited=d.items.filter(i=>{const l=liveItems[i.id];return l&&(l.name!==i.name||l.priceMinor!==i.priceMinor
+    ||l.course!==i.course||l.station!==i.station||JSON.stringify(l.modifierGroupIds)!==JSON.stringify(i.modifierGroupIds));}).map(i=>i.name);
+
+  const live=menu.groups||{};
+  const list=d.groups||Object.values(live);
+  const draftGroups=Object.fromEntries(list.map(g=>[g.id,g]));
+  const groupsAdded=list.filter(g=>!live[g.id]).map(g=>g.name);
+  const groupsRemoved=Object.values(live).filter(g=>!draftGroups[g.id]).map(g=>g.name);
+  const groupsEdited=list.filter(g=>live[g.id]&&groupSig(g)!==groupSig(live[g.id])).map(g=>g.name);
+
+  return{items:{added:itemsAdded,edited:itemsEdited,removed:itemsRemoved},
+    groups:{added:groupsAdded,edited:groupsEdited,removed:groupsRemoved}};
+}
+function diffLine(section){
+  const parts=[];
+  if(section.added.length)parts.push("+ "+section.added.map(esc).join(", "));
+  if(section.edited.length)parts.push("~ "+section.edited.map(esc).join(", "));
+  if(section.removed.length)parts.push("- "+section.removed.map(esc).join(", "));
+  return parts.length?parts.join(" · "):"no changes";
+}
+function clearFormErr(){const el=$("#fErr");if(el){el.textContent="";el.classList.remove("show");}}
+function showFormErr(msg){const el=$("#fErr");if(el){el.textContent=msg;el.classList.add("show");}}
+
 function render(){
   const d=draftInfo.draft;
   $("#banner").innerHTML=`<b>Menu v${menu.version}</b><span class="chip mut">${menu.items.length} items</span>
@@ -257,10 +352,7 @@ function render(){
     <span class="sp"></span>
     ${d?`<button class="btn btn-s" id="btnDiscard">Discard draft</button>
          <button class="btn btn-p" id="btnPublish">Publish v${menu.version+1}</button>`:""}`;
-  if($("#btnPublish"))$("#btnPublish").onclick=()=>form("Publish the menu","v"+(menu.version+1)+" becomes what service runs on; nothing already ordered changes",[
-    {id:"pin",label:"Manager PIN (demo manager: Marco B. · 1122)",ph:"••••"}],"Publish",async v=>{
-    const r=await cmd("/v1/menu/publish",{managerPin:v.pin});
-    toast("Published "+r.menu.snapshotId+" with "+r.menu.items+" items");});
+  if($("#btnPublish"))$("#btnPublish").onclick=publishForm;
   if($("#btnDiscard"))$("#btnDiscard").onclick=async()=>{await cmd("/v1/menu/draft/discard",{});toast("Draft discarded");await refresh();};
 
   /* live snapshot + 86 board */
@@ -273,7 +365,7 @@ function render(){
       const counted=a&&a.remaining!==undefined&&a.remaining!==null;
       const removedOnDraft=d&&!d.items.some(x=>x.id===i.id);
       return `<div class="row ${dead?"dead":""}">
-        <span class="nm">${esc(i.name)}<small>${esc(i.station)}${i.modifierGroupIds.length?" · "+i.modifierGroupIds.join(", "):""}</small></span>
+        <span class="nm">${esc(i.name)}<small>${esc(i.station)}${groupLabel(i,Object.values(menu.groups||{}))}</small></span>
         ${dead?'<span class="chip red">86</span>':counted?`<span class="chip ${a.remaining<=3?"amber":"info"}">${a.remaining} left</span>`:""}
         ${removedOnDraft?'<span class="chip amber">removed on draft</span>':""}
         <span class="pr num">${money(i.priceMinor)}</span>
@@ -303,16 +395,23 @@ function render(){
     await cmd("/v1/menu/86",{itemId:b.dataset.count,remaining:Math.max(0,parseInt(v.n||"0",10)||0),is86:false});
     toast("Count set");}));
 
-  /* draft */
+  /* modifier groups (E5-T3): the draft's own list when a draft exists, else
+     the live graph shown read-only until an edit starts one, exactly like
+     items already behave */
+  renderGroupsBlock();
+
+  /* draft items */
+  const {list:groupList}=currentGroups();
   $("#draft").innerHTML=(d
     ?COURSES.map(course=>{
       const items=d.items.filter(i=>i.course===course);
       if(!items.length)return"";
       return `<div class="course-h">${course}</div><div class="blk">`+items.map(i=>{
         const was=menu.items.find(m=>m.id===i.id);
-        const changed=!was||was.priceMinor!==i.priceMinor||was.name!==i.name;
+        const changed=!was||was.priceMinor!==i.priceMinor||was.name!==i.name
+          ||JSON.stringify(was.modifierGroupIds)!==JSON.stringify(i.modifierGroupIds);
         return `<div class="row">
-          <span class="nm">${esc(i.name)}<small>${esc(i.station)}</small></span>
+          <span class="nm">${esc(i.name)}<small>${esc(i.station)}${groupLabel(i,groupList)}</small></span>
           ${!was?'<span class="chip green">new</span>':changed?'<span class="chip amber">changed</span>':""}
           <span class="pr num">${money(i.priceMinor)}</span>
           <button class="btn btn-s" data-edit="${i.id}">Edit</button>
@@ -330,34 +429,225 @@ function render(){
     await cmd("/v1/menu/draft/remove",{itemId:b.dataset.remove});toast("Removed from draft");await refresh();});
 }
 
-function itemForm(src){
-  form(src?"Edit "+src.name:"Add an item","Saves to the draft; service sees it after publish",[
-    {id:"name",label:"Name",ph:"Focaccia al Rosmarino",val:src?src.name:""},
-    {id:"price",label:"Price ($)",ph:"9.00",val:src?(src.priceMinor/100).toFixed(2):""},
-    {id:"course",label:"Course",select:COURSES,val:src?src.course:"ANTIPASTI"},
-    {id:"station",label:"Station",select:STATIONS,val:src?src.station:"SAUTE"},
-  ],"Save to draft",async v=>{
-    await cmd("/v1/menu/draft/item",{
-      ...(src?{itemId:src.id}:{}),
-      name:v.name,priceMinor:Math.round(parseFloat(v.price||"0")*100),
-      course:v.course,station:v.station,
-      modifierGroupIds:src?src.modifierGroupIds:[],
-    });
-    toast("Saved to draft");
+/** The groups summary list: name, min-max badge, option count, price range,
+ *  new/changed chips against the live snapshot, Add group and tap-to-edit. */
+function renderGroupsBlock(){
+  const {live,list}=currentGroups();
+  $("#draftGroups").innerHTML=(list.length
+    ?`<div class="blk">`+list.map(g=>{
+      const liveG=live[g.id];
+      const isNew=!liveG;
+      const isChanged=liveG&&groupSig(g)!==groupSig(liveG);
+      return `<div class="row">
+        <span class="nm">${esc(g.name)}<small>${g.options.length} option${g.options.length===1?"":"s"}</small></span>
+        <span class="chip mut">${g.minSelect}–${g.maxSelect===null?"∞":g.maxSelect}</span>
+        ${isNew?'<span class="chip green">new</span>':isChanged?'<span class="chip amber">changed</span>':""}
+        <span class="pr num" style="width:auto">${priceRange(g)}</span>
+        <button class="btn btn-s" data-editgroup="${g.id}">Edit</button>
+      </div>`;
+    }).join("")+`</div>`
+    :`<div class="blk"><div class="row"><span class="nm">No modifier groups yet. Items with none assigned order exactly as before.</span></div></div>`)
+    +`<div style="margin-top:10px"><button class="btn btn-s btn-lg" id="btnAddGroup">+ Add group</button></div>`;
+  $("#btnAddGroup").onclick=()=>groupForm(null);
+  document.querySelectorAll("[data-editgroup]").forEach(b=>b.onclick=()=>{
+    groupForm(list.find(g=>g.id===b.dataset.editgroup));
   });
+}
+
+/* The item editor is custom, not the generic form() below, because the
+   modifier-group chips need to read and re-render mid-sheet (E5-T3) the same
+   way the group editor's option rows do. */
+function itemForm(src){
+  iName=src?src.name:"";iPrice=src?(src.priceMinor/100).toFixed(2):"";
+  iCourse=src?src.course:"ANTIPASTI";iStation=src?src.station:"SAUTE";
+  selectedGroupIds=src?[...src.modifierGroupIds]:[];
+  $("#fTitle").textContent=src?"Edit "+src.name:"Add an item";
+  $("#fSub").textContent="Saves to the draft; service sees it after publish";
+  clearFormErr();
+  iRenderBody();
+  $("#fGo").textContent="Save to draft";
+  $("#fGo").onclick=async()=>{
+    iName=$("#f_name").value;iPrice=$("#f_price").value;iCourse=$("#f_course").value;iStation=$("#f_station").value;
+    try{
+      await cmd("/v1/menu/draft/item",{
+        ...(src?{itemId:src.id}:{}),
+        name:iName.trim(),priceMinor:Math.round(parseFloat(iPrice||"0")*100),
+        course:iCourse,station:iStation,
+        modifierGroupIds:[...selectedGroupIds],
+      });
+      $("#ovForm").classList.remove("open");
+      toast("Saved to draft");
+      await refresh();
+    }catch(e){showFormErr(e.message);}
+  };
+  $("#ovForm").classList.add("open");
+}
+
+function iRenderBody(){
+  const {list}=currentGroups();
+  const chips=list.length?list.map(g=>{
+    const idx=selectedGroupIds.indexOf(g.id);
+    const on=idx>=0;
+    return `<button type="button" class="gchip${on?" on":""}" data-gchip="${g.id}">${on?`<span class="ord">${idx+1}</span>`:""}${esc(g.name)}</button>`;
+  }).join(""):`<span class="chip mut">No modifier groups on the draft yet</span>`;
+  const requires=selectedGroupIds.map(id=>list.find(g=>g.id===id)).filter(g=>g&&g.minSelect>=1).map(g=>g.name);
+  $("#fBody").innerHTML=`
+    <div class="fl">Name</div><input class="fld" id="f_name" placeholder="Focaccia al Rosmarino" value="${esc(iName)}">
+    <div class="fl">Price ($)</div><input class="fld" id="f_price" placeholder="9.00" value="${esc(iPrice)}">
+    <div class="fl">Course</div><select class="fld" id="f_course">${COURSES.map(c=>`<option ${c===iCourse?"selected":""}>${c}</option>`).join("")}</select>
+    <div class="fl">Station</div><select class="fld" id="f_station">${STATIONS.map(s=>`<option ${s===iStation?"selected":""}>${s}</option>`).join("")}</select>
+    <div class="fl">Modifier groups</div>
+    <div class="chipwrap">${chips}</div>
+    ${requires.length?`<div class="note" style="margin:2px 2px 0">requires: ${requires.map(esc).join(", ")}</div>`:""}`;
+  document.querySelectorAll("[data-gchip]").forEach(b=>b.onclick=()=>{
+    // tap order IS the assignment order: capture the text fields (about to
+    // be rebuilt), toggle membership, an unselected chip joins at the end
+    iName=$("#f_name").value;iPrice=$("#f_price").value;iCourse=$("#f_course").value;iStation=$("#f_station").value;
+    const id=b.dataset.gchip;
+    const at=selectedGroupIds.indexOf(id);
+    if(at>=0)selectedGroupIds.splice(at,1);else selectedGroupIds.push(id);
+    iRenderBody();
+  });
+}
+
+/** Create or edit a modifier group (E5-T2's upsertDraftGroup). Custom sheet:
+ *  the option list and min/max steppers need to add/remove/re-render mid-form,
+ *  which the generic field-array form() below cannot express. */
+function groupForm(src){
+  gName=src?src.name:"";
+  // a full copy, not just {id,name,priceMinor}: this sheet only edits name
+  // and price, so a default flag or a nested child group already sitting on
+  // an option (the seed's "Add shrimp" opens "Cooked how?") must survive a
+  // save untouched rather than silently vanish
+  gOpts=src?src.options.map(o=>({...o})):[];
+  gMin=src?src.minSelect:0;
+  gMaxUnlimited=src?src.maxSelect===null:true;
+  gMax=src&&src.maxSelect!==null?src.maxSelect:1;
+  $("#fTitle").textContent=src?"Edit "+src.name:"Add a modifier group";
+  $("#fSub").textContent="Options and price live on the group; publish freezes them into the menu";
+  clearFormErr();
+  gRenderBody(src);
+  $("#fGo").textContent="Save group";
+  $("#fGo").onclick=async()=>{
+    gCapture();
+    try{
+      await cmd("/v1/menu/draft/group",{
+        ...(src?{groupId:src.id}:{}),
+        name:gName.trim(),
+        minSelect:gMin,
+        maxSelect:gMaxUnlimited?null:gMax,
+        options:gOpts,
+      });
+      $("#ovForm").classList.remove("open");
+      toast("Saved to draft");
+      await refresh();
+    }catch(e){showFormErr(e.message);}
+  };
+  $("#ovForm").classList.add("open");
+}
+
+/** Pull the sheet's live input values into state before a structural change
+ *  (add/remove option, a stepper, the unlimited toggle) rebuilds the DOM
+ *  under them; otherwise a name half-typed into option 3 would vanish the
+ *  moment option 4 is added. */
+function gCapture(){
+  const nameEl=$("#g_name");
+  if(nameEl)gName=nameEl.value;
+  document.querySelectorAll("[data-optname]").forEach(el=>{const i=+el.dataset.optname;if(gOpts[i])gOpts[i].name=el.value;});
+  document.querySelectorAll("[data-optprice]").forEach(el=>{const i=+el.dataset.optprice;
+    if(gOpts[i])gOpts[i].priceMinor=Math.round((parseFloat(el.value||"0")||0)*100);});
+}
+
+function gRenderBody(src){
+  $("#fBody").innerHTML=`
+    <div class="fl">Name</div><input class="fld" id="g_name" placeholder="Temperature" value="${esc(gName)}">
+    <div class="fl">Minimum required</div>
+    <div class="stepper"><button type="button" data-gmin="-1">-</button><span class="sv num">${gMin}</span><button type="button" data-gmin="1">+</button></div>
+    <div class="fl">Maximum allowed</div>
+    <label style="display:flex;align-items:center;gap:8px;margin:4px 0 8px">
+      <input type="checkbox" id="g_unlim" ${gMaxUnlimited?"checked":""}> No limit
+    </label>
+    ${gMaxUnlimited?"":`<div class="stepper"><button type="button" data-gmax="-1">-</button><span class="sv num">${gMax}</span><button type="button" data-gmax="1">+</button></div>`}
+    <div class="fl">Options</div>
+    ${gOpts.map((o,i)=>`<div class="optrow">
+      <input class="fld" data-optname="${i}" placeholder="Option name" value="${esc(o.name)}">
+      <input class="fld op" data-optprice="${i}" placeholder="0.00" value="${(o.priceMinor/100).toFixed(2)}">
+      <button type="button" class="btn btn-s" data-optdel="${i}">Remove</button>
+    </div>`).join("")}
+    <button type="button" class="btn btn-s" id="btnAddOpt" style="margin-top:2px">+ Add option</button>
+    ${src?`<div style="margin-top:16px"><button type="button" class="btn btn-s" id="btnRemoveGroup" style="color:var(--red)">Remove group from draft</button></div>`:""}`;
+  $("#btnAddOpt").onclick=()=>{gCapture();gOpts.push({name:"",priceMinor:0});gRenderBody(src);};
+  document.querySelectorAll("[data-optdel]").forEach(b=>b.onclick=()=>{gCapture();gOpts.splice(+b.dataset.optdel,1);gRenderBody(src);});
+  document.querySelectorAll("[data-gmin]").forEach(b=>b.onclick=()=>{
+    gCapture();gMin=Math.max(0,gMin+parseInt(b.dataset.gmin,10));
+    if(!gMaxUnlimited&&gMax<gMin)gMax=gMin;
+    gRenderBody(src);
+  });
+  document.querySelectorAll("[data-gmax]").forEach(b=>b.onclick=()=>{
+    gCapture();gMax=Math.max(1,gMax+parseInt(b.dataset.gmax,10));
+    gRenderBody(src);
+  });
+  const unlim=$("#g_unlim");
+  if(unlim)unlim.onchange=()=>{gCapture();gMaxUnlimited=unlim.checked;if(!gMaxUnlimited&&gMax<gMin)gMax=Math.max(gMin,1);gRenderBody(src);};
+  const rm=$("#btnRemoveGroup");
+  if(rm)rm.onclick=()=>removeGroupFromDraft(src);
+}
+
+/** removeDraftGroup (E5-T2): the engine's own refusal, naming exactly which
+ *  items still assign this group, shown inline rather than left to a toast
+ *  that scrolls away before a list of several item names can be read. */
+async function removeGroupFromDraft(g){
+  try{
+    await cmd("/v1/menu/draft/group/remove",{groupId:g.id});
+    $("#ovForm").classList.remove("open");
+    toast("Group removed from draft");
+    await refresh();
+  }catch(e){showFormErr(e.message);}
+}
+
+/** Publish (unchanged gesture, E5-T3 point 3): the confirmation now shows
+ *  what changed, items and groups both, computed from the two reads the page
+ *  already holds, and the engine's unorderable-item refusal, if publish
+ *  refuses, stays on screen instead of only flashing as a toast. */
+function publishForm(){
+  const diff=diffSummary();
+  $("#fTitle").textContent="Publish the menu";
+  $("#fSub").textContent="v"+(menu.version+1)+" becomes what service runs on; nothing already ordered changes";
+  clearFormErr();
+  $("#fBody").innerHTML=`
+    <div class="note" style="margin:4px 2px 12px">
+      <b>Items:</b> ${diffLine(diff.items)}<br>
+      <b>Groups:</b> ${diffLine(diff.groups)}
+    </div>
+    <div class="fl">Manager PIN (demo manager: Marco B. · 1122)</div>
+    <input class="fld" id="f_pin" placeholder="••••">`;
+  $("#fGo").textContent="Publish";
+  $("#fGo").onclick=async()=>{
+    const pin=$("#f_pin").value.trim();
+    try{
+      const r=await cmd("/v1/menu/publish",{managerPin:pin});
+      $("#ovForm").classList.remove("open");
+      toast("Published "+r.menu.snapshotId+" with "+r.menu.items+" items");
+      await refresh();
+    }catch(e){showFormErr(e.message);}
+  };
+  $("#ovForm").classList.add("open");
 }
 
 function form(title,sub,fields,verb,go){
   $("#fTitle").textContent=title;$("#fSub").textContent=sub;
+  clearFormErr();
   $("#fBody").innerHTML=fields.map(f=>f.select
     ?`<div class="fl">${esc(f.label)}</div><select class="fld" id="f_${f.id}">${f.select.map(o=>`<option ${o===f.val?"selected":""}>${o}</option>`).join("")}</select>`
     :`<div class="fl">${esc(f.label)}</div><input class="fld" id="f_${f.id}" placeholder="${esc(f.ph||"")}" value="${esc(f.val||"")}">`).join("");
   $("#fGo").textContent=verb;
   $("#fGo").onclick=async()=>{
     const v={};fields.forEach(f=>v[f.id]=$("#f_"+f.id).value.trim());
-    await go(v);
-    $("#ovForm").classList.remove("open");
-    await refresh();
+    try{
+      await go(v);
+      $("#ovForm").classList.remove("open");
+      await refresh();
+    }catch(e){showFormErr(e.message);}
   };
   $("#ovForm").classList.add("open");
 }
