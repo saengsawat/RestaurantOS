@@ -23,7 +23,7 @@ What it contains, and what each part confirms or corrects:
 |---|---|---|
 | Locations | Name, description, department code, location type (POS vs Banquet) | Multi-outlet venues are real (this one runs a dozen bars and dining rooms); our single-location V1 is a known limit, already on record |
 | Servers / Non Servers | Authentication ID, first/last name, employee number, default role | The industry loads staff credentials as PLAINTEXT spreadsheet cells. Our fresh-PINs-always rule (§2.2) is not caution, it is the fix for an observed practice |
-| Modifier Groups | Group name, **minimum, maximum**, description, then modifier + price rows | Their modifier model is our modifier model (min/max per group), and their flat sheet links groups to items BY NAME, which is exactly our `modifier_group_hint` mechanism. §2.1's approach is validated by a shipping competitor |
+| Modifier Groups | Group name, **minimum, maximum**, description, then modifier + price rows | Their modifier model is our modifier model (min/max per group), and their flat sheet links groups to items BY NAME, which is exactly our `modifier_groups` column. §2.1's approach is validated by a shipping competitor |
 | Item Groups | Name, bill code, GL account, color, kitchen printer, expeditor printer, default modifier groups | Category-level accounting codes and PRINT ROUTING live at the group level; when we meet accounting-minded operators, revenue-category mapping will be asked for |
 | Menu Items (+ a beverage twin) | Menu card, category, subcategory, name, description, item group, type, price, member price, cost, open item, price-override flag, hide-on-terminal, auto-fire, printer type, SKU, modifier groups (by name), course, location | The maximal version of our minimal template. Notable columns we chose not to have yet: SKU, cost, per-item printer routing, auto-fire flags. Notably ABSENT everywhere: floor geometry, guest data, sales history, which confirms §2.3 and §3 outright |
 | "POS Items - DO NOT USE" | A stale legacy tab left in the live template | Template versioning is a real failure mode: a customer filling the wrong tab is a vendor-made error. Our import template must be one sheet, versioned, with no dead tabs |
@@ -36,7 +36,9 @@ Two conclusions worth restating with the stronger label. First, the industry's o
 
 **Mechanism:** a CSV template imported into the **existing draft-then-publish flow** (`/menu`, per FR-8/FR-9). An import is a draft the same way a manager's hand-typed edit is a draft: it sits unpublished until a manager reviews it and publishes, and publishing is what freezes it into the next immutable `menu_snapshot`. Nothing about an import skips that gate, because a bad import is exactly the kind of mistake the draft step exists to catch before it reaches a live check. `INFERRED`
 
-**Template columns**, one row per item: `name, course, price, station, modifier_group_hint`. This mirrors `menu_item` (`name`, `course`, `station_id`) and `item_variation` (`price_minor`) directly; `modifier_group_hint` is free text ("choice of protein", "temperature") rather than a structured modifier graph, because V1's modifier groups (`modifier_group`/`modifier`/`modifier_group_option`) are reusable and cross-linked in a way a flat CSV row cannot express on its own. A hint becomes a real modifier group assignment as a manager step in the draft editor, not an automatic mapping. `INFERRED`
+**Template columns**, one row per item: `name, course, price, station, modifier_groups`. This mirrors `menu_item` (`name`, `course`, `station_id`) and `item_variation` (`price_minor`) directly; `modifier_groups` is a semicolon-separated list of group NAMES, resolved case-insensitively against the draft's modifier graph. A name the menu already has links the item to that group; a name it does not have creates the group optional and empty for the manager to fill before publish. `DOCUMENTED` [built as E22-T2, 2026-09-02]
+
+> Historical note: this column began life as `modifier_group_hint`, free text only, because the draft could not yet carry a reusable modifier graph. E5-full (D29, 2026-09-01) changed that: the draft now holds the whole graph, so the import assigns real groups by name instead of leaving a note for the manager. The NorthStar workbook (§1a) links groups to items by name the same way, so the mechanism is also how a shipping competitor does it.
 
 **What incumbent exports actually contain**, labeled honestly since we have no file from any of the three in hand:
 
@@ -46,9 +48,9 @@ Two conclusions worth restating with the stronger label. First, the industry's o
 | Square | Square's Item Library supports CSV export/import for catalog items (name, price, category, SKU) as a documented feature of the product; exact column headers and modifier handling in that file | `INFERRED` (that a CSV catalog export exists), `UNKNOWN` (exact schema) |
 | Lightspeed | No export file reviewed | `UNKNOWN` |
 
-Recommended default: our CSV template is deliberately minimal (name/course/price/station/modifier hint) rather than an attempt to match any one incumbent's column names, because matching a schema we have not verified is worse than owning a simple one and asking Matt or a pilot operator to map their export into it by hand or with a short conversion pass. `INFERRED`
+Recommended default: our CSV template is deliberately minimal (name/course/price/station/modifier group names) rather than an attempt to match any one incumbent's column names, because matching a schema we have not verified is worse than owning a simple one and asking Matt or a pilot operator to map their export into it by hand or with a short conversion pass. `INFERRED`
 
-The NorthStar workbook (§1a) strengthens this default from the other direction: the one real template we hold links modifier groups to items by NAME in a flat sheet, which is our `modifier_group_hint` mechanism working in a shipping product, and its maximal column set (SKU, cost, printer routing, auto-fire) is a menu of what operators may eventually ask our template to grow, not what v1 needs. `DOCUMENTED` [NorthStar workbook]
+The NorthStar workbook (§1a) strengthens this default from the other direction: the one real template we hold links modifier groups to items by NAME in a flat sheet, which is our `modifier_groups` column working in a shipping product, and its maximal column set (SKU, cost, printer routing, auto-fire) is a menu of what operators may eventually ask our template to grow, not what v1 needs. `DOCUMENTED` [NorthStar workbook]
 
 ### 2.2 Staff
 
@@ -98,7 +100,7 @@ Also worth naming, because it decides whether the CSV template above should have
 
 | Dependency | What it gates |
 |---|---|
-| E5-full (relational menu editor) | The menu CSV's `modifier_group_hint` becoming a real, reusable modifier-group assignment rather than a manager typing it in by hand after import; v0 import works against today's document-draft editor either way |
+| E5-full (menu editor with the modifier graph, done 2026-09-01) | Satisfied: the menu CSV's `modifier_groups` column IS a real, reusable modifier-group assignment (built as E22-T2, 2026-09-02) |
 | E21 (venue + staff, done 2026-08-28) | The staff CSV's destination, `POST /v1/staff` |
 | E6 (floor editor, done 2026-08-28) | Where the redrawn room is built; nothing to migrate, the tool just needs to exist, and it does |
 | E20 (guestbook, v0 done 2026-08-23) | The guest CSV's destination at the manual-attach rung |
