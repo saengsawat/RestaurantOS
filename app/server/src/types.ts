@@ -422,6 +422,48 @@ export interface Store {
   putCheckGuest(link: CheckGuestLink): Promise<void>;
   removeCheckGuest(checkId: string, guestId: string): Promise<void>;
   removeGuestLinks(guestId: string): Promise<void>;
+
+  /** The call-in book (E23-T2). Reservations are ordinary rows; everything
+   *  the floor and the book SHOW about them is derived at read. */
+  listReservations(): Promise<Reservation[]>;
+  getReservation(id: string): Promise<Reservation | undefined>;
+  putReservation(reservation: Reservation): Promise<void>;
+
+  /** Every table name the room has EVER had, retired ones included (E23-T2).
+   *  A booking taken in March for a table retired in April still has to
+   *  resolve, so validating a reservation's table cannot use the active
+   *  floor the way seating does. */
+  listAllTableNames(): Promise<string[]>;
+}
+
+/** A promise, not a lock (D27). The floor shows it as the hour approaches and
+ *  the host overrides it whenever the room says otherwise; nothing in here
+ *  ever refuses a seating. */
+export const RESERVATION_STATUSES = ["booked", "seated", "no_show", "cancelled"] as const;
+export type ReservationStatus = (typeof RESERVATION_STATUSES)[number];
+
+/** One entry in the call-in book (E23-T2, reservations-spec §4).
+ *
+ *  `name` and `phone` live here rather than only on a guest record, and the
+ *  redundancy is deliberate: a booking taken over the phone is a fact about a
+ *  call, and it has to be writable in four seconds without creating a person
+ *  first. `guestId` fills in when a phone matches and a human confirms it. */
+export interface Reservation {
+  id: string;
+  name: string;
+  phone?: string;
+  partySize: number;
+  /** UTC ISO, like every other timestamp in the system */
+  reservedFor: string;
+  /** the table promised, if one was. Resolves against retired tables too, so
+   *  a floor edit between the call and the night does not strand the booking. */
+  tableName?: string;
+  status: ReservationStatus;
+  note?: string;
+  /** set when a phone match was confirmed at seating, or attached by hand */
+  guestId?: string;
+  createdBy?: string;
+  createdAt: string;
 }
 
 /** A guest the house remembers (E20, spec section 2). Identity only: no money,
@@ -478,6 +520,14 @@ export interface Venue {
   /** YYYY-MM-DD, the day a weekly or biweekly cycle starts counting from.
    *  Semimonthly ignores it: the 1st and the 16th are the anchor. */
   payPeriodAnchor: string;
+  /** How long before a booking the floor starts showing it (E23-T2, spec
+   *  §2). Earlier than this the badge is noise on a table that is busy
+   *  serving somebody else. Default 45. */
+  reservationLeadMinutes: number;
+  /** How long a table is held past the booked time before the book nudges
+   *  the host (E23-T2, deck E-2 default). A SOFT prompt: nothing is released
+   *  automatically, because the host decides who sits where. Default 15. */
+  reservationHoldMinutes: number;
 }
 
 /** The demo venue, seeded into whichever store is active. It stays the seed
@@ -490,6 +540,8 @@ export const VENUE: Venue = {
   payPeriod: "biweekly",
   // a Monday, so the demo's cycles start where a restaurant week does
   payPeriodAnchor: "2026-01-05",
+  reservationLeadMinutes: 45,
+  reservationHoldMinutes: 15,
 };
 
 /** Osteria Nove's room, seeded into whichever store is active. */

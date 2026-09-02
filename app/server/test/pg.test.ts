@@ -472,6 +472,7 @@ describe.skipIf(!PGBIN)("PostgreSQL persistence (E4)", () => {
     expect((await app.inject({ method: "GET", url: "/v1/venue" })).json()).toEqual({
       name: "Osteria Nove", address: "9 Vicolo della Luna, New York", timezone: "America/New_York",
       payPeriod: "biweekly", payPeriodAnchor: "2026-01-05",
+      reservationLeadMinutes: 45, reservationHoldMinutes: 15,
     });
     const bad = await app.inject({ method: "POST", url: "/v1/venue",
       payload: ENV({ managerPin: MGR, timezone: "America/Atlantis" }) });
@@ -528,6 +529,7 @@ describe.skipIf(!PGBIN)("PostgreSQL persistence (E4)", () => {
     expect((await app3.inject({ method: "GET", url: "/v1/venue" })).json()).toEqual({
       name: "Trattoria Sedici", address: "16 Elm St, Austin", timezone: "America/Chicago",
       payPeriod: "biweekly", payPeriodAnchor: "2026-01-05",
+      reservationLeadMinutes: 45, reservationHoldMinutes: 15,
     });
 
     const after = await roster(app3);
@@ -831,5 +833,101 @@ describe.skipIf(!PGBIN)("PostgreSQL persistence (E4)", () => {
     // the snapshot row carries the menu and not the paperwork
     expect(JSON.stringify(live.items)).not.toContain("csv-import");
     expect(sql("SELECT count(*) FROM menu_snapshot WHERE document::text LIKE '%csv-import%'")).toBe("0");
+  }, 60_000);
+
+  /* ------------- the call-in book (E23-T2) -------------
+   * The promise-not-a-lock rules are proven against the memory store in
+   * api.test.ts. What only Postgres can prove: migration 0010's table holds
+   * a booking through a restart, table_id really points at dining_table (so
+   * a retired table still resolves), and seating writes a real check and a
+   * real guest link in the same act. */
+
+  it("keeps a booking across a restart, seats it into real rows, and survives a retired table", async () => {
+    const app = buildServer(store, "postgres");
+    const MGR = "1122";
+    const soon = new Date(Date.now() + 20 * 60_000).toISOString();
+
+    // 0010 landed, table_id is a real FK, and the two windows backfilled
+    expect(sql(`SELECT count(*) FROM information_schema.tables WHERE table_name = 'reservation'`)).toBe("1");
+    expect(sql(`SELECT count(*) FROM information_schema.table_constraints tc
+                JOIN information_schema.key_column_usage k ON k.constraint_name = tc.constraint_name
+                WHERE tc.table_name = 'reservation' AND tc.constraint_type = 'FOREIGN KEY'
+                  AND k.column_name = 'table_id'`)).toBe("1");
+    expect(sql("SELECT reservation_lead_minutes FROM location")).toBe("45");
+    expect(sql("SELECT reservation_hold_minutes FROM location")).toBe("15");
+
+    // a guest the house already knows, so the phone rung has something to find
+    const guest = (await app.inject({ method: "POST", url: "/v1/guests",
+      payload: ENV({ displayName: "Somchai P.", phone: "917-555-0143" }) })).json().guest;
+
+    const booked = await app.inject({ method: "POST", url: "/v1/reservations",
+      payload: ENV({ name: "Somchai", phone: "917-555-0143", partySize: 4,
+        reservedFor: soon, tableName: "Table 3", note: "anniversary" }) });
+    expect(booked.statusCode).toBe(200);
+    const id = booked.json().reservation.id as string;
+
+    // it is a real row, and table_id resolved to the real table
+    expect(sql(`SELECT status FROM reservation WHERE id = '${id}'`)).toBe("booked");
+    expect(sql(`SELECT dt.name FROM reservation rv JOIN dining_table dt ON dt.id = rv.table_id
+                WHERE rv.id = '${id}'`)).toBe("Table 3");
+
+    /* the host goes home; the book is still there tomorrow */
+    await store.end();
+    store = new PgStore(url);
+    await store.init();
+    const app10 = buildServer(store, "postgres");
+
+    const day = (await app10.inject({ method: "GET", url: "/v1/reservations" })).json();
+    const row = day.reservations.find((r: { id: string }) => r.id === id);
+    expect(row).toMatchObject({ name: "Somchai", partySize: 4, tableName: "Table 3", note: "anniversary", status: "booked" });
+    // the phone match is computed at read, against real guest rows
+    expect(row.guestMatch).toEqual({ id: guest.id, name: "Somchai P." });
+
+    // and the floor badge is derived, not stored: no column on dining_table
+    const badge = (await app10.inject({ method: "GET", url: "/v1/floor" })).json().tables
+      .find((t: { name: string }) => t.name === "Table 3").reserved;
+    expect(badge).toMatchObject({ name: "Somchai", partySize: 4 });
+    expect(sql(`SELECT count(*) FROM information_schema.columns
+                WHERE table_name = 'dining_table' AND column_name LIKE '%reserv%'`)).toBe("0");
+
+    /* seating: one command, a real check and a real guest link */
+    const seated = await app10.inject({ method: "POST", url: `/v1/reservations/${id}/seat`,
+      payload: ENV({ guestId: guest.id }) });
+    expect(seated.statusCode).toBe(200);
+    const checkId = seated.json().check.id as string;
+    expect(seated.json().check).toMatchObject({ tableName: "Table 3", covers: 4 });
+    expect(sql(`SELECT p.covers FROM party p JOIN checks c ON c.party_id = p.id WHERE c.id = '${checkId}'`)).toBe("4");
+    expect(sql(`SELECT count(*) FROM check_guest WHERE check_id = '${checkId}' AND guest_id = '${guest.id}'`)).toBe("1");
+    expect(sql(`SELECT guest_id FROM reservation WHERE id = '${id}'`)).toBe(guest.id);
+    expect(sql(`SELECT status FROM reservation WHERE id = '${id}'`)).toBe("seated");
+    // the badge is gone because the row is no longer booked, not because
+    // anything was written to the table
+    expect((await app10.inject({ method: "GET", url: "/v1/floor" })).json().tables
+      .find((t: { name: string }) => t.name === "Table 3").reserved).toBeNull();
+
+    /* a booking on a table the floor editor then retires still resolves */
+    const later = await app10.inject({ method: "POST", url: "/v1/reservations",
+      payload: ENV({ name: "Ploy", partySize: 2, reservedFor: soon, tableName: "Table 2" }) });
+    expect(later.statusCode).toBe(200);
+    const retire = await app10.inject({ method: "POST", url: "/v1/floor/retire",
+      payload: ENV({ managerPin: MGR, tableName: "Table 2" }) });
+    expect(retire.statusCode).toBe(200);
+
+    await store.end();
+    store = new PgStore(url);
+    await store.init();
+    const app11 = buildServer(store, "postgres");
+    const orphan = (await app11.inject({ method: "GET", url: "/v1/reservations" })).json()
+      .reservations.find((r: { name: string }) => r.name === "Ploy");
+    // the table is off the floor plan and the promise is still on the books
+    expect(orphan).toMatchObject({ tableName: "Table 2", status: "booked" });
+    expect((await app11.inject({ method: "GET", url: "/v1/floor" })).json().tables
+      .some((t: { name: string }) => t.name === "Table 2")).toBe(false);
+
+    // a no-show is a state, and it keeps its row
+    const noShow = await app11.inject({ method: "POST", url: `/v1/reservations/${orphan.id}/no-show`, payload: ENV() });
+    expect(noShow.statusCode).toBe(200);
+    expect(sql(`SELECT status FROM reservation WHERE id = '${orphan.id}'`)).toBe("no_show");
+    expect(sql(`SELECT count(*) FROM reservation WHERE id = '${orphan.id}'`)).toBe("1");
   }, 60_000);
 });

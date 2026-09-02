@@ -633,19 +633,23 @@ describe("the venue is data now (E21-T1)", () => {
       // wage field here and rung 3 is the reason there is not going to be one
       payPeriod: "biweekly",
       payPeriodAnchor: "2026-01-05",
+      // and E23-T2 added the two soft reservation windows: one decides when a
+      // badge appears, the other when the book nudges. Neither refuses anything.
+      reservationLeadMinutes: 45,
+      reservationHoldMinutes: 15,
     });
 
     const res = await app.inject({ method: "POST", url: "/v1/venue",
       payload: { ...ENV(1), managerPin: MGR, name: "Trattoria Sedici", address: "16 Elm St, Austin", timezone: "America/Chicago" } });
     expect(res.statusCode).toBe(200);
-    expect(res.json().venue).toEqual({ name: "Trattoria Sedici", address: "16 Elm St, Austin", timezone: "America/Chicago", payPeriod: "biweekly", payPeriodAnchor: "2026-01-05" });
+    expect(res.json().venue).toEqual({ name: "Trattoria Sedici", address: "16 Elm St, Austin", timezone: "America/Chicago", payPeriod: "biweekly", payPeriodAnchor: "2026-01-05", reservationLeadMinutes: 45, reservationHoldMinutes: 15 });
     expect((await app.inject({ method: "GET", url: "/v1/venue" })).json().name).toBe("Trattoria Sedici");
 
     // an omitted field is left alone; a blank address is a real edit, because
     // a kitchen with no street frontage is a real thing
     const partial = await app.inject({ method: "POST", url: "/v1/venue",
       payload: { ...ENV(2), managerPin: MGR, address: "" } });
-    expect(partial.json().venue).toEqual({ name: "Trattoria Sedici", address: "", timezone: "America/Chicago", payPeriod: "biweekly", payPeriodAnchor: "2026-01-05" });
+    expect(partial.json().venue).toEqual({ name: "Trattoria Sedici", address: "", timezone: "America/Chicago", payPeriod: "biweekly", payPeriodAnchor: "2026-01-05", reservationLeadMinutes: 45, reservationHoldMinutes: 15 });
   });
 
   it("refuses the edit without a manager, and refuses a name or a timezone it cannot honor", async () => {
@@ -4094,5 +4098,283 @@ describe("the menu import lands on the Menu screen (E22-T3)", () => {
     expect(page).toContain("function groupForm(src)");
     expect(page).toContain("function publishForm()");
     expect(page.match(/<svg viewBox="0 0 24 24" aria-hidden="true">/g)).toHaveLength(7);
+  });
+});
+
+/* ---------------- the call-in book (E23-T2, D27/D31) ----------------
+   A reservation is a PROMISE, not a lock. The assertions below are as much
+   about what the book refuses to do (never block a seating, never delete a
+   row, never guess at a guest) as about what it records. */
+describe("the call-in book (E23-T2)", () => {
+  const MGR = "1122";
+
+  /** a local-time instant, the clock the whole calendar runs on */
+  const at = (h: number, min = 0, dayOffset = 0) => {
+    const d = new Date();
+    d.setDate(d.getDate() + dayOffset);
+    d.setHours(h, min, 0, 0);
+    return d.toISOString();
+  };
+  const today = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+  /** minutes from now, which is how the lead and hold windows are reasoned about */
+  const inMinutes = (m: number) => new Date(Date.now() + m * 60_000).toISOString();
+
+  const book = (app: ReturnType<typeof buildServer>, n: number, body: Record<string, unknown> = {}) =>
+    app.inject({ method: "POST", url: "/v1/reservations",
+      payload: { ...ENV(n), name: "Somchai", phone: "917-555-0143", partySize: 4,
+        reservedFor: at(19, 30), tableName: "Table 12", ...body } });
+
+  const readBook = async (app: ReturnType<typeof buildServer>, date?: string) =>
+    (await app.inject({ method: "GET", url: `/v1/reservations${date ? `?date=${date}` : ""}` })).json();
+
+  const floorOf = async (app: ReturnType<typeof buildServer>) =>
+    (await app.inject({ method: "GET", url: "/v1/floor" })).json().tables as
+      { name: string; reserved: { name: string; partySize: number; reservedFor: string } | null }[];
+
+  it("takes a booking from whoever answers the phone, and refuses only nonsense", async () => {
+    const app = buildServer();
+    const res = await book(app, 1);
+    expect(res.statusCode).toBe(200); // no manager PIN anywhere: it is a phone call
+    expect(res.json().reservation).toMatchObject({
+      name: "Somchai", phone: "917-555-0143", partySize: 4, tableName: "Table 12", status: "booked",
+    });
+
+    for (const [patch, reason] of [
+      [{ name: "  " }, "a booking needs a name"],
+      [{ partySize: 0 }, "party size must be a whole number of people, at least 1"],
+      [{ partySize: 2.5 }, "party size must be a whole number of people, at least 1"],
+      [{ reservedFor: "friday-ish" }, "'friday-ish' is not a date and time"],
+      [{ tableName: "Table 99" }, "Table 99 is not a table this room has"],
+    ] as [Record<string, unknown>, string][]) {
+      const bad = await book(app, 2, patch);
+      expect(bad.statusCode, reason).toBe(422);
+      expect(bad.json().reason).toBe(reason);
+    }
+
+    // a table is OPTIONAL: a call that did not settle one is still a booking
+    const floating = await book(app, 3, { tableName: undefined, name: "Anong" });
+    expect(floating.json().reservation.tableName).toBeUndefined();
+
+    // and a PAST time is allowed in silence, because a host catching the book
+    // up after a rush is back-entering tonight, not making a mistake
+    const backEntered = await book(app, 4, { reservedFor: at(12, 0), name: "Kamon" });
+    expect(backEntered.statusCode).toBe(200);
+  });
+
+  it("cancels and no-shows as STATES, from booked only, keeping the row", async () => {
+    const app = buildServer();
+    const one = (await book(app, 1)).json().reservation.id as string;
+    const two = (await book(app, 2, { name: "Nid" })).json().reservation.id as string;
+
+    const cancelled = await app.inject({ method: "POST", url: `/v1/reservations/${one}/cancel`, payload: ENV(3) });
+    expect(cancelled.json().reservation.status).toBe("cancelled");
+    const noShow = await app.inject({ method: "POST", url: `/v1/reservations/${two}/no-show`, payload: ENV(4) });
+    expect(noShow.json().reservation.status).toBe("no_show");
+
+    // both rows survive: the reason to record a no-show is that it happened
+    const rows = (await readBook(app)).reservations;
+    expect(rows.map((r: { status: string }) => r.status).sort()).toEqual(["cancelled", "no_show"]);
+
+    // and neither state goes anywhere else
+    const twice = await app.inject({ method: "POST", url: `/v1/reservations/${one}/cancel`, payload: ENV(5) });
+    expect(twice.statusCode).toBe(422);
+    expect(twice.json().reason).toBe("Somchai's booking is already cancelled; only a booked one can be cancelled");
+    const seatDead = await app.inject({ method: "POST", url: `/v1/reservations/${two}/seat`, payload: ENV(6) });
+    expect(seatDead.json().reason).toBe("Nid's booking is no show; only a booked one can be seated");
+
+    const nobody = await app.inject({ method: "POST", url: "/v1/reservations/not-a-booking/cancel", payload: ENV(7) });
+    expect(nobody.json().reason).toBe("no reservation not-a-booking");
+  });
+
+  it("seats the party into a real check, covers and table prefilled, in one act", async () => {
+    const app = buildServer();
+    const id = (await book(app, 1)).json().reservation.id as string;
+
+    const seated = await app.inject({ method: "POST", url: `/v1/reservations/${id}/seat`, payload: ENV(2) });
+    expect(seated.statusCode).toBe(200);
+    // the party size was typed once, on the phone, and it drives every
+    // per-cover figure downstream from here
+    expect(seated.json().check).toMatchObject({ tableName: "Table 12", covers: 4, status: "open" });
+    expect(seated.json().reservation.status).toBe("seated");
+
+    // one command, so a half-seated reservation cannot exist: the check is
+    // real and the book moved in the same breath
+    const live = (await app.inject({ method: "GET", url: "/v1/checks" })).json().checks;
+    expect(live.filter((c: { tableName: string }) => c.tableName === "Table 12")).toHaveLength(1);
+    expect((await readBook(app)).reservations[0].status).toBe("seated");
+  });
+
+  it("attaches the guest a human confirmed, and matches a phone EXACTLY", async () => {
+    const app = buildServer();
+    const guest = (await app.inject({ method: "POST", url: "/v1/guests",
+      payload: { ...ENV(1), displayName: "Somchai P.", phone: "917-555-0143" } })).json().guest;
+
+    const id = (await book(app, 2)).json().reservation.id as string;
+    // the book PROPOSES the match; it never binds it
+    const proposed = (await readBook(app)).reservations[0];
+    expect(proposed.guestMatch).toEqual({ id: guest.id, name: "Somchai P." });
+    expect(proposed.guestId).toBeUndefined();
+
+    const seated = await app.inject({ method: "POST", url: `/v1/reservations/${id}/seat`,
+      payload: { ...ENV(3), guestId: guest.id } });
+    expect(seated.statusCode).toBe(200);
+    expect(seated.json().check.guests).toEqual([{ id: guest.id, name: "Somchai P." }]);
+    expect(seated.json().reservation.guestId).toBe(guest.id);
+
+    // one digit off is a different person (D20: exact, never fuzzy)
+    const other = await book(app, 4, { phone: "917-555-0144", name: "Not Somchai" });
+    const rows = (await readBook(app)).reservations;
+    expect(rows.find((r: { name: string }) => r.name === "Not Somchai").guestMatch).toBeUndefined();
+    expect(other.statusCode).toBe(200);
+
+    // and a guest that does not exist is refused rather than silently skipped
+    const ghost = (await book(app, 5, { name: "Ghost", tableName: "Table 5" })).json().reservation.id;
+    const bad = await app.inject({ method: "POST", url: `/v1/reservations/${ghost}/seat`,
+      payload: { ...ENV(6), guestId: "no-such-guest" } });
+    expect(bad.json().reason).toBe("no such guest");
+  });
+
+  it("warns and allows a reroute, and still never doubles a table up", async () => {
+    const app = buildServer();
+    const id = (await book(app, 1)).json().reservation.id as string;
+
+    // the promised table is taken, so the host moves them. Deviating from the
+    // promise needs an acknowledgement, not a permission.
+    const unconfirmed = await app.inject({ method: "POST", url: `/v1/reservations/${id}/seat`,
+      payload: { ...ENV(2), tableName: "Table 5" } });
+    expect(unconfirmed.statusCode).toBe(422);
+    expect(unconfirmed.json().reason)
+      .toBe("Somchai was promised Table 12; confirm the override to seat them at Table 5");
+
+    const rerouted = await app.inject({ method: "POST", url: `/v1/reservations/${id}/seat`,
+      payload: { ...ENV(3), tableName: "Table 5", confirmOverride: true } });
+    expect(rerouted.statusCode).toBe(200);
+    expect(rerouted.json().check).toMatchObject({ tableName: "Table 5", covers: 4 });
+    expect(rerouted.json().reservation).toMatchObject({ status: "seated", tableName: "Table 5" });
+
+    // the ledger's own rule still stands: one table, one open check. Promise
+    // not lock means the HOST reroutes, not that the books double up.
+    const second = (await book(app, 4, { name: "Ploy", tableName: "Table 5" })).json().reservation.id;
+    const clash = await app.inject({ method: "POST", url: `/v1/reservations/${second}/seat`, payload: ENV(5) });
+    expect(clash.statusCode).toBe(422);
+    expect(clash.json().reason).toBe("Table 5 already has an open check");
+
+    // a booking with no table at all has to be told where to go
+    const floating = (await book(app, 6, { name: "Anong", tableName: undefined })).json().reservation.id;
+    const nowhere = await app.inject({ method: "POST", url: `/v1/reservations/${floating}/seat`, payload: ENV(7) });
+    expect(nowhere.json().reason).toBe("Anong's booking names no table; choose one to seat them at");
+    const placed = await app.inject({ method: "POST", url: `/v1/reservations/${floating}/seat`,
+      payload: { ...ENV(8), tableName: "Table 9" } }); // no override needed: nothing was promised
+    expect(placed.statusCode).toBe(200);
+    expect(placed.json().check.tableName).toBe("Table 9");
+  });
+
+  it("badges the floor inside the lead window and stays quiet outside it", async () => {
+    const app = buildServer();
+    // 30 minutes out, inside the 45 minute default
+    await book(app, 1, { reservedFor: inMinutes(30), tableName: "Table 12" });
+    // 4 hours out, well outside it
+    await book(app, 2, { reservedFor: inMinutes(240), tableName: "Table 9", name: "Ploy", partySize: 2 });
+
+    const tables = await floorOf(app);
+    expect(tables.find((t) => t.name === "Table 12")!.reserved)
+      .toMatchObject({ name: "Somchai", partySize: 4 });
+    // noise on a table that is busy serving somebody else, so: nothing
+    expect(tables.find((t) => t.name === "Table 9")!.reserved).toBeNull();
+    expect(tables.find((t) => t.name === "Table 5")!.reserved).toBeNull();
+
+    // widen the window and the later booking appears, with nothing stored
+    const widen = await app.inject({ method: "POST", url: "/v1/venue",
+      payload: { ...ENV(3), managerPin: MGR, reservationLeadMinutes: 300 } });
+    expect(widen.statusCode).toBe(200);
+    expect((await floorOf(app)).find((t) => t.name === "Table 9")!.reserved)
+      .toMatchObject({ name: "Ploy", partySize: 2 });
+
+    // seating it clears the badge: only a BOOKED row is still expected
+    const id = (await readBook(app)).reservations.find((r: { name: string }) => r.name === "Somchai").id;
+    await app.inject({ method: "POST", url: `/v1/reservations/${id}/seat`, payload: ENV(4) });
+    expect((await floorOf(app)).find((t) => t.name === "Table 12")!.reserved).toBeNull();
+
+    const bad = await app.inject({ method: "POST", url: "/v1/venue",
+      payload: { ...ENV(5), managerPin: MGR, reservationLeadMinutes: -1 } });
+    expect(bad.json().reason).toBe("the reservation lead window must be a whole number of minutes between 0 and 1440");
+  });
+
+  it("keeps a booking on a table the floor editor retired", async () => {
+    const app = buildServer();
+    await book(app, 1, { tableName: "Table 12" });
+
+    // the room changes between the call and the night
+    const retired = await app.inject({ method: "POST", url: "/v1/floor/retire",
+      payload: { ...ENV(2), managerPin: MGR, tableName: "Table 12" } });
+    expect(retired.statusCode).toBe(200);
+    expect((await floorOf(app)).some((t) => t.name === "Table 12")).toBe(false);
+
+    // the booking still resolves, and still says who is coming
+    const row = (await readBook(app)).reservations[0];
+    expect(row).toMatchObject({ name: "Somchai", tableName: "Table 12", status: "booked" });
+
+    // a NEW booking on the retired name is still accepted: the room has had
+    // that table, and the host may be about to bring it back
+    const again = await book(app, 3, { name: "Ploy", tableName: "table 12" });
+    expect(again.statusCode).toBe(200);
+    expect(again.json().reservation.tableName).toBe("Table 12"); // matched case-insensitively
+  });
+
+  it("reads the book in time order, with covers per period and past-due flagged", async () => {
+    const app = buildServer();
+    await book(app, 1, { name: "Dinner late", reservedFor: at(20, 30), partySize: 6, tableName: "Table 9" });
+    await book(app, 2, { name: "Lunch", reservedFor: at(12, 30), partySize: 2, tableName: "Table 5" });
+    await book(app, 3, { name: "Dinner early", reservedFor: at(18, 0), partySize: 4, tableName: "Table 12" });
+    await book(app, 4, { name: "Tomorrow", reservedFor: at(19, 0, 1), partySize: 8, tableName: "Table 14" });
+
+    const day = await readBook(app);
+    expect(day.date).toBe(today());
+    // time order, and tomorrow's booking is not tonight's problem
+    expect(day.reservations.map((r: { name: string }) => r.name)).toEqual(["Lunch", "Dinner early", "Dinner late"]);
+    expect(day.periods).toEqual([
+      { period: "lunch", reservations: 1, covers: 2 },
+      { period: "dinner", reservations: 2, covers: 10 },
+    ]);
+    expect(day.covers).toBe(12);
+    expect(day.holdMinutes).toBe(15);
+
+    // tomorrow's book is its own day
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    const tomorrow = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    expect((await readBook(app, tomorrow)).reservations.map((r: { name: string }) => r.name)).toEqual(["Tomorrow"]);
+
+    // past due is the SOFT prompt, measured past the hold window, and it
+    // never releases anything: the row is still booked
+    const app2 = buildServer();
+    await book(app2, 5, { name: "Late", reservedFor: inMinutes(-20), tableName: "Table 5" });
+    await book(app2, 6, { name: "Only just", reservedFor: inMinutes(-5), tableName: "Table 9" });
+    const rows = (await readBook(app2)).reservations;
+    const flagged = Object.fromEntries(rows.map((r: { name: string; pastDue: boolean }) => [r.name, r.pastDue]));
+    expect(flagged).toEqual({ Late: true, "Only just": false });
+    expect(rows.every((r: { status: string }) => r.status === "booked")).toBe(true);
+  });
+
+  it("replays a dropped booking and a dropped seating instead of doubling them", async () => {
+    const app = buildServer();
+    const op = { ...ENV(1), name: "Somchai", partySize: 4, reservedFor: at(19, 30), tableName: "Table 12" };
+    const first = await app.inject({ method: "POST", url: "/v1/reservations", payload: op });
+    const retry = await app.inject({ method: "POST", url: "/v1/reservations", payload: op });
+    expect(retry.json()).toEqual(first.json());
+    expect((await readBook(app)).reservations).toHaveLength(1);
+
+    const id = first.json().reservation.id as string;
+    const seatOp = { ...ENV(2) };
+    const seat1 = await app.inject({ method: "POST", url: `/v1/reservations/${id}/seat`, payload: seatOp });
+    const seat2 = await app.inject({ method: "POST", url: `/v1/reservations/${id}/seat`, payload: seatOp });
+    expect(seat1.statusCode).toBe(200);
+    // a dropped reply must not open a second check on the same table
+    expect(seat2.json()).toEqual(seat1.json());
+    expect((await app.inject({ method: "GET", url: "/v1/checks" })).json().checks
+      .filter((c: { tableName: string }) => c.tableName === "Table 12")).toHaveLength(1);
   });
 });

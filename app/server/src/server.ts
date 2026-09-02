@@ -72,6 +72,7 @@ function respond(reply: FastifyReply, outcome: CommandOutcome): unknown {
         ...(outcome.guest !== undefined ? { guest: outcome.guest } : {}),
         ...(outcome.venue !== undefined ? { venue: outcome.venue } : {}),
         ...(outcome.employee !== undefined ? { employee: outcome.employee } : {}),
+        ...(outcome.reservation !== undefined ? { reservation: outcome.reservation } : {}),
         ...(outcome.audit !== undefined ? { audit: outcome.audit } : {}),
         ...(outcome.refundDueMinor !== undefined ? { refundDueMinor: outcome.refundDueMinor } : {}),
         ...(outcome.note !== undefined ? { note: outcome.note } : {}),
@@ -138,6 +139,60 @@ export function buildServer(store: Store = new MemoryStore(), storeName = "memor
       ...(body.timezone !== undefined ? { timezone: String(body.timezone) } : {}),
       ...(body.payPeriod !== undefined ? { payPeriod: String(body.payPeriod) } : {}),
       ...(body.payPeriodAnchor !== undefined ? { payPeriodAnchor: String(body.payPeriodAnchor) } : {}),
+      ...(body.reservationLeadMinutes !== undefined ? { reservationLeadMinutes: Number(body.reservationLeadMinutes) } : {}),
+      ...(body.reservationHoldMinutes !== undefined ? { reservationHoldMinutes: Number(body.reservationHoldMinutes) } : {}),
+    }));
+  });
+
+  /* ------------------ the call-in book (E23-T2) ------------------
+     Not manager-gated: whoever answers the phone takes the booking. The
+     actor is recorded, which is the honest trade for keeping a call to
+     four seconds. */
+
+  app.get("/v1/reservations", async (req) => {
+    const { date } = req.query as { date?: string };
+    return engine.reservations(date);
+  });
+
+  app.post("/v1/reservations", async (req, reply) => {
+    const body = (req.body ?? {}) as EnvelopeBody & Record<string, unknown>;
+    const envelope = readEnvelope(body);
+    if ("error" in envelope) return reply.code(400).send({ status: "BAD_REQUEST", reason: envelope.error });
+    return respond(reply, await engine.bookReservation(envelope, {
+      name: String(body.name ?? ""),
+      ...(typeof body.phone === "string" ? { phone: body.phone } : {}),
+      partySize: Number(body.partySize),
+      reservedFor: String(body.reservedFor ?? ""),
+      ...(typeof body.tableName === "string" ? { tableName: body.tableName } : {}),
+      ...(typeof body.note === "string" ? { note: body.note } : {}),
+    }));
+  });
+
+  app.post("/v1/reservations/:id/cancel", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const envelope = readEnvelope((req.body ?? {}) as EnvelopeBody);
+    if ("error" in envelope) return reply.code(400).send({ status: "BAD_REQUEST", reason: envelope.error });
+    return respond(reply, await engine.cancelReservation(envelope, id));
+  });
+
+  app.post("/v1/reservations/:id/no-show", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const envelope = readEnvelope((req.body ?? {}) as EnvelopeBody);
+    if ("error" in envelope) return reply.code(400).send({ status: "BAD_REQUEST", reason: envelope.error });
+    return respond(reply, await engine.markNoShow(envelope, id));
+  });
+
+  app.post("/v1/reservations/:id/seat", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = (req.body ?? {}) as EnvelopeBody & Record<string, unknown>;
+    const envelope = readEnvelope(body);
+    if ("error" in envelope) return reply.code(400).send({ status: "BAD_REQUEST", reason: envelope.error });
+    return respond(reply, await engine.seatReservation(envelope, id, {
+      ...(typeof body.tableName === "string" ? { tableName: body.tableName } : {}),
+      // the guest is attached only when a human confirmed the match; the read
+      // proposes, a person decides (D20)
+      ...(typeof body.guestId === "string" ? { guestId: body.guestId } : {}),
+      ...(body.confirmOverride === true ? { confirmOverride: true } : {}),
     }));
   });
 

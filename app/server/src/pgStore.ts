@@ -33,6 +33,7 @@ import {
   type MenuDraft,
   type MenuSnapshot,
   type OpMeta,
+  type Reservation,
   type Shift,
   type Store,
   type TableShape,
@@ -791,7 +792,9 @@ export class PgStore implements Store {
 
   async getVenue(): Promise<Venue> {
     const r = await this.pool.query(
-      "SELECT name, address, timezone, pay_period, pay_period_anchor FROM location WHERE id = $1", [LOC]);
+      `SELECT name, address, timezone, pay_period, pay_period_anchor,
+              reservation_lead_minutes, reservation_hold_minutes
+       FROM location WHERE id = $1`, [LOC]);
     const row = r.rows[0];
     const anchor = row?.pay_period_anchor as Date | string | null | undefined;
     return {
@@ -804,14 +807,97 @@ export class PgStore implements Store {
       // a DATE column comes back as a Date; the rest of the system speaks
       // YYYY-MM-DD strings, and it must stay the LOCAL day pg handed us
       payPeriodAnchor: anchor instanceof Date ? ymd(anchor) : (anchor ?? VENUE.payPeriodAnchor),
+      // and 0010 for the two reservation windows
+      reservationLeadMinutes: (row?.reservation_lead_minutes as number) ?? VENUE.reservationLeadMinutes,
+      reservationHoldMinutes: (row?.reservation_hold_minutes as number) ?? VENUE.reservationHoldMinutes,
     };
   }
 
   async putVenue(venue: Venue): Promise<void> {
     await this.pool.query(
-      "UPDATE location SET name = $1, address = $2, timezone = $3, pay_period = $4, pay_period_anchor = $5 WHERE id = $6",
-      [venue.name, venue.address, venue.timezone, venue.payPeriod, venue.payPeriodAnchor, LOC],
+      `UPDATE location SET name = $1, address = $2, timezone = $3, pay_period = $4, pay_period_anchor = $5,
+                           reservation_lead_minutes = $6, reservation_hold_minutes = $7
+       WHERE id = $8`,
+      [venue.name, venue.address, venue.timezone, venue.payPeriod, venue.payPeriodAnchor,
+       venue.reservationLeadMinutes, venue.reservationHoldMinutes, LOC],
     );
+  }
+
+  /* ------------------- the call-in book (E23-T2) ------------------- */
+
+  /** The book. table_id joins back out to a NAME, retired rows included, so a
+   *  booking survives the floor edit that retired its table. */
+  async listReservations(): Promise<Reservation[]> {
+    const r = await this.pool.query(
+      `SELECT rv.id, rv.guest_id, rv.name, rv.phone, rv.party_size, rv.reserved_for,
+              rv.status, rv.note, rv.created_by, rv.created_at, dt.name AS table_name
+       FROM reservation rv
+       LEFT JOIN dining_table dt ON dt.id = rv.table_id
+       WHERE rv.location_id = $1
+       ORDER BY rv.reserved_for, rv.created_at`,
+      [LOC],
+    );
+    return r.rows.map((row) => ({
+      id: row.id as string,
+      name: row.name as string,
+      ...(row.phone ? { phone: row.phone as string } : {}),
+      partySize: row.party_size as number,
+      reservedFor: new Date(row.reserved_for as string).toISOString(),
+      ...(row.table_name ? { tableName: row.table_name as string } : {}),
+      status: row.status as Reservation["status"],
+      ...(row.note ? { note: row.note as string } : {}),
+      ...(row.guest_id ? { guestId: row.guest_id as string } : {}),
+      ...(row.created_by ? { createdBy: row.created_by as string } : {}),
+      createdAt: new Date(row.created_at as string).toISOString(),
+    }));
+  }
+
+  async getReservation(id: string): Promise<Reservation | undefined> {
+    return (await this.listReservations()).find((r) => r.id === id);
+  }
+
+  async putReservation(reservation: Reservation): Promise<void> {
+    const c = await this.pool.connect();
+    try {
+      await c.query("BEGIN");
+      // ensureTable is the same resolver a check uses: it prefers the active
+      // row, falls back to the retired ghost, and only invents a row for a
+      // name the room has genuinely never had
+      const tableId = reservation.tableName ? await this.ensureTable(c, reservation.tableName) : null;
+      // created_by must be a real employee row or NULL; an unsigned demo
+      // terminal has nobody to name and NULL is the honest answer
+      const createdBy = reservation.createdBy
+        ? (await c.query("SELECT 1 FROM employee WHERE id = $1", [reservation.createdBy])).rowCount
+          ? reservation.createdBy : null
+        : null;
+      await c.query(
+        `INSERT INTO reservation (id, org_id, location_id, guest_id, name, phone, party_size,
+                                  reserved_for, table_id, status, note, created_by, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,COALESCE($13, now()))
+         ON CONFLICT (id) DO UPDATE SET guest_id = $4, name = $5, phone = $6, party_size = $7,
+           reserved_for = $8, table_id = $9, status = $10, note = $11`,
+        [reservation.id, ORG, LOC, reservation.guestId ?? null, reservation.name, reservation.phone ?? null,
+         reservation.partySize, reservation.reservedFor, tableId, reservation.status,
+         reservation.note ?? null, createdBy, reservation.createdAt],
+      );
+      await c.query("COMMIT");
+    } catch (err) {
+      await c.query("ROLLBACK");
+      throw err;
+    } finally {
+      c.release();
+    }
+  }
+
+  /** Retired rows included: this answers "has the room ever had this table",
+   *  which is a different question from "what is on the floor plan now". */
+  async listAllTableNames(): Promise<string[]> {
+    const r = await this.pool.query(
+      `SELECT dt.name FROM dining_table dt JOIN dining_area da ON da.id = dt.area_id
+       WHERE da.location_id = $1 ORDER BY dt.name`,
+      [LOC],
+    );
+    return r.rows.map((row) => row.name as string);
   }
 
   /** The roster, ordered so the list a manager reads does not reshuffle

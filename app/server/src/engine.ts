@@ -27,7 +27,7 @@ import type { MenuEntry } from "./menu.js";
 import { isBlankRecord, parseCsv } from "./csv.js";
 import { defaultTitle, PIN_RULE, pinHash, STAFF, type DirectoryEntry, type Employee, type RosterEntry } from "./staff.js";
 import { randomUUID } from "node:crypto";
-import { addDays, dateAt, isValidYmd, lastCompletedPeriod, PAY_PERIODS, periodContaining, sameName, serviceDateOf, TABLE_SHAPES, type CashEvent, type CheckAggregate, type DraftGroup, type DrawerSession, type Envelope, type FloorTable, type Guest, type KitchenTicket, type MenuDraft, type MenuSnapshot, type OrderLine, type PayPeriod, type PayPeriodKind, type Store, type TableShape, type Venue } from "./types.js";
+import { addDays, dateAt, isValidYmd, lastCompletedPeriod, PAY_PERIODS, periodContaining, sameName, serviceDateOf, TABLE_SHAPES, type CashEvent, type CheckAggregate, type DraftGroup, type DrawerSession, type Envelope, type FloorTable, type Guest, type KitchenTicket, type MenuDraft, type MenuSnapshot, type OrderLine, type PayPeriod, type Reservation, type PayPeriodKind, type Store, type TableShape, type Venue } from "./types.js";
 import type { GroupIndex } from "@restaurantos/domain";
 
 export const TAX_RATE = { num: 8_875, den: 100_000 };
@@ -47,7 +47,7 @@ function usd(minor: number): string {
 // an employee who holds the manager role. See Engine.manager().
 
 export type CommandOutcome =
-  | { kind: "applied"; check?: CheckView; tickets?: KitchenTicket[]; session?: DrawerSession; day?: unknown; menu?: unknown; guest?: unknown; venue?: Venue; employee?: RosterEntry; audit?: unknown; refundDueMinor?: number; note?: string }
+  | { kind: "applied"; check?: CheckView; tickets?: KitchenTicket[]; session?: DrawerSession; day?: unknown; menu?: unknown; guest?: unknown; venue?: Venue; employee?: RosterEntry; reservation?: Reservation; audit?: unknown; refundDueMinor?: number; note?: string }
   | { kind: "replay"; result: CommandOutcome }
   | { kind: "conflict"; expectedVersion: number | undefined; currentVersion: number }
   | { kind: "rejected"; reason: string; modifierErrors?: readonly ModifierError[] }
@@ -535,22 +535,37 @@ export class Engine {
   async openCheck(envelope: Envelope, input: { tableName: string; covers: number }): Promise<CommandOutcome> {
     const replay = await this.store.opResult(envelope.operationId);
     if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
+    const opened = await this.openCheckFor(envelope, input.tableName, input.covers);
+    if (!opened.ok) return this.remember(envelope, { kind: "rejected", reason: opened.reason }, "check", "new");
+    return this.remember(envelope, { kind: "applied", check: toView(opened.check) }, "check", opened.check.id);
+  }
 
-    if (!Number.isSafeInteger(input.covers) || input.covers < 1) {
-      return this.remember(envelope, { kind: "rejected", reason: "covers must be a positive integer" }, "check", "new");
+  /**
+   * Open a check, WITHOUT touching the operation journal.
+   *
+   * Split out of openCheck (E23-T2) so seating a reservation can reuse the
+   * one real open path rather than growing a second one. The journal entry
+   * belongs to the COMMAND the caller invoked: one operationId, one remembered
+   * outcome, whether the guest arrived off the street or out of the book.
+   */
+  private async openCheckFor(
+    envelope: Envelope,
+    tableName: string,
+    covers: number,
+  ): Promise<{ ok: true; check: CheckAggregate } | { ok: false; reason: string }> {
+    if (!Number.isSafeInteger(covers) || covers < 1) {
+      return { ok: false, reason: "covers must be a positive integer" };
     }
     if (await this.store.dayStatus(serviceDate()) === "closed") {
-      return this.remember(envelope, { kind: "rejected", reason: "the business day is closed; reopen it from the Close screen first" }, "check", "new");
+      return { ok: false, reason: "the business day is closed; reopen it from the Close screen first" };
     }
     const floor = await this.store.listFloor();
-    const floorTable = floor.find((t) => t.name === input.tableName);
+    const floorTable = floor.find((t) => t.name === tableName);
     if (floorTable) {
       const open = (await this.store.list()).some(
-        (c) => c.tableName === input.tableName && c.status !== "closed" && c.status !== "voided",
+        (c) => c.tableName === tableName && c.status !== "closed" && c.status !== "voided",
       );
-      if (open) {
-        return this.remember(envelope, { kind: "rejected", reason: `${input.tableName} already has an open check` }, "check", "new");
-      }
+      if (open) return { ok: false, reason: `${tableName} already has an open check` };
     }
     // who opened it (E19): the employee signed in on this device, or the
     // seeded default when nobody is, so an unsigned demo terminal still
@@ -559,8 +574,8 @@ export class Engine {
     const check: CheckAggregate = {
       id: randomUUID(),
       checkNo: await this.store.nextCheckNo(),
-      tableName: input.tableName,
-      covers: input.covers,
+      tableName,
+      covers,
       serverId: opener.id,
       serverName: opener.name,
       status: "open",
@@ -572,8 +587,7 @@ export class Engine {
       openedAt: new Date().toISOString(),
     };
     await this.store.put(check);
-    const outcome: CommandOutcome = { kind: "applied", check: toView(check) };
-    return this.remember(envelope, outcome, "check", check.id);
+    return { ok: true, check };
   }
 
   async addItem(
@@ -2006,7 +2020,8 @@ export class Engine {
    */
   async updateVenue(
     envelope: Envelope,
-    input: { managerPin?: string; name?: string; address?: string; timezone?: string; payPeriod?: string; payPeriodAnchor?: string },
+    input: { managerPin?: string; name?: string; address?: string; timezone?: string; payPeriod?: string; payPeriodAnchor?: string;
+             reservationLeadMinutes?: number; reservationHoldMinutes?: number },
   ): Promise<CommandOutcome> {
     const replay = await this.store.opResult(envelope.operationId);
     if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
@@ -2039,6 +2054,19 @@ export class Engine {
       const anchor = input.payPeriodAnchor.trim();
       if (!isValidYmd(anchor)) return refuse(`${anchor} is not a date (use YYYY-MM-DD)`);
       venue.payPeriodAnchor = anchor;
+    }
+    // the two reservation windows (E23-T2). Both are soft: one decides when a
+    // badge appears, the other when the book nudges. Neither refuses anything.
+    for (const [key, label] of [
+      ["reservationLeadMinutes", "the reservation lead window"],
+      ["reservationHoldMinutes", "the reservation hold window"],
+    ] as const) {
+      const value = input[key];
+      if (value === undefined) continue;
+      if (!Number.isSafeInteger(value) || value < 0 || value > 24 * 60) {
+        return refuse(`${label} must be a whole number of minutes between 0 and 1440`);
+      }
+      venue[key] = value;
     }
 
     await this.store.putVenue(venue);
@@ -2357,15 +2385,22 @@ export class Engine {
     return { portions: splitPortions(check, spec) };
   }
 
-  /** Floor with live status derived from checks and tickets (E6). */
+  /** Floor with live status derived from checks and tickets (E6), and from
+   *  the call-in book since E23-T2. */
   async floor() {
-    const [tables, checks, tickets] = await Promise.all([
+    const [tables, checks, tickets, book, venue] = await Promise.all([
       this.store.listFloor(),
       this.store.list(),
       this.activeTickets(),
+      this.store.listReservations(),
+      this.store.getVenue(),
     ]);
     const LATE_MS = 12 * 60_000;
     const now = Date.now();
+    // the lead window: a booking shows on the floor once it is close enough
+    // to matter, and not before, when it would be noise on a table currently
+    // serving somebody else
+    const until = now + venue.reservationLeadMinutes * 60_000;
     return tables.map((t) => {
       const check = checks.find((c) => c.tableName === t.name && c.status !== "closed" && c.status !== "voided");
       // tickets match by TABLE, not check id: after a merge, courses fired
@@ -2373,6 +2408,13 @@ export class Engine {
       const open = tickets.filter((k) => check && k.tableName === t.name && k.status === "open");
       const late = open.some((k) => !k.items.every((i) => i.done || i.voided) && now - Date.parse(k.firedAt) >= LATE_MS);
       const view = check ? toView(check) : undefined;
+      // DERIVED, never stored on the table (spec §4): the earliest booking
+      // still expected here inside the window. A stored status can be wrong;
+      // this one cannot drift from the book it is read out of.
+      const soon = book
+        .filter((r) => r.status === "booked" && r.tableName && sameName(r.tableName, t.name)
+          && Date.parse(r.reservedFor) <= until)
+        .sort((a, b) => a.reservedFor.localeCompare(b.reservedFor))[0];
       return {
         ...t,
         check: view
@@ -2383,6 +2425,9 @@ export class Engine {
             }
           : null,
         kitchenLate: late,
+        reserved: soon
+          ? { id: soon.id, name: soon.name, partySize: soon.partySize, reservedFor: soon.reservedFor }
+          : null,
       };
     });
   }
@@ -2784,6 +2829,237 @@ export class Engine {
    * Attaching the same guest twice is a no-op rather than an error, because a
    * double tap on a handheld is not a mistake worth a red toast.
    */
+  /* ------------------ the call-in book (E23-T2, D27/D31) ------------------
+     A reservation is a PROMISE, not a lock. Everything below obeys that in
+     the same way: the book records what the house said it would do, the
+     floor shows the promise as the hour approaches, and NOTHING here ever
+     refuses a seating. The host is the only one who can see the room, and a
+     POS that argues with them during a rush is a POS they work around. */
+
+  /** The guest whose phone is EXACTLY this one, when there is exactly one.
+   *
+   *  Exact, never fuzzy (D20). Two guests sharing a number is a household or
+   *  a merge waiting to happen, and guessing between them is how a POS tells
+   *  a server that table 5 is somebody else's ex-wife. No match and an
+   *  ambiguous match are the same answer here: nothing is proposed. */
+  private async guestByPhone(phone: string | undefined): Promise<Guest | undefined> {
+    const wanted = (phone ?? "").trim();
+    if (!wanted) return undefined;
+    const hits = (await this.store.listGuests()).filter((g) => (g.phone ?? "").trim() === wanted);
+    return hits.length === 1 ? hits[0] : undefined;
+  }
+
+  /** Book a table. NOT manager-gated: whoever answers the phone at 6pm takes
+   *  the booking, and making them find a manager first is how a call ends up
+   *  on a sticky note instead. The actor is recorded either way. */
+  async bookReservation(
+    envelope: Envelope,
+    input: { name?: string; phone?: string; partySize?: number; reservedFor?: string; tableName?: string; note?: string },
+  ): Promise<CommandOutcome> {
+    const replay = await this.store.opResult(envelope.operationId);
+    if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
+    const refuse = (reason: string) => this.remember(envelope, { kind: "rejected", reason }, "reservation", "new");
+
+    const name = (input.name ?? "").trim();
+    if (!name) return refuse("a booking needs a name");
+
+    const partySize = input.partySize;
+    if (!Number.isSafeInteger(partySize) || (partySize as number) < 1) {
+      return refuse("party size must be a whole number of people, at least 1");
+    }
+
+    const when = Date.parse(input.reservedFor ?? "");
+    if (!Number.isFinite(when)) return refuse(`'${input.reservedFor ?? ""}' is not a date and time`);
+    // a reservedFor in the PAST is deliberately allowed and deliberately
+    // silent: a host catching up the book after a rush is back-entering
+    // tonight's bookings, and refusing them would send the work to paper
+
+    let tableName: string | undefined;
+    const wanted = (input.tableName ?? "").trim();
+    if (wanted) {
+      // against every table the room has EVER had, retired included, so a
+      // booking outlives the floor edit that retired its table
+      const known = (await this.store.listAllTableNames()).find((t) => sameName(t, wanted));
+      if (!known) return refuse(`${wanted} is not a table this room has`);
+      tableName = known;
+    }
+
+    const reservation: Reservation = {
+      id: randomUUID(),
+      name,
+      ...(input.phone?.trim() ? { phone: input.phone.trim() } : {}),
+      partySize: partySize as number,
+      reservedFor: new Date(when).toISOString(),
+      ...(tableName ? { tableName } : {}),
+      status: "booked",
+      ...(input.note?.trim() ? { note: input.note.trim() } : {}),
+      ...(this.actorId(envelope) ? { createdBy: this.actorId(envelope) } : {}),
+      createdAt: new Date().toISOString(),
+    };
+    await this.store.putReservation(reservation);
+    return this.remember(envelope, { kind: "applied", reservation }, "reservation", reservation.id);
+  }
+
+  /** Cancel, or record that nobody came. Both are STATES, never deletions:
+   *  the reason to record a no-show is that it happened, and a booking that
+   *  quietly vanishes at 7:31 is a fact the house has lost. */
+  private async settleReservation(
+    envelope: Envelope,
+    id: string,
+    status: "cancelled" | "no_show",
+    verb: string,
+  ): Promise<CommandOutcome> {
+    const replay = await this.store.opResult(envelope.operationId);
+    if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
+    const refuse = (reason: string) => this.remember(envelope, { kind: "rejected", reason }, "reservation", id);
+
+    const reservation = await this.store.getReservation(id);
+    if (!reservation) return refuse(`no reservation ${id}`);
+    if (reservation.status !== "booked") {
+      return refuse(`${reservation.name}'s booking is already ${reservation.status.replace("_", " ")}; only a booked one can be ${verb}`);
+    }
+    const settled: Reservation = { ...reservation, status };
+    await this.store.putReservation(settled);
+    return this.remember(envelope, { kind: "applied", reservation: settled }, "reservation", id);
+  }
+
+  async cancelReservation(envelope: Envelope, id: string): Promise<CommandOutcome> {
+    return this.settleReservation(envelope, id, "cancelled", "cancelled");
+  }
+
+  async markNoShow(envelope: Envelope, id: string): Promise<CommandOutcome> {
+    return this.settleReservation(envelope, id, "no_show", "marked a no-show");
+  }
+
+  /**
+   * Seat the party: one command, so a half-seated reservation cannot exist.
+   *
+   * It opens the check on the existing open path with covers prefilled from
+   * the party size, moves the reservation to `seated`, and attaches the guest
+   * when the caller confirmed a phone match. That last part is why the book
+   * lives in the POS at all: the party size was typed once, and the phone
+   * number the D20 ladder was waiting on arrives from our own book instead of
+   * from an integration we do not have.
+   *
+   * Warn and allow, not refuse: seating somebody at a table other than the
+   * one promised needs `confirmOverride`, which is an acknowledgement rather
+   * than a permission. What still stands is the ledger's own rule, that one
+   * table cannot carry two open checks: promise-not-lock means the HOST
+   * reroutes the party, not that the books double up.
+   */
+  async seatReservation(
+    envelope: Envelope,
+    id: string,
+    input: { tableName?: string; guestId?: string; confirmOverride?: boolean } = {},
+  ): Promise<CommandOutcome> {
+    const replay = await this.store.opResult(envelope.operationId);
+    if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
+    const refuse = (reason: string) => this.remember(envelope, { kind: "rejected", reason }, "reservation", id);
+
+    const reservation = await this.store.getReservation(id);
+    if (!reservation) return refuse(`no reservation ${id}`);
+    if (reservation.status !== "booked") {
+      return refuse(`${reservation.name}'s booking is ${reservation.status.replace("_", " ")}; only a booked one can be seated`);
+    }
+
+    const target = (input.tableName ?? reservation.tableName ?? "").trim();
+    if (!target) return refuse(`${reservation.name}'s booking names no table; choose one to seat them at`);
+    if (reservation.tableName && !sameName(target, reservation.tableName) && !input.confirmOverride) {
+      return refuse(`${reservation.name} was promised ${reservation.tableName}; confirm the override to seat them at ${target}`);
+    }
+
+    let guest: Guest | undefined;
+    if (input.guestId) {
+      guest = await this.store.getGuest(input.guestId);
+      if (!guest) return refuse("no such guest");
+    }
+
+    const opened = await this.openCheckFor(envelope, target, reservation.partySize);
+    if (!opened.ok) return refuse(opened.reason);
+
+    // the guest attaches through the same link attachGuest writes, and the
+    // reservation remembers who it turned out to be
+    if (guest) await this.linkGuest(opened.check.id, guest.id, this.actorId(envelope));
+    const seated: Reservation = {
+      ...reservation, status: "seated",
+      ...(guest ? { guestId: guest.id } : {}),
+      ...(sameName(target, reservation.tableName ?? target) ? {} : { tableName: target }),
+    };
+    await this.store.putReservation(seated);
+
+    return this.remember(envelope, {
+      kind: "applied",
+      check: toView(opened.check, await this.guestChips(opened.check.id)),
+      reservation: seated,
+    }, "check", opened.check.id);
+  }
+
+  /**
+   * The book for one service date, time ordered.
+   *
+   * Everything the book SHOWS is computed here and stored nowhere (D19): the
+   * covers running total, whether a booking is past its hold window, and the
+   * guest a phone number turns out to belong to. A stored flag is a flag that
+   * can be wrong; a derived one cannot drift from the row it came from.
+   */
+  async reservations(date?: string) {
+    const [all, venue] = await Promise.all([this.store.listReservations(), this.store.getVenue()]);
+    const on = date && isValidYmd(date) ? date : serviceDate();
+    // the same server-local day bucketing serviceDateOf gives every report,
+    // so the book and the day report never disagree about which night it is
+    const forDay = all.filter((r) => serviceDateOf(r.reservedFor) === on)
+      .sort((a, b) => a.reservedFor.localeCompare(b.reservedFor) || a.createdAt.localeCompare(b.createdAt));
+
+    const now = Date.now();
+    const holdMs = venue.reservationHoldMinutes * 60_000;
+    const rows: (Reservation & {
+      period: ServicePeriod;
+      pastDue: boolean;
+      guestMatch?: { id: string; name: string };
+    })[] = [];
+    for (const r of forDay) {
+      const match = r.status === "booked" ? await this.guestByPhone(r.phone) : undefined;
+      rows.push({
+        ...r,
+        period: servicePeriodOf(r.reservedFor),
+        // a soft prompt, never a release: the table is theirs until the host
+        // says otherwise (deck E-2 default, 15 minutes)
+        pastDue: r.status === "booked" && now > Date.parse(r.reservedFor) + holdMs,
+        ...(match ? { guestMatch: { id: match.id, name: match.displayName } } : {}),
+      });
+    }
+
+    // covers per service period, so the host can see the second seating is
+    // already full before a single walk-in arrives
+    const periods = SERVICE_PERIODS.map((period) => {
+      const live = rows.filter((r) => r.period === period && (r.status === "booked" || r.status === "seated"));
+      return { period, reservations: live.length, covers: live.reduce((a, r) => a + r.partySize, 0) };
+    });
+
+    return {
+      date: on,
+      reservations: rows,
+      periods,
+      covers: periods.reduce((a, p) => a + p.covers, 0),
+      holdMinutes: venue.reservationHoldMinutes,
+      leadMinutes: venue.reservationLeadMinutes,
+    };
+  }
+
+  /** Write the check-to-guest link, idempotently: attaching twice is the same
+   *  row. Shared by attachGuest and by seating a reservation whose phone
+   *  matched (E23-T2), so both take the one attach path. */
+  private async linkGuest(checkId: string, guestId: string, actor?: string): Promise<void> {
+    const links = await this.store.listCheckGuests(checkId);
+    if (links.some((l) => l.guestId === guestId)) return;
+    await this.store.putCheckGuest({
+      checkId,
+      guestId,
+      ...(actor ? { attachedBy: actor } : {}),
+      attachedAt: new Date().toISOString(),
+    });
+  }
+
   async attachGuest(envelope: Envelope, checkId: string, input: { guestId: string }): Promise<CommandOutcome> {
     const replay = await this.store.opResult(envelope.operationId);
     if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
@@ -2793,16 +3069,7 @@ export class Engine {
     if (!guest) {
       return this.remember(envelope, { kind: "rejected", reason: "no such guest" }, "check", checkId);
     }
-    const links = await this.store.listCheckGuests(checkId);
-    if (!links.some((l) => l.guestId === guest.id)) {
-      const actor = this.actorId(envelope);
-      await this.store.putCheckGuest({
-        checkId,
-        guestId: guest.id,
-        ...(actor ? { attachedBy: actor } : {}),
-        attachedAt: new Date().toISOString(),
-      });
-    }
+    await this.linkGuest(checkId, guest.id, this.actorId(envelope));
     const view = toView(check, await this.guestChips(checkId));
     return this.remember(envelope, { kind: "applied", check: view }, "check", checkId);
   }
@@ -3036,6 +3303,21 @@ export class Engine {
 
 function serviceDate(): string {
   return serviceDateOf(new Date().toISOString());
+}
+
+/** The two seatings a full-service house runs (E23-T2). The split is a
+ *  constant rather than a venue setting on purpose: nothing in the product
+ *  needed the concept before the book did, and inventing a configurable one
+ *  ahead of an operator asking is how settings screens fill up with knobs
+ *  nobody turns. Deck E is where a real answer comes from. */
+export const SERVICE_PERIODS = ["lunch", "dinner"] as const;
+export type ServicePeriod = (typeof SERVICE_PERIODS)[number];
+const DINNER_FROM_HOUR = 17;
+
+/** Server-local, the same clock serviceDateOf reads, so a booking and the
+ *  service date it belongs to never land on different calendars. */
+export function servicePeriodOf(iso: string): ServicePeriod {
+  return new Date(iso).getHours() >= DINNER_FROM_HOUR ? "dinner" : "lunch";
 }
 
 /** One CSV cell. Quoted only when it has to be, because a payroll provider's

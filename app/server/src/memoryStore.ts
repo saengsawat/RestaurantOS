@@ -15,6 +15,7 @@ import {
   type Guest,
   type MenuSnapshot,
   type OpMeta,
+  type Reservation,
   type Shift,
   type Store,
   type TableShape,
@@ -207,4 +208,16 @@ export class MemoryStore implements Store {
   async removeGuestLinks(guestId: string) {
     for (const [key, link] of this.guestLinks) if (link.guestId === guestId) this.guestLinks.delete(key);
   }
+
+  /* the call-in book (E23-T2). Ordinary rows: the badge on the floor and the
+     past-due flag in the book are both computed at read, never stored here,
+     because a stored status is a status that can drift from the book. */
+  private reservations = new Map<string, Reservation>();
+  async listReservations() { return [...this.reservations.values()]; }
+  async getReservation(id: string) { return this.reservations.get(id); }
+  async putReservation(reservation: Reservation) { this.reservations.set(reservation.id, { ...reservation }); }
+
+  /** retired tables included, which is the whole point of the method: the
+   *  floor array keeps a retired row so history stays whole (E6-T2) */
+  async listAllTableNames() { return this.floor.map((t) => t.name); }
 }
