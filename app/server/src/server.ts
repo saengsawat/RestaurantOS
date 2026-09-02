@@ -518,6 +518,19 @@ export function buildServer(store: Store = new MemoryStore(), storeName = "memor
     }));
   });
 
+  /** The menu import (E22-T2). The page reads the file in the browser and
+   *  posts its TEXT, so the server never learns a filename or a path: what
+   *  crosses the wire is the menu, not the manager's disk. */
+  app.post("/v1/menu/import", async (req, reply) => {
+    const body = (req.body ?? {}) as EnvelopeBody & Record<string, unknown>;
+    const envelope = readEnvelope(body);
+    if ("error" in envelope) return reply.code(400).send({ status: "BAD_REQUEST", reason: envelope.error });
+    return respond(reply, await engine.importMenuCsv(envelope, {
+      ...managerPin(body),
+      ...(typeof body.csv === "string" ? { csv: body.csv } : {}),
+    }));
+  });
+
   app.post("/v1/menu/draft/remove", async (req, reply) => {
     const body = (req.body ?? {}) as EnvelopeBody & { itemId?: unknown };
     const envelope = readEnvelope(body);

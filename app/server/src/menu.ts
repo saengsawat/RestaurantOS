@@ -10,6 +10,14 @@ export interface MenuEntry extends MenuItemSpec {
   priceMinor: number;
   course: "BEVERAGE" | "ANTIPASTI" | "PRIMI" | "SECONDI" | "DOLCI";
   station: string;
+  /** Where this row came from, e.g. "csv-import 2026-09-02T...Z" (E22-T2).
+   *
+   *  DRAFT ONLY. Provenance is review material: it lets the Menu screen badge
+   *  the rows a spreadsheet just wrote so a manager can tell them from the
+   *  ones they typed (migration-spec §4). It is stripped at publish, because a
+   *  published snapshot is the priced menu service runs on and its shape is
+   *  frozen; how a dish got onto it is not something a check needs to carry. */
+  source?: string;
 }
 
 export const SNAPSHOT_ID = "snap-0001";

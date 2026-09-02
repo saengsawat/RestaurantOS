@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import { buildServer } from "../src/server.js";
 import { MemoryStore } from "../src/memoryStore.js";
 import { lastCompletedPeriod, periodContaining, VENUE, type Shift, type Venue } from "../src/types.js";
+import { parseCsv } from "../src/csv.js";
+import { parseMajorPrice } from "../src/engine.js";
+import { readFileSync } from "node:fs";
 
 const ENV = (n: number, extra: Record<string, unknown> = {}) => ({
   operationId: `op-${n}-${Math.random().toString(36).slice(2)}`,
@@ -3714,5 +3717,312 @@ describe("the payroll hours export (E24-T3)", () => {
     for (const forbidden of ['id="vWage"', 'id="eWage"', "wageMinor", "hourlyRate"]) {
       expect(body, `${forbidden} has no business on this page`).not.toContain(forbidden);
     }
+  });
+});
+
+/* ---------------- the CSV reader (E22-T2) ----------------
+   Its own unit, because the input is a real spreadsheet export and the
+   failure modes are the ones a hand-rolled splitter gets wrong. */
+describe("reading a spreadsheet's CSV (E22-T2)", () => {
+  const fields = (text: string) => {
+    const r = parseCsv(text);
+    if (!r.ok) throw new Error(`expected a parse, got line ${r.line}: ${r.reason}`);
+    return r.records.map((rec) => rec.fields);
+  };
+
+  it("reads quoted fields, embedded commas, and doubled quotes", () => {
+    expect(fields('name,price\n"Garlic, Pepper & Basil",20')).toEqual([
+      ["name", "price"], ["Garlic, Pepper & Basil", "20"],
+    ]);
+    // "" is one literal quote, which is how a spreadsheet writes 6" Bowl
+    expect(fields('a\n"6"" Bowl"')).toEqual([["a"], ['6" Bowl']]);
+    // a quote that does not open a field is just a character
+    expect(fields("a\n6\" Bowl")).toEqual([["a"], ['6" Bowl']]);
+    // a newline inside quotes belongs to the field, not to the file
+    expect(fields('a,b\n"one\ntwo",3')).toEqual([["a", "b"], ["one\ntwo", "3"]]);
+  });
+
+  it("handles CRLF, a trailing newline, blank lines, and Excel's BOM", () => {
+    expect(fields("a,b\r\n1,2\r\n")).toEqual([["a", "b"], ["1", "2"]]);
+    // a trailing newline is the end of the last row, not an empty extra one
+    expect(fields("a,b\n1,2\n")).toHaveLength(2);
+    expect(fields("a,b\n1,2")).toHaveLength(2);
+    // the BOM belongs to the encoding: unstripped it hides the first column
+    const withBom = parseCsv("﻿name,course\nPad Thai,PRIMI\n");
+    expect(withBom.ok && withBom.records[0]!.fields[0]).toBe("name");
+  });
+
+  it("counts lines the way the spreadsheet does, so a report can be acted on", () => {
+    const r = parseCsv("a,b\n1,2\n\n3,4\n");
+    expect(r.ok && r.records.map((rec) => rec.line)).toEqual([1, 2, 4]);
+    // a record with a newline inside a quoted field is reported where it STARTS
+    const spanning = parseCsv('a\n"one\ntwo"\nlast');
+    expect(spanning.ok && spanning.records.map((rec) => rec.line)).toEqual([1, 2, 4]);
+  });
+
+  it("refuses a file it cannot read, and names the line", () => {
+    const unterminated = parseCsv('name,price\n"Pad Thai,18\nPad See Ew,18\n');
+    expect(unterminated.ok).toBe(false);
+    expect(!unterminated.ok && unterminated.line).toBe(2);
+    expect(!unterminated.ok && unterminated.reason).toBe("a quoted field is never closed");
+
+    const ragged = parseCsv('a\n"one"two\n');
+    expect(ragged.ok).toBe(false);
+    expect(!ragged.ok && ragged.reason).toBe("unexpected text after a closing quote");
+  });
+
+  it("converts dollars to cents once, half up, without touching a float", () => {
+    expect(parseMajorPrice("14")).toBe(1400);
+    expect(parseMajorPrice("13.95")).toBe(1395);
+    expect(parseMajorPrice("13.9")).toBe(1390);
+    expect(parseMajorPrice("0")).toBe(0);
+    // the midpoint 13.955 is 1395.4999... as a float: Math.round would lose a
+    // cent here, which is exactly the bug this parser exists to not have
+    expect(parseMajorPrice("13.955")).toBe(1396);
+    expect(parseMajorPrice("13.954")).toBe(1395);
+    // a sheet out of an accounting tool
+    expect(parseMajorPrice("$1,234.50")).toBe(123450);
+    for (const bad of ["", "free", "-5", "12.3.4", "1e3", "18 "]) {
+      expect(parseMajorPrice(bad === "18 " ? bad : bad), bad).toBe(bad === "18 " ? 1800 : undefined);
+    }
+  });
+});
+
+/* ---------------- the menu import (E22-T2, D30) ----------------
+   The spec's discipline in three words: draft, idempotent, provenance. */
+describe("a spreadsheet becomes a draft (E22-T2)", () => {
+  const MGR = "1122";
+  const THAI = readFileSync(new URL("../../../docs/examples/nine-thai-menu.csv", import.meta.url), "utf8");
+
+  const importCsv = (app: ReturnType<typeof buildServer>, n: number, csv: string, pin: string | null = MGR) =>
+    app.inject({ method: "POST", url: "/v1/menu/import",
+      payload: { ...ENV(n), ...(pin === null ? {} : { managerPin: pin }), csv } });
+
+  const report = (res: { json: () => { menu: { import: Record<string, unknown> } } }) => res.json().menu.import;
+  const draftOf = async (app: ReturnType<typeof buildServer>) =>
+    (await app.inject({ method: "GET", url: "/v1/menu/draft" })).json().draft;
+
+  const SMALL = [
+    "name,course,price,station,modifier_groups",
+    "Pad Thai,PRIMI,18,SAUTE,Spice Level;Protein",
+    "Thai Iced Tea,BEVERAGE,6,,Ice",
+    "Mango Sticky Rice,DOLCI,12,,",
+  ].join("\n") + "\n";
+
+  it("lands rows on the draft, creating unknown groups optional and empty", async () => {
+    const app = buildServer();
+    const res = await importCsv(app, 1, SMALL);
+    expect(res.statusCode).toBe(200);
+    expect(report(res)).toMatchObject({ itemsAdded: 3, itemsUpdated: 0, itemsSkipped: 0 });
+    expect(report(res).groupsCreated).toEqual(["Spice Level", "Protein", "Ice"]);
+
+    const draft = await draftOf(app);
+    const pad = draft.items.find((m: { id: string }) => m.id === "pad-thai");
+    expect(pad).toMatchObject({ name: "Pad Thai", course: "PRIMI", priceMinor: 1800, station: "SAUTE" });
+    expect(pad.modifierGroupIds).toEqual(["spice-level", "protein"]);
+
+    // a blank station follows the course rather than being guessed
+    expect(draft.items.find((m: { id: string }) => m.id === "thai-iced-tea").station).toBe("BAR");
+    expect(draft.items.find((m: { id: string }) => m.id === "mango-sticky-rice").station).toBe("FREDDO");
+
+    // OPTIONAL and EMPTY, never required on the manager's behalf: a required
+    // group with no options is a dish nobody can order
+    const spice = draft.groups.find((g: { id: string }) => g.id === "spice-level");
+    expect(spice).toMatchObject({ name: "Spice Level", minSelect: 0, options: [] });
+
+    // the import is a DRAFT and nothing else: service has not moved
+    const live = (await app.inject({ method: "GET", url: "/v1/menu" })).json();
+    expect(live.version).toBe(1);
+    expect(live.items.some((i: { id: string }) => i.id === "pad-thai")).toBe(false);
+    expect(res.json().menu.note).toContain("publish");
+  });
+
+  it("marks what it wrote, and keeps that mark off the published snapshot", async () => {
+    const app = buildServer();
+    await importCsv(app, 1, SMALL);
+
+    const draft = await draftOf(app);
+    const pad = draft.items.find((m: { id: string }) => m.id === "pad-thai");
+    // provenance the review screen can badge: an imported row must never look
+    // identical to one a manager typed
+    expect(pad.source).toMatch(/^csv-import \d{4}-\d{2}-\d{2}T/);
+    // a hand-typed row alongside it carries no mark
+    expect(draft.items.find((m: { id: string }) => m.id === "ragu").source).toBeUndefined();
+
+    const pub = await app.inject({ method: "POST", url: "/v1/menu/publish", payload: { ...ENV(2), managerPin: MGR } });
+    expect(pub.statusCode).toBe(200);
+    const live = (await app.inject({ method: "GET", url: "/v1/menu" })).json();
+    expect(live.items.find((i: { id: string }) => i.id === "pad-thai")).toBeDefined();
+    // the snapshot is exactly the shape it has always been
+    expect(JSON.stringify(live.items)).not.toContain("csv-import");
+    for (const item of live.items) expect(item.source).toBeUndefined();
+  });
+
+  it("is safe to run twice: the second pass updates, it never duplicates", async () => {
+    const app = buildServer();
+    await importCsv(app, 1, SMALL);
+    const before = (await draftOf(app)).items.length;
+
+    // "run it again, something looked wrong" is the realistic operator move
+    const again = await importCsv(app, 2, SMALL);
+    expect(report(again)).toMatchObject({ itemsAdded: 0, itemsUpdated: 3, itemsSkipped: 0 });
+    expect(report(again).groupsCreated).toEqual([]); // groups match by name too
+    expect((await draftOf(app)).items).toHaveLength(before);
+
+    // a corrected sheet updates in place, matched on name within course
+    // case-insensitively, so shouting the name is still the same dish
+    const corrected = SMALL.replace("Pad Thai,PRIMI,18", "PAD THAI,primi,19.50");
+    const third = await importCsv(app, 3, corrected);
+    expect(report(third)).toMatchObject({ itemsAdded: 0, itemsUpdated: 3 });
+    const pad = (await draftOf(app)).items.filter((m: { name: string }) => m.name.toLowerCase() === "pad thai");
+    expect(pad).toHaveLength(1);
+    expect(pad[0]).toMatchObject({ id: "pad-thai", name: "PAD THAI", priceMinor: 1950 });
+  });
+
+  it("skips a bad row by line and lands every good one around it", async () => {
+    const app = buildServer();
+    const messy = [
+      "name,course,price,station,modifier_groups",
+      "Pad Thai,PRIMI,18,SAUTE,",          // line 2, fine
+      "Larb Gai,SIDES,16,SAUTE,",          // line 3, unknown course
+      ",PRIMI,12,SAUTE,",                  // line 4, blank name
+      "Som Tum,ANTIPASTI,free,SAUTE,",     // line 5, not a price
+      "Khao Soi,PRIMI,-4,SAUTE,",          // line 6, negative
+      "Sai Ua,SECONDI,17,FRYER,",          // line 7, unknown station
+      "Tom Kha,ANTIPASTI,12,SAUTE,",       // line 8, fine
+    ].join("\n") + "\n";
+
+    const res = await importCsv(app, 1, messy);
+    expect(res.statusCode).toBe(200);
+    const r = report(res);
+    expect(r).toMatchObject({ itemsAdded: 2, itemsSkipped: 5 });
+    expect(r.skipped).toEqual([
+      "row 3: unknown course 'SIDES'",
+      "row 4: the name is blank",
+      "row 5: 'free' is not a price",
+      "row 6: '-4' is not a price",
+      "row 7: unknown station 'FRYER'",
+    ]);
+
+    const draft = await draftOf(app);
+    expect(draft.items.some((m: { id: string }) => m.id === "pad-thai")).toBe(true);
+    expect(draft.items.some((m: { id: string }) => m.id === "tom-kha")).toBe(true);
+    expect(draft.items.some((m: { name: string }) => m.name === "Larb Gai")).toBe(false);
+  });
+
+  it("refuses a file it cannot read, or a header it cannot use, whole", async () => {
+    const app = buildServer();
+
+    const notCsv = await importCsv(app, 1, 'name,course,price,station,modifier_groups\n"Pad Thai,PRIMI,18,SAUTE,\n');
+    expect(notCsv.statusCode).toBe(422);
+    expect(notCsv.json().reason).toBe("line 2: a quoted field is never closed");
+
+    const wrongHeader = await importCsv(app, 2, "dish,category,cost\nPad Thai,PRIMI,18\n");
+    expect(wrongHeader.json().reason)
+      .toBe("the header is missing name, course, price, station, modifier_groups; expected name, course, price, station, modifier_groups");
+
+    expect((await importCsv(app, 3, "   ")).json().reason).toBe("the file is empty");
+    expect((await importCsv(app, 4, "name,course,price,station,modifier_groups\n")).statusCode).toBe(200);
+
+    // nothing that was refused touched the draft
+    expect(await draftOf(app)).toBeNull();
+
+    // column ORDER is the sheet's business, and extra columns are ignored:
+    // a real export carries SKU and cost columns we have no use for
+    const shuffled = "sku,price,name,modifier_groups,course,cost,station\n" +
+      "PT-01,18,Pad Thai,Spice Level,PRIMI,6.20,SAUTE\n";
+    const ok = await importCsv(app, 5, shuffled);
+    expect(report(ok)).toMatchObject({ itemsAdded: 1 });
+    expect((await draftOf(app)).items.find((m: { id: string }) => m.id === "pad-thai").priceMinor).toBe(1800);
+  });
+
+  it("asks for a manager, and replays a dropped import instead of doubling it", async () => {
+    const app = buildServer();
+    const bare = await importCsv(app, 1, SMALL, null);
+    expect(bare.statusCode).toBe(422);
+    expect(bare.json().reason).toBe("importing a menu requires a manager's PIN");
+
+    const asServer = await importCsv(app, 2, SMALL, "2468");
+    expect(asServer.json().reason).toBe("PIN not recognized as a manager");
+    expect(await draftOf(app)).toBeNull();
+
+    const op = { ...ENV(3), managerPin: MGR, csv: SMALL };
+    const first = await app.inject({ method: "POST", url: "/v1/menu/import", payload: op });
+    const retry = await app.inject({ method: "POST", url: "/v1/menu/import", payload: op });
+    expect(first.statusCode).toBe(200);
+    expect(retry.json()).toEqual(first.json());
+    expect((await draftOf(app)).items.filter((m: { id: string }) => m.id === "pad-thai")).toHaveLength(1);
+  });
+
+  it("gives two dishes of one name in different courses ids of their own", async () => {
+    const app = buildServer();
+    const both = [
+      "name,course,price,station,modifier_groups",
+      "Tom Yum,ANTIPASTI,12,SAUTE,",
+      "Tom Yum,SECONDI,20,SAUTE,",
+    ].join("\n") + "\n";
+    expect(report(await importCsv(app, 1, both))).toMatchObject({ itemsAdded: 2 });
+    const mine = (await draftOf(app)).items.filter((m: { name: string }) => m.name === "Tom Yum");
+    expect(mine.map((m: { id: string }) => m.id)).toEqual(["tom-yum", "tom-yum-2"]);
+    // and the natural key still holds on a re-run: two updates, no third row
+    expect(report(await importCsv(app, 2, both))).toMatchObject({ itemsAdded: 0, itemsUpdated: 2 });
+  });
+
+  /* The founder's demo, end to end: a whole restaurant's menu out of a
+     spreadsheet, reviewed, published, and sold from. */
+  it("takes Nine Thai Kitchen from a spreadsheet to an order on the pass", async () => {
+    const app = buildServer();
+    const res = await importCsv(app, 1, THAI);
+    expect(res.statusCode).toBe(200);
+    const r = report(res);
+    expect(r).toMatchObject({ itemsAdded: 27, itemsUpdated: 0, itemsSkipped: 0 });
+    expect(r.groupsCreated).toEqual(["Spice Level", "Light Options", "Protein", "Entree Options", "Ice"]);
+
+    const draft = await draftOf(app);
+    // the demo venue's own nine items are still there: an import ADDS to the
+    // draft, and clearing the old menu is the manager's call, not ours
+    expect(draft.items).toHaveLength(9 + 27);
+    for (const course of ["BEVERAGE", "ANTIPASTI", "PRIMI", "SECONDI", "DOLCI"]) {
+      expect(draft.items.filter((m: { course: string; source?: string }) => m.course === course && m.source).length,
+        course).toBeGreaterThan(0);
+    }
+
+    // the manager fills the one group the kitchen cannot cook without, and
+    // makes it required. That step is deliberately theirs.
+    const spice = await app.inject({ method: "POST", url: "/v1/menu/draft/group",
+      payload: { ...ENV(2), managerPin: MGR, groupId: "spice-level", name: "Spice Level",
+        minSelect: 1, maxSelect: 1,
+        options: [{ name: "No Spice", priceMinor: 0 }, { name: "Mild", priceMinor: 0 },
+          { name: "Medium", priceMinor: 0 }, { name: "Hot", priceMinor: 0 }, { name: "Thai Hot", priceMinor: 0 }] } });
+    expect(spice.statusCode).toBe(200);
+
+    const pub = await app.inject({ method: "POST", url: "/v1/menu/publish", payload: { ...ENV(3), managerPin: MGR } });
+    expect(pub.statusCode).toBe(200);
+    const live = (await app.inject({ method: "GET", url: "/v1/menu" })).json();
+    expect(live.version).toBe(2);
+    expect(live.groups["spice-level"].options.map((o: { id: string }) => o.id))
+      .toEqual(["no-spice", "mild", "medium", "hot", "thai-hot"]);
+
+    // and the pass refuses a Pad Thai nobody specified, because a manager
+    // said so in a spreadsheet twenty seconds ago
+    const check = await openCheck(app);
+    const bare = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items`,
+      payload: { ...ENV(4), itemId: "pad-thai", quantity: 1, seatNo: 1 } });
+    expect(bare.statusCode).toBe(422);
+    expect(bare.json().modifierErrors).toEqual([{ code: "too_few", groupId: "spice-level", min: 1, got: 0 }]);
+
+    const ordered = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items`,
+      payload: { ...ENV(5), itemId: "pad-thai", quantity: 1, seatNo: 1,
+        modifiers: [{ groupId: "spice-level", modifierId: "thai-hot" }] } });
+    expect(ordered.statusCode).toBe(200);
+    const line = ordered.json().check.lines.at(-1);
+    expect(line).toMatchObject({ capturedName: "Pad Thai", unitPriceMinor: 1800 });
+
+    // it cooks: the ticket reaches the rail naming the choice
+    expect((await app.inject({ method: "POST", url: `/v1/checks/${check.id}/send`, payload: ENV(6) })).statusCode).toBe(200);
+    const fired = (await app.inject({ method: "GET", url: "/v1/kds" })).json().tickets
+      .flatMap((t: { items: { name: string; mods: string }[] }) => t.items)
+      .find((i: { name: string }) => i.name === "Pad Thai");
+    expect(fired.mods).toBe("Thai Hot");
   });
 });

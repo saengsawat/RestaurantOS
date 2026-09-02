@@ -1,0 +1,28 @@
+name,course,price,station,modifier_groups
+Spring Rolls,ANTIPASTI,9,FREDDO,Spice Level;Light Options
+Chicken Satay,ANTIPASTI,12,GRILL,Spice Level;Light Options
+Crab Rangoon,ANTIPASTI,11,SAUTE,Light Options
+Thai Wings,ANTIPASTI,13,GRILL,Spice Level;Light Options
+Tom Yum,ANTIPASTI,12,SAUTE,Protein;Spice Level
+Tom Kha,ANTIPASTI,12,SAUTE,Protein;Spice Level
+Wonton Soup,ANTIPASTI,10,SAUTE,Light Options
+Pad Thai,PRIMI,18,SAUTE,Protein;Spice Level;Entree Options
+Pad See Ew,PRIMI,18,SAUTE,Protein;Spice Level;Entree Options
+Drunken Noodles,PRIMI,19,SAUTE,Protein;Spice Level;Entree Options
+Thai Fried Rice,PRIMI,18,SAUTE,Protein;Spice Level;Entree Options
+Basil Fried Rice,PRIMI,19,SAUTE,Protein;Spice Level;Entree Options
+Pineapple Fried Rice,PRIMI,20,SAUTE,Protein;Spice Level;Entree Options
+Green Curry,SECONDI,20,SAUTE,Protein;Spice Level;Entree Options
+Red Curry,SECONDI,20,SAUTE,Protein;Spice Level;Entree Options
+Panang Curry,SECONDI,21,SAUTE,Protein;Spice Level;Entree Options
+Massaman Curry,SECONDI,22,SAUTE,Protein;Spice Level;Entree Options
+Pad Kra Pao,SECONDI,20,SAUTE,Protein;Spice Level;Entree Options
+Cashew Chicken,SECONDI,21,SAUTE,Spice Level;Entree Options
+Garlic & Pepper,SECONDI,20,SAUTE,Protein;Spice Level;Entree Options
+Thai Iced Tea,BEVERAGE,6,BAR,Ice
+Thai Iced Coffee,BEVERAGE,6,BAR,Ice
+Coke,BEVERAGE,4,BAR,
+Sparkling Water,BEVERAGE,5,BAR,
+Mango Sticky Rice,DOLCI,12,FREDDO,
+Fried Banana,DOLCI,9,FREDDO,
+Coconut Ice Cream,DOLCI,8,FREDDO,

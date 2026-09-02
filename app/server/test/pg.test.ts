@@ -8,7 +8,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { buildServer } from "../src/server.js";
@@ -757,5 +757,79 @@ describe.skipIf(!PGBIN)("PostgreSQL persistence (E4)", () => {
     // more in the file, in the footer that says whose job overtime is.
     expect(csv.body.split("\n")[0]).not.toContain("overtime");
     expect(csv.body).toContain("wage, overtime, and tax rules are the payroll provider's");
+  }, 60_000);
+
+  /* ------------- the menu import (E22-T2) -------------
+   * The parser and the idempotency rules are proven against the memory store
+   * in api.test.ts. What only Postgres can prove: an imported draft, source
+   * marks and all, survives in the JSONB document a manager walks away from
+   * and comes back to, and publishing it still leaves the marks behind. */
+
+  it("keeps an imported draft across a restart, and publishes it without its source marks", async () => {
+    const app = buildServer(store, "postgres");
+    const MGR = "1122";
+    const thai = readFileSync(new URL("../../../docs/examples/nine-thai-menu.csv", import.meta.url), "utf8");
+
+    const res = await app.inject({ method: "POST", url: "/v1/menu/import",
+      payload: ENV({ managerPin: MGR, csv: thai }) });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().menu.import).toMatchObject({ itemsAdded: 27, itemsSkipped: 0 });
+
+    // it really is in the document column, marks included
+    expect(sql("SELECT count(*) FROM menu_draft WHERE document::text LIKE '%Pad Thai%'")).toBe("1");
+    expect(sql("SELECT count(*) FROM menu_draft WHERE document::text LIKE '%csv-import%'")).toBe("1");
+
+    /* the manager goes home mid-review; the draft is still there tomorrow */
+    await store.end();
+    store = new PgStore(url);
+    await store.init();
+    const app8 = buildServer(store, "postgres");
+
+    const draft = (await app8.inject({ method: "GET", url: "/v1/menu/draft" })).json().draft;
+    const pad = draft.items.find((m: { id: string }) => m.id === "pad-thai");
+    expect(pad).toMatchObject({ name: "Pad Thai", course: "PRIMI", priceMinor: 1800, station: "SAUTE" });
+    expect(pad.source).toMatch(/^csv-import /);
+
+    type Group = { id: string; name: string; minSelect: number; options: unknown[] };
+    const named = (name: string) =>
+      draft.groups.filter((g: Group) => g.name.toLowerCase() === name.toLowerCase()) as Group[];
+
+    // this database already carried a "Spice level" group from the earlier
+    // test, spelled with a different capital. The import matched it by NAME
+    // and reused it rather than making a second one, which is the idempotency
+    // rule applied to groups and the case a real install actually hits.
+    expect(named("spice level")).toHaveLength(1);
+    expect(pad.modifierGroupIds).toContain(named("spice level")[0]!.id);
+
+    // a group the file genuinely introduces arrives optional and empty, for
+    // the manager to fill rather than for us to guess at
+    expect(named("Entree Options")[0]).toMatchObject({ minSelect: 0, options: [] });
+
+    // a second run against the SAME database is still a no-op, which is the
+    // property that makes "try it again" safe on a real install
+    const again = await app8.inject({ method: "POST", url: "/v1/menu/import",
+      payload: ENV({ managerPin: MGR, csv: thai }) });
+    expect(again.json().menu.import).toMatchObject({ itemsAdded: 0, itemsUpdated: 27 });
+
+    const beforeVersion = (await app8.inject({ method: "GET", url: "/v1/menu" })).json().version as number;
+    // the manager fills the group the kitchen cannot cook without, whichever
+    // id it turned out to have
+    await app8.inject({ method: "POST", url: "/v1/menu/draft/group",
+      payload: ENV({ managerPin: MGR, groupId: named("spice level")[0]!.id, name: "Spice Level",
+        minSelect: 1, maxSelect: 1,
+        options: [{ name: "Mild", priceMinor: 0 }, { name: "Thai Hot", priceMinor: 0 }] }) });
+    const pub = await app8.inject({ method: "POST", url: "/v1/menu/publish", payload: ENV({ managerPin: MGR }) });
+    expect(pub.statusCode).toBe(200);
+
+    await store.end();
+    store = new PgStore(url);
+    await store.init();
+    const app9 = buildServer(store, "postgres");
+    const live = (await app9.inject({ method: "GET", url: "/v1/menu" })).json();
+    expect(live.version).toBe(beforeVersion + 1);
+    expect(live.items.find((i: { id: string }) => i.id === "pad-thai").priceMinor).toBe(1800);
+    // the snapshot row carries the menu and not the paperwork
+    expect(JSON.stringify(live.items)).not.toContain("csv-import");
+    expect(sql("SELECT count(*) FROM menu_snapshot WHERE document::text LIKE '%csv-import%'")).toBe("0");
   }, 60_000);
 });

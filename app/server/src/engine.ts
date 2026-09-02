@@ -24,6 +24,7 @@ import {
   type SplitPortion,
 } from "@restaurantos/domain";
 import type { MenuEntry } from "./menu.js";
+import { isBlankRecord, parseCsv } from "./csv.js";
 import { defaultTitle, PIN_RULE, pinHash, STAFF, type DirectoryEntry, type Employee, type RosterEntry } from "./staff.js";
 import { randomUUID } from "node:crypto";
 import { addDays, dateAt, isValidYmd, lastCompletedPeriod, PAY_PERIODS, periodContaining, sameName, serviceDateOf, TABLE_SHAPES, type CashEvent, type CheckAggregate, type DraftGroup, type DrawerSession, type Envelope, type FloorTable, type Guest, type KitchenTicket, type MenuDraft, type MenuSnapshot, type OrderLine, type PayPeriod, type PayPeriodKind, type Store, type TableShape, type Venue } from "./types.js";
@@ -221,8 +222,48 @@ export interface KitchenTicketView extends KitchenTicket {
  */
 
 /** The fixed course order the scorecard's bars follow, so one course reads as
- *  the same segment on every row. Mirrors MenuEntry["course"]. */
+ *  the same segment on every row. Mirrors MenuEntry["course"], and is the
+ *  list the CSV import validates a row's course against (E22-T2). */
 export const COURSE_ORDER = ["BEVERAGE", "ANTIPASTI", "PRIMI", "SECONDI", "DOLCI"] as const;
+
+/** Where a dish is made. The kitchen rail groups by these, so an import that
+ *  guessed one wrong would send a plate to the wrong cook (E22-T2). */
+export const MENU_STATIONS = ["BAR", "FREDDO", "GRILL", "SAUTE"] as const;
+
+/**
+ * Dollars as written in a spreadsheet, converted to minor units ONCE, half up.
+ *
+ * Done on the digits rather than with floating point on purpose: `13.955 * 100`
+ * is 1395.4999... in binary, so Math.round would quietly round a price DOWN at
+ * exactly the midpoint this is supposed to round up. A cent lost per dish is a
+ * money bug, and money bugs are the ones that survive to production.
+ *
+ * A leading currency symbol and thousands separators are tolerated, because a
+ * sheet exported from an accounting tool has them and the alternative is a
+ * manager hand-cleaning 300 rows. Anything else, including a negative, is not
+ * a price and the row gets skipped and named.
+ */
+export function parseMajorPrice(text: string): number | undefined {
+  const cleaned = text.trim().replace(/^\$/, "").replace(/,/g, "");
+  const m = /^(\d+)(?:\.(\d*))?$/.exec(cleaned);
+  if (!m) return undefined;
+  const digits = (m[2] ?? "").padEnd(3, "0");
+  const minor = Number(m[1]) * 100 + Number(digits.slice(0, 2));
+  const rounded = Number(digits[2]) >= 5 ? minor + 1 : minor;
+  return Number.isSafeInteger(rounded) ? rounded : undefined;
+}
+
+/** `base`, or `base-2`, `base-3`... until it collides with nothing. Two menu
+ *  items must never share an id, and two dishes of the same name in different
+ *  courses (a soup and a main both called Tom Yum) slug to the same string. */
+export function uniqueId(base: string, taken: readonly string[]): string {
+  const seed = base || "item";
+  if (!taken.includes(seed)) return seed;
+  for (let n = 2; ; n++) {
+    const candidate = `${seed}-${n}`;
+    if (!taken.includes(candidate)) return candidate;
+  }
+}
 
 /** What one server did tonight. Every count and every *Minor field is an EXACT
  *  integer sum over closed checks; the three average fields are display math
@@ -1284,6 +1325,171 @@ export class Engine {
     return this.remember(envelope, { kind: "applied", menu: { draft } }, "menu_draft", "draft");
   }
 
+  /* ------------------ the menu import (E22-T2, D30) ------------------
+     A restaurant switching POS brings a menu it built over years, and
+     retyping it is the long pole of onboarding. This turns a spreadsheet
+     into a DRAFT, which is the whole discipline in one sentence: an import
+     is a draft the same way a manager's hand-typed edit is a draft, and
+     publishing stays a separate, deliberate, manager act (migration-spec
+     §2.1, §4). Nothing here can reach a live check on its own. */
+
+  /** The template, in one place, quoted verbatim into the response so the
+   *  documentation and the code cannot drift apart. */
+  static readonly IMPORT_TEMPLATE = {
+    columns: "name, course, price, station, modifier_groups",
+    notes: [
+      "One row per menu item. A header row is required; column ORDER does not matter and extra columns are ignored, because a real sheet carries more than we need.",
+      `course is one of ${COURSE_ORDER.join(", ")} (case-insensitive).`,
+      "price is in dollars, with or without decimals (14 or 13.95); a leading $ and thousands commas are tolerated.",
+      `station is one of ${MENU_STATIONS.join(", ")} (case-insensitive). Left blank it follows the course: BEVERAGE to BAR, DOLCI to FREDDO, everything else to SAUTE.`,
+      "modifier_groups is a semicolon-separated list of group NAMES. A name the menu does not have yet is created as an OPTIONAL, EMPTY group for you to fill in; it is never made required on your behalf.",
+    ],
+  } as const;
+
+  /**
+   * Import a CSV onto the draft.
+   *
+   * All-or-nothing PARSE, row-by-row APPLY. A file that is not CSV is refused
+   * whole and named by line, because half-reading an unterminated quote would
+   * apply half a menu. A file that parses applies every valid row and reports
+   * every skipped one by line and reason, so the loop a manager actually runs
+   * (import, read the report, fix the sheet, import again) is safe: matching
+   * is idempotent, so the second run updates rather than duplicates.
+   */
+  async importMenuCsv(envelope: Envelope, input: { managerPin?: string; csv?: string }): Promise<CommandOutcome> {
+    const replay = await this.store.opResult(envelope.operationId);
+    if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
+    const refuse = (reason: string) => this.remember(envelope, { kind: "rejected", reason }, "menu_draft", "draft");
+
+    if (!(await this.manager(input.managerPin))) return refuse(this.managerRefusal(input.managerPin, "importing a menu"));
+
+    const text = input.csv ?? "";
+    if (!text.trim()) return refuse("the file is empty");
+
+    const parsed = parseCsv(text);
+    if (!parsed.ok) return refuse(`line ${parsed.line}: ${parsed.reason}`);
+
+    const rows = parsed.records.filter((r) => !isBlankRecord(r));
+    if (!rows.length) return refuse("the file has no rows");
+
+    // the header names the columns; order is the sheet's business, not ours
+    const header = rows[0]!.fields.map((f) => f.trim().toLowerCase());
+    const columnOf = (name: string) => header.indexOf(name);
+    const required = ["name", "course", "price", "station", "modifier_groups"];
+    const missing = required.filter((c) => columnOf(c) === -1);
+    if (missing.length) {
+      return refuse(`the header is missing ${missing.join(", ")}; expected ${Engine.IMPORT_TEMPLATE.columns}`);
+    }
+    const at = Object.fromEntries(required.map((c) => [c, columnOf(c)])) as Record<string, number>;
+
+    const active = await this.store.getActiveSnapshot();
+    const draft = await this.draftOrStart();
+    const groups = Engine.draftGroups(draft, active);
+    const stamp = `csv-import ${new Date().toISOString()}`;
+
+    const skipped: { line: number; reason: string }[] = [];
+    const groupsCreated: string[] = [];
+    let added = 0, updated = 0;
+
+    for (const record of rows.slice(1)) {
+      const cell = (column: string) => (record.fields[at[column]!] ?? "").trim();
+      const fail = (reason: string) => skipped.push({ line: record.line, reason });
+
+      const name = cell("name");
+      if (!name) { fail("the name is blank"); continue; }
+
+      const course = cell("course").toUpperCase();
+      if (!COURSE_ORDER.includes(course as MenuEntry["course"])) {
+        fail(`unknown course '${cell("course")}'`);
+        continue;
+      }
+
+      const priceMinor = parseMajorPrice(cell("price"));
+      if (priceMinor === undefined) { fail(`'${cell("price")}' is not a price`); continue; }
+
+      const stationCell = cell("station").toUpperCase();
+      // blank follows the course, because a sheet that never had a station
+      // column is the common case and guessing wrong is a plating error
+      const station = stationCell || (course === "BEVERAGE" ? "BAR" : course === "DOLCI" ? "FREDDO" : "SAUTE");
+      if (!MENU_STATIONS.includes(station as (typeof MENU_STATIONS)[number])) {
+        fail(`unknown station '${cell("station")}'`);
+        continue;
+      }
+
+      // groups resolve by NAME, the way the one real vendor template we hold
+      // links them (migration-spec §2.1). An unfamiliar name becomes an
+      // optional empty group: never required on the manager's behalf, because
+      // a required group with no options is an item nobody can order, and
+      // publish refuses that state anyway.
+      const groupIds: string[] = [];
+      for (const raw of cell("modifier_groups").split(";")) {
+        const groupName = raw.trim();
+        if (!groupName) continue;
+        const existing = groups.find((g) => g.name.trim().toLowerCase() === groupName.toLowerCase());
+        if (existing) {
+          if (!groupIds.includes(existing.id)) groupIds.push(existing.id);
+          continue;
+        }
+        const id = uniqueId(Engine.slug(groupName), groups.map((g) => g.id));
+        groups.push({ id, name: groupName, minSelect: 0, maxSelect: null, options: [] });
+        groupsCreated.push(groupName);
+        groupIds.push(id);
+      }
+
+      // the natural key (migration-spec §4): name within course, case
+      // insensitively, so "PAD THAI" on the second run is the same dish
+      const existingAt = draft.items.findIndex(
+        (m) => m.course === course && m.name.trim().toLowerCase() === name.toLowerCase(),
+      );
+      if (existingAt >= 0) {
+        const previous = draft.items[existingAt]!;
+        draft.items[existingAt] = {
+          ...previous, name, priceMinor, course: course as MenuEntry["course"], station,
+          modifierGroupIds: groupIds, source: stamp,
+        };
+        updated++;
+      } else {
+        // the slug can already belong to a dish of the same name in another
+        // course, and two items must never share an id
+        const id = uniqueId(Engine.slug(name), draft.items.map((m) => m.id));
+        draft.items.push({
+          id, name, priceMinor, course: course as MenuEntry["course"], station,
+          modifierGroupIds: groupIds, source: stamp,
+        });
+        added++;
+      }
+    }
+
+    // a file that changed nothing leaves the store alone. Writing a draft
+    // here would copy the live menu into one and light up "you have
+    // unpublished changes" over an import that did not import anything.
+    if (added || updated || groupsCreated.length) {
+      draft.groups = groups;
+      await this.store.putDraft(draft);
+    }
+
+    return this.remember(envelope, {
+      kind: "applied",
+      menu: {
+        import: {
+          template: Engine.IMPORT_TEMPLATE,
+          itemsAdded: added,
+          itemsUpdated: updated,
+          itemsSkipped: skipped.length,
+          groupsCreated,
+          skipped: skipped.map((s) => `row ${s.line}: ${s.reason}`),
+          source: stamp,
+        },
+        draft: {
+          basedOnVersion: draft.basedOnVersion,
+          items: draft.items.length,
+          groups: groups.length,
+        },
+        note: "Nothing is live yet. Review the draft on the Menu screen and publish it, which is a separate manager action.",
+      },
+    }, "menu_draft", "draft");
+  }
+
   async menuDiscardDraft(envelope: Envelope): Promise<CommandOutcome> {
     const replay = await this.store.opResult(envelope.operationId);
     if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
@@ -1324,7 +1530,10 @@ export class Engine {
     const snapshot: MenuSnapshot = {
       id: `snap-${String(active.version + 1).padStart(4, "0")}`,
       version: active.version + 1,
-      items: draft.items,
+      // provenance is draft-only (E22-T2): the review screen needs to know a
+      // row came from a spreadsheet, a published snapshot does not. Stripping
+      // it here keeps the snapshot exactly the shape it has always been.
+      items: draft.items.map(({ source: _source, ...item }) => item),
       groups,
       publishedAt: new Date().toISOString(),
     };
