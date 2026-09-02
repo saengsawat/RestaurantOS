@@ -91,6 +91,9 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 .fld{width:100%;min-height:44px;border-radius:10px;border:1px solid var(--line);background:var(--panel);
   color:var(--ink);font:inherit;padding:0 12px}
 select.fld{padding:0 8px}
+textarea.fld{min-height:110px;padding:10px 12px;resize:vertical;line-height:1.4;font-family:var(--mono);font-size:12.5px}
+input[type="file"].fld{padding:9px 10px}
+a.btn{text-decoration:none;color:inherit}
 .toasts{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:200;display:flex;flex-direction:column;gap:8px;align-items:center}
 .toast{background:var(--ink);color:var(--bg);border-radius:999px;padding:9px 18px;font-size:13px;font-weight:600;max-width:92vw}
 .toast.err{background:var(--red);color:#fff}
@@ -226,6 +229,7 @@ select.fld{padding:0 8px}
   <div id="live"></div>
 
   <div class="sec-h">Draft</div>
+  <div style="margin:0 0 12px"><button class="btn btn-s" id="btnImport">Import menu (CSV)</button></div>
   <div class="course-h">Modifier groups</div>
   <div id="draftGroups"></div>
   <div class="course-h" style="margin-top:14px">Items</div>
@@ -413,6 +417,7 @@ function render(){
         return `<div class="row">
           <span class="nm">${esc(i.name)}<small>${esc(i.station)}${groupLabel(i,groupList)}</small></span>
           ${!was?'<span class="chip green">new</span>':changed?'<span class="chip amber">changed</span>':""}
+          ${i.source?'<span class="chip mut">imported</span>':""}
           <span class="pr num">${money(i.priceMinor)}</span>
           <button class="btn btn-s" data-edit="${i.id}">Edit</button>
           <button class="btn btn-s" data-remove="${i.id}">Remove</button>
@@ -634,6 +639,81 @@ function publishForm(){
   $("#ovForm").classList.add("open");
 }
 
+/** The template CSV (E22-T3): generated client-side so there is one source
+ *  of truth for what a manager downloads versus what they paste back in.
+ *  Mirrors the documented columns (migration-spec §2.1 / E22-T2's
+ *  IMPORT_TEMPLATE) exactly, with two example rows. */
+const IMPORT_COLUMNS="name,course,price,station,modifier_groups";
+function templateCsv(){
+  return [
+    IMPORT_COLUMNS,
+    "Pad Thai,PRIMI,18,SAUTE,Spice Level;Protein",
+    "Thai Iced Tea,BEVERAGE,6,,",
+  ].join("\r\n")+"\r\n";
+}
+
+/** Import a CSV onto the draft (E22-T2's importMenuCsv). File picker and
+ *  paste-into-textarea both feed the same text box: whichever the manager
+ *  used, the same "Import" button posts the same string, and the page never
+ *  reads a row of it itself beyond handing that string to the command. */
+function importForm(){
+  $("#fTitle").textContent="Import a menu";
+  $("#fSub").textContent="A CSV lands on the draft; nothing goes live until you publish";
+  clearFormErr();
+  $("#fBody").innerHTML=`
+    <a class="btn btn-s" download="restaurantos-menu-template.csv"
+       href="data:text/csv;charset=utf-8,${encodeURIComponent(templateCsv())}">Download the template</a>
+    <div class="fl" style="margin-top:14px">CSV file</div>
+    <input class="fld" type="file" accept=".csv,text/csv" id="f_file">
+    <div class="fl">Or paste the CSV text (columns: ${esc(IMPORT_COLUMNS)})</div>
+    <textarea class="fld" id="f_csv" placeholder="name,course,price,station,modifier_groups"></textarea>
+    <div class="fl">Manager PIN (demo manager: Marco B. · 1122)</div>
+    <input class="fld" id="f_pin" placeholder="••••">`;
+  $("#f_file").onchange=()=>{
+    const file=$("#f_file").files&&$("#f_file").files[0];
+    if(!file)return;
+    const reader=new FileReader();
+    // the file never leaves the browser except as this text: the server
+    // reads a CSV body, never a filename or a path (E22-T2)
+    reader.onload=()=>{$("#f_csv").value=String(reader.result||"");};
+    reader.readAsText(file);
+  };
+  $("#fGo").textContent="Import";
+  $("#fGo").onclick=async()=>{
+    const csv=$("#f_csv").value;
+    const pin=$("#f_pin").value.trim();
+    try{
+      const r=await cmd("/v1/menu/import",{managerPin:pin,csv});
+      renderImportReport(r.menu.import,r.menu.note);
+    }catch(e){showFormErr(e.message);}
+  };
+  $("#ovForm").classList.add("open");
+}
+
+/** The report, rendered honestly: the server's own per-row outcomes in the
+ *  page's existing list styling, a skipped row read verbatim ("row 7:
+ *  unknown course 'SIDES'"), and the manager's next step stated once. Closing
+ *  this stage is what lands the manager back on the draft (the badge on each
+ *  imported row is the draft read's own `source` field, not invented here). */
+function renderImportReport(imp,note){
+  $("#fTitle").textContent="Import report";
+  $("#fSub").textContent=`${imp.itemsAdded} added · ${imp.itemsUpdated} updated · ${imp.itemsSkipped} skipped`;
+  const rows=[];
+  if(imp.itemsAdded)rows.push(`<div class="row"><span class="nm">${imp.itemsAdded} item${imp.itemsAdded===1?"":"s"} added</span><span class="chip green">added</span></div>`);
+  if(imp.itemsUpdated)rows.push(`<div class="row"><span class="nm">${imp.itemsUpdated} item${imp.itemsUpdated===1?"":"s"} updated</span><span class="chip amber">updated</span></div>`);
+  if(imp.groupsCreated.length)rows.push(`<div class="row"><span class="nm">Group${imp.groupsCreated.length===1?"":"s"} created: ${imp.groupsCreated.map(esc).join(", ")}</span><span class="chip info">empty, needs options</span></div>`);
+  imp.skipped.forEach(s=>rows.push(`<div class="row"><span class="nm">${esc(s)}</span><span class="chip red">skipped</span></div>`));
+  if(!rows.length)rows.push(`<div class="row"><span class="nm">Nothing changed: the file matched what the draft already has.</span></div>`);
+  $("#fBody").innerHTML=`<div class="blk">${rows.join("")}</div>
+    <p class="note" style="margin-top:10px">${esc(note||"")}</p>
+    <p class="note">Next: review the draft below, fill in any empty groups the import created, and publish when ready.</p>`;
+  $("#fGo").textContent="Done";
+  $("#fGo").onclick=async()=>{
+    $("#ovForm").classList.remove("open");
+    await refresh();
+  };
+}
+
 function form(title,sub,fields,verb,go){
   $("#fTitle").textContent=title;$("#fSub").textContent=sub;
   clearFormErr();
@@ -654,6 +734,9 @@ function form(title,sub,fields,verb,go){
 
 function setViewportH(){document.documentElement.style.setProperty("--vph",window.innerHeight+"px");}
 addEventListener("resize",setViewportH);setViewportH();
+// static markup, wired once: the button lives in the draft area regardless
+// of draft state, since an import can start a draft from nothing (E22-T3)
+$("#btnImport").onclick=importForm;
 refresh().catch(()=>toast("Cannot reach the server","err"));
 setInterval(()=>{if(!$("#ovForm").classList.contains("open"))refresh().catch(()=>{});},5000);
 /* ---------- the venue's own name (E21-T2) ----------

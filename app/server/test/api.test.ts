@@ -4026,3 +4026,73 @@ describe("a spreadsheet becomes a draft (E22-T2)", () => {
     expect(fired.mods).toBe("Thai Hot");
   });
 });
+
+/* E22-T3: the page that puts E22-T2's importMenuCsv behind a manager's
+ * hands. No engine or route under test here, page-serve assertions only: the
+ * import sheet's markup exists (file picker, paste textarea, template link,
+ * PIN field) and is wired into the served script, and the existing menu
+ * markup (E5, E5-T2, E5-T3) is untouched. */
+describe("the menu import lands on the Menu screen (E22-T3)", () => {
+  it("serves the Import action, its sheet, the template link, and the report renderer", async () => {
+    const app = buildServer();
+    const page = (await app.inject({ method: "GET", url: "/menu" })).body;
+
+    // an Import action in the draft area, available with or without a draft
+    expect(page).toContain('id="btnImport"');
+    expect(page).toContain("Import menu (CSV)");
+    expect(page).toContain("function importForm()");
+    expect(page).toContain('/v1/menu/import');
+
+    // file picker (read client-side, the raw text is what posts) and a
+    // paste-into-textarea alternative for the phone/tablet case
+    expect(page).toContain('type="file"');
+    expect(page).toContain('accept=".csv,text/csv"');
+    expect(page).toContain("new FileReader()");
+    expect(page).toContain("readAsText(file)");
+    expect(page).toContain('id="f_csv"');
+    expect(page).toContain("<textarea");
+
+    // the template link, generated client-side from one column list, not
+    // fetched from the server ahead of an import
+    expect(page).toContain("function templateCsv()");
+    expect(page).toContain("IMPORT_COLUMNS");
+    expect(page).toContain("name,course,price,station,modifier_groups");
+    expect(page).toContain("Download the template");
+    expect(page).toContain('download="restaurantos-menu-template.csv"');
+
+    // the PIN field, asked the way publish already asks for one
+    expect(page).toContain('id="f_pin"');
+    expect(page).toContain("Manager PIN (demo manager: Marco B. · 1122)");
+
+    // the report, rendered honestly: added/updated/skipped-with-reason and
+    // groups created, in the page's existing .row/.blk list styling, plus
+    // the one-line next step
+    expect(page).toContain("function renderImportReport(imp,note)");
+    expect(page).toContain("imp.itemsAdded");
+    expect(page).toContain("imp.itemsUpdated");
+    expect(page).toContain("imp.skipped.forEach");
+    expect(page).toContain("imp.groupsCreated");
+    expect(page).toContain("Next: review the draft");
+    expect(page).toContain('"Done"');
+
+    // imported rows carry a small badge beside the existing new/changed
+    // chips, sourced from the draft read's own `source` field
+    expect(page).toContain("i.source");
+    expect(page).toContain('<span class="chip mut">imported</span>');
+
+    // the page hands the text over; it never parses a row of CSV itself
+    expect(page).not.toContain('split(";")');
+  });
+
+  it("still serves everything the E5/E5-T2/E5-T3 menu screen shipped before this ticket", async () => {
+    const app = buildServer();
+    const page = (await app.inject({ method: "GET", url: "/menu" })).body;
+    expect(page).toContain("Live now · 86 board");
+    expect(page).toContain('id="live"></div>');
+    expect(page).toContain('id="draft"></div>');
+    expect(page).toContain('id="draftGroups"></div>');
+    expect(page).toContain("function groupForm(src)");
+    expect(page).toContain("function publishForm()");
+    expect(page.match(/<svg viewBox="0 0 24 24" aria-hidden="true">/g)).toHaveLength(7);
+  });
+});
