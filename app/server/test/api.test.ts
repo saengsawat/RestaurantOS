@@ -1664,7 +1664,7 @@ describe("modifier groups on the Menu screen (E5-T3)", () => {
     expect(page).toContain('id="draft"></div>');
     expect(page).toContain("86 it");
     expect(page).toContain("Set count");
-    expect(page.match(/<svg viewBox="0 0 24 24" aria-hidden="true">/g)).toHaveLength(7);
+    expect(page.match(/<svg viewBox="0 0 24 24" aria-hidden="true">/g)).toHaveLength(8);
   });
 });
 
@@ -1895,7 +1895,7 @@ describe("reads", () => {
     // rather than summing the scorecard rows (E19-T3)
     expect(page.body).toContain("declaredTipsTotalMinor");
     // and every other page can reach it, now through its rail entry (UI-T1)
-    for (const url of ["/pos", "/tables", "/kds", "/menu", "/close"]) {
+    for (const url of ["/pos", "/tables", "/kds", "/menu", "/close", "/reservations"]) {
       expect((await app.inject({ method: "GET", url })).body).toContain('class="nav-btn" href="/reports"');
     }
   });
@@ -1903,11 +1903,11 @@ describe("reads", () => {
   /* UI-T1: the shell DESIGN.md section 5 prescribes. Navigation is a place you
    * go, so it is the left icon rail with its badge counts; the topbar is where
    * you are. The markup is duplicated per page (each page is a self-contained
-   * zero-dependency file), so the assertion runs over all SEVEN (Settings
-   * joined in E21-T2) to keep the copies from drifting apart. */
-  it("gives all seven navigable pages the app shell: rail navigates, topbar identifies", async () => {
+   * zero-dependency file), so the assertion runs over all EIGHT (Settings
+   * joined in E21-T2, the call-in book in E23-T3) to keep them from drifting. */
+  it("gives all eight navigable pages the app shell: rail navigates, topbar identifies", async () => {
     const app = buildServer();
-    const screens = ["/pos", "/tables", "/kds", "/menu", "/close", "/reports", "/settings"];
+    const screens = ["/pos", "/tables", "/reservations", "/kds", "/menu", "/close", "/reports", "/settings"];
     for (const url of screens) {
       const body = (await app.inject({ method: "GET", url })).body;
       expect(body).toContain('<nav class="navrail" aria-label="Screens">');
@@ -1917,8 +1917,8 @@ describe("reads", () => {
       for (const dest of screens) expect(body).toContain(`href="${dest}"`);
       expect(body.match(/class="nav-btn on" aria-current="page"/g)).toHaveLength(1);
       expect(body).toContain(`class="nav-btn on" aria-current="page" href="${url}"`);
-      // seven icons, inline SVG in one stroke style, never emoji
-      expect(body.match(/<svg viewBox="0 0 24 24" aria-hidden="true">/g)).toHaveLength(7);
+      // eight icons, inline SVG in one stroke style, never emoji
+      expect(body.match(/<svg viewBox="0 0 24 24" aria-hidden="true">/g)).toHaveLength(8);
       // the rail carries the two live counts the data already supports
       expect(body).toContain('id="navTables"');
       expect(body).toContain('id="navKds"');
@@ -1937,9 +1937,9 @@ describe("reads", () => {
   /* E21-T2: the demo restaurant's name is not in anybody's markup any more.
    * Every page ships "RestaurantOS" and asks the server who it is actually
    * serving, so a second restaurant never sees somebody else's name flash. */
-  it("takes the venue's name off the walls of all seven pages and the lock screen", async () => {
+  it("takes the venue's name off the walls of all eight pages and the lock screen", async () => {
     const app = buildServer();
-    for (const url of ["/pos", "/tables", "/kds", "/menu", "/close", "/reports", "/settings", "/"]) {
+    for (const url of ["/pos", "/tables", "/reservations", "/kds", "/menu", "/close", "/reports", "/settings", "/"]) {
       const body = (await app.inject({ method: "GET", url })).body;
       expect(body, `${url} still names the demo venue`).not.toContain("<b>Osteria Nove</b>");
       expect(body, `${url} still names the demo venue`).not.toContain("<h1>Osteria Nove</h1>");
@@ -4097,7 +4097,7 @@ describe("the menu import lands on the Menu screen (E22-T3)", () => {
     expect(page).toContain('id="draftGroups"></div>');
     expect(page).toContain("function groupForm(src)");
     expect(page).toContain("function publishForm()");
-    expect(page.match(/<svg viewBox="0 0 24 24" aria-hidden="true">/g)).toHaveLength(7);
+    expect(page.match(/<svg viewBox="0 0 24 24" aria-hidden="true">/g)).toHaveLength(8);
   });
 });
 
@@ -4275,7 +4275,7 @@ describe("the call-in book (E23-T2)", () => {
   it("badges the floor inside the lead window and stays quiet outside it", async () => {
     const app = buildServer();
     // 30 minutes out, inside the 45 minute default
-    await book(app, 1, { reservedFor: inMinutes(30), tableName: "Table 12" });
+    const soon = await book(app, 1, { reservedFor: inMinutes(30), tableName: "Table 12" });
     // 4 hours out, well outside it
     await book(app, 2, { reservedFor: inMinutes(240), tableName: "Table 9", name: "Ploy", partySize: 2 });
 
@@ -4294,7 +4294,10 @@ describe("the call-in book (E23-T2)", () => {
       .toMatchObject({ name: "Ploy", partySize: 2 });
 
     // seating it clears the badge: only a BOOKED row is still expected
-    const id = (await readBook(app)).reservations.find((r: { name: string }) => r.name === "Somchai").id;
+    // the id off the command's own reply, not out of the day book: a booking
+    // 30 minutes from a late-evening now belongs to TOMORROW's service date,
+    // and this assertion is about the badge rather than about the calendar
+    const id = soon.json().reservation.id as string;
     await app.inject({ method: "POST", url: `/v1/reservations/${id}/seat`, payload: ENV(4) });
     expect((await floorOf(app)).find((t) => t.name === "Table 12")!.reserved).toBeNull();
 
@@ -4376,5 +4379,105 @@ describe("the call-in book (E23-T2)", () => {
     expect(seat2.json()).toEqual(seat1.json());
     expect((await app.inject({ method: "GET", url: "/v1/checks" })).json().checks
       .filter((c: { tableName: string }) => c.tableName === "Table 12")).toHaveLength(1);
+  });
+});
+
+/* ---------------- the book on screen (E23-T3) ----------------
+   The page is a formatter and nothing else: the covers totals, the past-due
+   flag, the guestbook match and the floor badge all arrive already decided by
+   E23-T2's two reads. These assertions hold that line, and hold the badge to
+   the info triple, because a reservation is information rather than an alarm. */
+describe("the reservations screen and the floor badge (E23-T3)", () => {
+  it("serves /reservations: the day book, the booking sheet, the seat confirm", async () => {
+    const app = buildServer();
+    const res = await app.inject({ method: "GET", url: "/reservations" });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-type"]).toContain("text/html");
+    const body = res.body;
+
+    // two reads and no third question
+    expect(body).toContain('fetch("/v1/reservations?date="+encodeURIComponent(day))');
+    expect(body).toContain('fetch("/v1/floor")');
+
+    // one day at a time, Today by default
+    expect(body).toContain('id="dPrev"');
+    expect(body).toContain('id="dNext"');
+    expect(body).toContain('id="dToday"');
+    expect(body).toContain("let day=todayYmd()");
+
+    // grouped by service period, with the read's OWN covers total per period
+    expect(body).toContain("book.periods.map(");
+    expect(body).toContain("' booked · '+p.covers+' covers</span>");
+
+    // the four commands, all of them the engine's
+    expect(body).toContain('cmd("/v1/reservations"');
+    expect(body).toContain('(kind==="cancel"?"/cancel":"/no-show")');
+    expect(body).toContain('+"/seat"');
+
+    // the new booking: a name that admits any name, a stepper, a required time
+    expect(body).toContain('Any name will do, even "walk-in"');
+    expect(body).toContain('data-party="-1"');
+    expect(body).toContain('id="nTime" type="time"');
+    expect(body).toContain("A booking needs a time.");
+    // a past time warns and saves anyway, in amber and disabling nothing
+    expect(body).toContain("That time has already gone by");
+    expect(body).toContain('<div class="warn" id="nWarn"></div>');
+
+    // the guestbook match is PROPOSED by the read and taken by a person (D20)
+    expect(body).toContain("in the guestbook: attach?");
+    expect(body).toContain('seat={r:r,table:r.tableName||"",attach:false}');
+    expect(body).toContain("seat.attach&&r.guestMatch?{guestId:r.guestMatch.id}:{}");
+
+    // seating away from the promised table says so first, then sends the
+    // acknowledgement the engine asks for. Warn and allow, never refuse.
+    expect(body).toContain("moved?{confirmOverride:true}:{}");
+    expect(body).toContain("was promised ");
+
+    // the command opened the check; the page only goes where the server put it
+    expect(body).toContain('location.href="/pos?check="+res.data.check.id');
+
+    // no PIN anywhere: whoever answers the phone at 6pm takes the booking
+    expect(body).not.toContain("managerPin");
+    expect(body).not.toContain("askPin");
+
+    // past-due is the read's flag, shown, not a comparison made here
+    expect(body).toContain("r.pastDue?");
+    expect(body).toContain("Past due");
+  });
+
+  it("badges a reserved table on the floor and warns before seating over it", async () => {
+    const page = (await buildServer().inject({ method: "GET", url: "/tables" })).body;
+
+    // the badge: time, name and party size, all off the floor read's own
+    // `reserved` object, in the flow of the tile rather than floating
+    expect(page).toContain('<span class="rz">');
+    expect(page).toContain("clockOf(r.reservedFor)");
+    expect(page).toContain("esc(r.name)");
+    expect(page).toContain("r.partySize");
+    expect(page).toContain(".tbl .rz{");
+    // a 42px two-top on a phone is not a name's worth of room, so the tile
+    // drops the name there and the strip below carries the whole promise
+    expect(page).toContain("@media (max-width:820px){");
+    expect(page).toContain('<i class="rzn">');
+    expect(page).toContain(".tbl .rz .rzn{display:none}");
+    expect(page).toContain('class="soon-r" data-sr=');
+    expect(page).toContain(">Reserved soon<");
+    // the info triple, never the red one
+    const rule = page.slice(page.indexOf(".tbl .rz{"), page.indexOf(".tbl.open.booked"));
+    expect(rule).toContain("var(--info-wash)");
+    expect(rule).not.toContain("--red");
+
+    // the warn-and-allow confirm, in the spec's own sentence
+    expect(page).toContain('id="ovHold"');
+    expect(page).toContain('" is held for "+r.name+" at "+clockOf(r.reservedFor)+", "+awayText(r.reservedFor)+". Seat anyway?"');
+    expect(page).toContain(">Seat anyway<");
+    expect(page).toContain("if(t.reserved){warnHeld(t);return;}");
+    // and confirming runs the seat flow that was already there
+    expect(page).toContain('$("#holdGo").onclick=()=>{$("#ovHold").classList.remove("open");openSeat(t);};');
+
+    // the confirm leaves the booking alone: the host may be about to move it,
+    // so this page sends no reservation command at all
+    expect(page).not.toContain("/v1/reservations");
+    expect(page).toContain('href="/reservations"');
   });
 });

@@ -165,7 +165,7 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--brand);outline-offs
    session state, nothing you navigate with. Icons are inline SVG in one
    stroke style, never emoji.
 
-   This block is duplicated verbatim on all six navigable pages. Each
+   This block is duplicated verbatim on all eight navigable pages. Each
    page is a self-contained zero-dependency file, so duplication is the
    accepted cost; keep the block identical everywhere so extracting it
    later is mechanical rather than a merge.
@@ -241,12 +241,13 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--brand);outline-offs
 </head>
 <body>
 <div class="shell">
-  <!-- ===== APP SHELL: navigation rail (UI-T1). Identical markup on all six
+  <!-- ===== APP SHELL: navigation rail (UI-T1). Identical markup on all eight
        navigable pages; only which entry carries "on" differs. ===== -->
   <nav class="navrail" aria-label="Screens">
     <div class="rail-logo" aria-hidden="true">R</div>
     <a class="nav-btn" href="/pos"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3.5h12v17l-3-1.8-3 1.8-3-1.8-3 1.8z"/><path d="M9.2 8.6h5.6M9.2 12.6h5.6"/></svg>Service</a>
     <a class="nav-btn" href="/tables"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="5"/><path d="M12 3.6v2.2M12 18.2v2.2M3.6 12h2.2M18.2 12h2.2"/></svg>Tables<span class="nav-badge" id="navTables"></span></a>
+    <a class="nav-btn" href="/reservations"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5.4" width="17" height="15.1" rx="2.6"/><path d="M3.5 10.4h17M8.2 3.4v3.6M15.8 3.4v3.6"/></svg>Bookings</a>
     <a class="nav-btn" href="/kds"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 18.6h17"/><path d="M5.5 18.6a6.5 6.5 0 0 1 13 0"/><path d="M12 12.1V9.9"/></svg>Kitchen<span class="nav-badge" id="navKds"></span></a>
     <a class="nav-btn" href="/menu"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5.6" cy="7" r="1.1"/><circle cx="5.6" cy="12" r="1.1"/><circle cx="5.6" cy="17" r="1.1"/><path d="M9.6 7h8.8M9.6 12h8.8M9.6 17h8.8"/></svg>Menu</a>
     <a class="nav-btn" href="/close"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="7.5" width="17" height="11" rx="2.5"/><path d="M3.5 12.6h17M10 15.8h4"/></svg>Close</a>
@@ -504,7 +505,7 @@ setInterval(()=>{if(!$("#ov").classList.contains("open"))refresh().catch(()=>{})
    restaurant is actually called. The demo's name is never in the markup: a
    page that flashed "Osteria Nove" at somebody else's restaurant would be
    worse than one that says nothing for forty milliseconds. Identical on all
-   seven pages; failure is silent, because a header is not worth an alarm. */
+   eight pages; failure is silent, because a header is not worth an alarm. */
 let VENUE={name:"RestaurantOS",address:"",timezone:""};
 async function loadVenue(){
   try{
@@ -518,7 +519,7 @@ const venueReady=loadVenue();
 
 /* ---------- APP SHELL: rail badge counts (UI-T1) ----------
    Two cheap reads on the rail's own timer, so no page's existing poll
-   changes shape. Identical on all six pages. Failure is silent: a badge
+   changes shape. Identical on all eight pages. Failure is silent: a badge
    that cannot be read must never be louder than the screen behind it. */
 async function railBadges(){
   const [checks,kds]=await Promise.all([
