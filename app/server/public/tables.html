@@ -209,7 +209,7 @@ button:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
    session state, nothing you navigate with. Icons are inline SVG in one
    stroke style, never emoji.
 
-   This block is duplicated verbatim on all eight navigable pages. Each
+   This block is duplicated verbatim on all nine navigable pages. Each
    page is a self-contained zero-dependency file, so duplication is the
    accepted cost; keep the block identical everywhere so extracting it
    later is mechanical rather than a merge.
@@ -285,7 +285,7 @@ button:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
 </head>
 <body>
 <div class="shell">
-  <!-- ===== APP SHELL: navigation rail (UI-T1). Identical markup on all eight
+  <!-- ===== APP SHELL: navigation rail (UI-T1). Identical markup on all nine
        navigable pages; only which entry carries "on" differs. ===== -->
   <nav class="navrail" aria-label="Screens">
     <div class="rail-logo" aria-hidden="true">R</div>
@@ -296,6 +296,7 @@ button:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
     <a class="nav-btn" href="/menu"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5.6" cy="7" r="1.1"/><circle cx="5.6" cy="12" r="1.1"/><circle cx="5.6" cy="17" r="1.1"/><path d="M9.6 7h8.8M9.6 12h8.8M9.6 17h8.8"/></svg>Menu</a>
     <a class="nav-btn" href="/close"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="7.5" width="17" height="11" rx="2.5"/><path d="M3.5 12.6h17M10 15.8h4"/></svg>Close</a>
     <a class="nav-btn" href="/reports"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.6 19.6h16.8"/><path d="M6.6 19.6v-6.4M12 19.6V5.4M17.4 19.6v-9"/></svg>Reports</a>
+    <a class="nav-btn" href="/schedule"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.2"/><path d="M12 7.3v5l3.4 2"/></svg>Shifts</a>
     <a class="nav-btn" href="/settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7.6h9.2M18.4 7.6h1.6M4 16.4h4.6M13.8 16.4h6.2"/><circle cx="15.6" cy="7.6" r="2.4"/><circle cx="11.2" cy="16.4" r="2.4"/></svg>Settings</a>
     <div class="rail-spacer"></div>
     <div class="rail-foot">Concept build.<br>Demo data only.</div>
@@ -738,7 +739,7 @@ setInterval(()=>{if(!edit)refresh().catch(()=>{});},5000);
    restaurant is actually called. The demo's name is never in the markup: a
    page that flashed "Osteria Nove" at somebody else's restaurant would be
    worse than one that says nothing for forty milliseconds. Identical on all
-   eight pages; failure is silent, because a header is not worth an alarm. */
+   nine pages; failure is silent, because a header is not worth an alarm. */
 let VENUE={name:"RestaurantOS",address:"",timezone:""};
 async function loadVenue(){
   try{
@@ -752,7 +753,7 @@ const venueReady=loadVenue();
 
 /* ---------- APP SHELL: rail badge counts (UI-T1) ----------
    Two cheap reads on the rail's own timer, so no page's existing poll
-   changes shape. Identical on all eight pages. Failure is silent: a badge
+   changes shape. Identical on all nine pages. Failure is silent: a badge
    that cannot be read must never be louder than the screen behind it. */
 async function railBadges(){
   const [checks,kds]=await Promise.all([

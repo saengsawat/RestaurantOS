@@ -1,0 +1,894 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>RestaurantOS Schedule · connected</title>
+<style>
+:root{
+  color-scheme:light;
+  --brand:#9fe870;--brand-ink:#163300;--brand-wash:rgba(159,232,112,.18);
+  --bg:#f2f1ec;--panel:#fff;--surface:#fff;--surface-2:#e9ebe4;
+  --ink:#0e0f0c;--ink-2:#3f423d;--ink-3:#5f635c;--ink-4:#787c74;
+  --info:#0a7ea4;--info-wash:rgba(10,126,164,.10);--info-line:rgba(10,126,164,.30);
+  --amber:#a16207;--amber-wash:rgba(161,98,7,.10);--amber-line:rgba(161,98,7,.30);
+  --green:#116e3b;--green-wash:rgba(17,110,59,.10);--green-line:rgba(17,110,59,.32);
+  --red:#c22f35;--red-wash:rgba(194,47,53,.09);--red-line:rgba(194,47,53,.32);
+  --line:rgba(14,15,12,.12);--line-subtle:rgba(14,15,12,.06);
+  --ring:0 0 0 1px rgba(14,15,12,.12);--shadow-lg:0 16px 40px rgba(14,15,12,.16);
+  --overlay:rgba(14,15,12,.45);
+  --font:"Inter",ui-sans-serif,system-ui,sans-serif;--mono:ui-monospace,Consolas,monospace;
+  --rail:86px;--topbar:56px;--tap:44px;--safe-b:env(safe-area-inset-bottom,0px);
+  --vph:100vh;
+}
+@supports (height:100dvh){:root{--vph:100dvh}}
+@media (prefers-color-scheme:dark){:root{
+  color-scheme:dark;
+  --bg:#0e0f0c;--panel:#161814;--surface:#1d201b;--surface-2:#282c26;
+  --ink:#f2f1ec;--ink-2:#c9cdc4;--ink-3:#9a9e94;--ink-4:#83877d;
+  --info:#4cc3e8;--info-wash:rgba(76,195,232,.12);--info-line:rgba(76,195,232,.34);
+  --amber:#e3b341;--amber-wash:rgba(227,179,65,.12);--amber-line:rgba(227,179,65,.34);
+  --green:#34d399;--green-wash:rgba(52,211,153,.11);--green-line:rgba(52,211,153,.34);
+  --red:#f0555a;--red-wash:rgba(240,85,90,.12);--red-line:rgba(240,85,90,.36);
+  --line:rgba(242,241,236,.10);--line-subtle:rgba(242,241,236,.05);
+  --ring:0 0 0 1px rgba(242,241,236,.10);--overlay:rgba(0,0,0,.6);
+}}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:var(--vph)}
+body{background:var(--bg);color:var(--ink);font:14.5px/1.45 var(--font);overflow:hidden;user-select:none;
+  -webkit-font-smoothing:antialiased;display:flex;flex-direction:column}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+.num{font-variant-numeric:tabular-nums}
+
+.chip{border-radius:999px;padding:2px 10px;font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;border:1px solid}
+.chip.green{color:var(--green);background:var(--green-wash);border-color:var(--green-line)}
+.chip.amber{color:var(--amber);background:var(--amber-wash);border-color:var(--amber-line)}
+.chip.red{color:var(--red);background:var(--red-wash);border-color:var(--red-line)}
+.chip.info{color:var(--info);background:var(--info-wash);border-color:var(--info-line)}
+.chip.mut{color:var(--ink-3);background:var(--surface-2);border-color:var(--line)}
+
+.sec-h{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);margin:16px 2px 8px}
+.course-h{font-size:11px;font-weight:700;letter-spacing:.05em;color:var(--ink-4);margin:10px 2px 4px}
+.blk{background:var(--surface);border-radius:14px;box-shadow:var(--ring);padding:2px 15px;margin-bottom:8px}
+.row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line-subtle);flex-wrap:wrap}
+.row:last-child{border-bottom:none}
+.row .nm{font-weight:600;min-width:180px;flex:1}
+.row .nm small{display:block;font-weight:400;font-size:11px;color:var(--ink-4)}
+.row .pr{font-family:var(--mono);font-weight:700;width:76px;text-align:right}
+.row.dead .nm,.row.dead .pr{color:var(--ink-4);text-decoration:line-through}
+.btn{min-height:40px;border-radius:999px;font-size:13px;font-weight:600;padding:0 14px;
+  display:inline-flex;align-items:center;justify-content:center;transition:transform .1s}
+.btn:active{transform:scale(.97)}
+@media (hover:hover){.btn:hover{filter:brightness(.96)}}
+.btn-p{background:var(--brand);color:var(--brand-ink)}
+.btn-s{background:var(--surface-2)}
+.btn-lg{min-height:46px;font-size:14.5px;padding:0 20px}
+.btn:disabled{opacity:.45;cursor:default}
+.note{font-size:12px;color:var(--ink-4);margin:6px 2px 0}
+
+/* above the bottom tab bar's 150 (UI-T1), below the toasts' 200: on a phone
+   the rail is fixed to the bottom and would otherwise paint straight over a
+   modal's action row (E21-T2) */
+.ov{position:fixed;inset:0;background:var(--overlay);display:none;align-items:center;justify-content:center;z-index:160;padding:16px}
+.ov.open{display:flex}
+.modal{background:var(--surface);border-radius:16px;box-shadow:var(--shadow-lg);width:min(420px,100%);max-height:92vh;overflow-y:auto;animation:pop .15s ease-out}
+@keyframes pop{from{transform:scale(.97);opacity:.6}to{transform:none;opacity:1}}
+.m-h{display:flex;justify-content:space-between;align-items:center;padding:15px 18px 8px}
+.m-h h3{font-size:18px;font-weight:700}
+.m-h .sub{font-size:12px;color:var(--ink-3)}
+.m-x{min-width:36px;min-height:36px;border-radius:999px;background:var(--surface-2)}
+.m-b{padding:2px 18px 6px}
+.m-f{padding:8px 18px 16px}
+.m-f .btn{width:100%}
+.fl{font-size:12.5px;font-weight:700;margin:10px 0 4px}
+.fld{width:100%;min-height:44px;border-radius:10px;border:1px solid var(--line);background:var(--panel);
+  color:var(--ink);font:inherit;padding:0 12px}
+select.fld{padding:0 8px}
+.toasts{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:200;display:flex;flex-direction:column;gap:8px;align-items:center}
+.toast{background:var(--ink);color:var(--bg);border-radius:999px;padding:9px 18px;font-size:13px;font-weight:600;max-width:92vw}
+.toast.err{background:var(--red);color:#fff}
+
+/* This block is emitted AFTER the shared chrome on purpose: the responsive
+   rules below override .ov and .modal, and a media query adds no specificity,
+   so source order is the only thing that decides. */
+/* The toasts sit at z-index 200, deliberately above every modal, so a message
+   is readable over a sheet. On a phone a sheet's action row is at the bottom
+   of the screen and the toast lands exactly on top of it, which made the
+   button dead for the three seconds the toast was up. Visible, never
+   clickable: the message is for reading, not for tapping. */
+.toasts{pointer-events:none}
+.wrap{flex:1;overflow-y:auto;padding:16px 18px;max-width:1080px;width:100%;margin:0 auto}
+.note{font-size:12px;color:var(--ink-4);margin:8px 2px 0;line-height:1.5}
+.hint{font-size:11.5px;color:var(--ink-4);margin-top:7px;line-height:1.45}
+
+/* Three views on one screen, and which one you get is a matter of who you
+   are: the employee's own week is the default and needs nothing, the two
+   manager views ask for a PIN once and hold it for the visit. */
+.views{display:flex;gap:6px;background:var(--surface-2);border-radius:999px;padding:4px;margin-bottom:14px}
+.view{flex:1;min-height:var(--tap);border-radius:999px;font-size:13.5px;font-weight:600;color:var(--ink-3);
+  display:flex;align-items:center;justify-content:center;gap:6px;transition:transform .1s}
+.view:active{transform:scale(.97)}
+.view.on{background:var(--panel);color:var(--ink);box-shadow:var(--ring)}
+.view .lk{width:12px;height:12px;flex-shrink:0;fill:none;stroke:currentColor;stroke-width:1.9;
+  stroke-linecap:round;stroke-linejoin:round;opacity:.75}
+
+/* the week bar: the schedule is one week at a time, and every part of moving
+   between them is thumb sized */
+.wkbar{display:flex;align-items:center;gap:8px}
+.wknav{min-width:var(--tap);min-height:var(--tap);border-radius:999px;background:var(--surface-2);
+  font-size:19px;font-weight:700;flex-shrink:0;transition:transform .1s}
+.wknav:active{transform:scale(.95)}
+.wklabel{flex:1;min-width:0;min-height:var(--tap);border-radius:10px;background:var(--surface);
+  box-shadow:var(--ring);display:flex;flex-direction:column;align-items:center;justify-content:center;
+  font-size:13.5px;font-weight:700;line-height:1.2;padding:0 8px;text-align:center}
+.wklabel small{font-size:11px;font-weight:600;color:var(--ink-4)}
+.thisweek{min-height:var(--tap);border-radius:999px;padding:0 15px;font-size:13px;font-weight:600;
+  background:var(--surface-2);color:var(--ink-2);flex-shrink:0;transition:transform .1s}
+.thisweek:active{transform:scale(.96)}
+.thisweek[hidden]{display:none}
+.tally{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12.5px;font-weight:600;
+  color:var(--ink-3);margin:10px 2px 0}
+
+/* ---- my week: a day list, readable standing up in a break room ---- */
+.day{background:var(--surface);border-radius:14px;box-shadow:var(--ring);margin-bottom:8px;
+  padding:11px 14px;display:flex;align-items:flex-start;gap:14px}
+.day.today{box-shadow:inset 0 0 0 1.5px var(--brand),var(--ring)}
+.day .dnm{min-width:78px;font-size:13.5px;font-weight:800;line-height:1.25}
+.day .dnm small{display:block;font-size:11px;font-weight:600;color:var(--ink-4)}
+.day .dbody{flex:1;min-width:0}
+.day .off{font-size:13px;color:var(--ink-4)}
+.sh{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap;padding:3px 0}
+.sh b{font-size:14.5px;font-weight:700;font-variant-numeric:tabular-nums}
+.sh .role{font-size:12px;font-weight:700;color:var(--info);letter-spacing:.02em}
+.sh .hrs{margin-left:auto;font-size:11.5px;color:var(--ink-4);font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* not an error: the page simply has not been told who is holding it */
+.lock{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:14px 15px;border-radius:14px;
+  background:var(--surface);box-shadow:var(--ring);font-size:13px;color:var(--ink-3);line-height:1.5}
+.lock p{flex:1;min-width:200px}
+.empty{background:var(--surface);border-radius:14px;box-shadow:var(--ring);padding:26px 18px;text-align:center;
+  color:var(--ink-3);font-size:13.5px;line-height:1.6}
+
+/* ---- the manager's week ----
+   Desktop gets the grid the ticket asks for, employees down and days across.
+   A phone gets ONE DAY at a time behind a day switcher, never a grid shoved
+   sideways: a horizontally scrolled table on a handheld is a table nobody
+   reads, and a manager fixing Saturday is looking at Saturday. */
+.dayswitch{display:flex;gap:6px;margin:14px 0 10px}
+.dchip{flex:1;min-width:0;min-height:52px;border-radius:12px;background:var(--surface-2);color:var(--ink-3);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;
+  font-size:11px;font-weight:700;transition:transform .1s}
+.dchip:active{transform:scale(.96)}
+.dchip b{font-size:14px;font-weight:800;font-variant-numeric:tabular-nums}
+.dchip.on{background:var(--ink);color:var(--bg)}
+.dchip .cnt{font-size:9.5px;font-weight:700;letter-spacing:.04em}
+.dchip.on .cnt{color:var(--bg);opacity:.75}
+
+.grid{display:none;background:var(--surface);border-radius:14px;box-shadow:var(--ring);overflow:hidden;margin-top:12px}
+.grid .grow{display:grid;grid-template-columns:158px repeat(7,minmax(0,1fr));
+  border-bottom:1px solid var(--line-subtle)}
+.grid .grow:last-child{border-bottom:none}
+.grid .ghead{background:var(--surface-2)}
+.grid .gc{padding:8px 6px;border-left:1px solid var(--line-subtle);min-width:0}
+.grid .gc:first-child{border-left:none}
+.grid .gname{padding:10px 12px;font-size:13px;font-weight:700;line-height:1.25}
+.grid .gname small{display:block;font-size:10.5px;font-weight:600;color:var(--ink-4)}
+.grid .gday{padding:8px 6px;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  color:var(--ink-3);text-align:center;border-left:1px solid var(--line-subtle)}
+.grid .gday small{display:block;font-size:13px;font-weight:800;color:var(--ink);letter-spacing:0}
+/* a cell is a container, not a control: a button holding buttons is
+   invalid markup and the browser ejects the inner ones, which would take the
+   shift pills out of the grid entirely */
+.cell{display:flex;flex-direction:column;gap:4px;align-items:stretch}
+.cadd{min-height:var(--tap);border-radius:10px;border:1.5px dashed var(--line);color:var(--ink-4);
+  font-size:17px;font-weight:600;transition:transform .1s,background-color .15s}
+.cadd:active{transform:scale(.96)}
+@media (hover:hover){.cadd:hover{background:var(--surface-2);color:var(--ink-2)}}
+
+/* one planned shift, wherever it is drawn. Draft and live wear the Menu
+   page's own language: amber for a draft in progress, green for what is
+   already out there. */
+.pill{border-radius:9px;padding:5px 9px;text-align:left;font-size:11.5px;font-weight:700;line-height:1.3;
+  border:1px solid;transition:transform .1s;min-height:var(--tap)}
+.pill:active{transform:scale(.97)}
+.pill span{display:block;font-size:10.5px;font-weight:600;opacity:.85}
+.pill.live{background:var(--green-wash);border-color:var(--green-line);color:var(--green)}
+.pill.draft{background:var(--amber-wash);border-color:var(--amber-line);color:var(--amber)}
+
+/* the phone's day view: one employee per row, their shifts beside them */
+.prow{background:var(--surface);border-radius:14px;box-shadow:var(--ring);margin-bottom:8px;padding:10px 13px;
+  display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.prow .pnm{min-width:120px;flex:1;font-size:14px;font-weight:700;line-height:1.25}
+.prow .pnm small{display:block;font-size:11px;font-weight:600;color:var(--ink-4)}
+.prow .pshifts{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.addbtn{min-height:var(--tap);min-width:var(--tap);border-radius:999px;padding:0 14px;font-size:13px;
+  font-weight:700;background:var(--surface-2);color:var(--ink-3);transition:transform .1s}
+.addbtn:active{transform:scale(.96)}
+
+/* the warning the engine sent back, in the page and never in the way */
+.warn{display:none;align-items:flex-start;gap:10px;margin-top:12px;padding:11px 13px;border-radius:12px;
+  font-size:12.5px;font-weight:600;color:var(--amber);background:var(--amber-wash);
+  border:1px solid var(--amber-line);line-height:1.45}
+.warn.on{display:flex}
+.warn p{flex:1}
+.warn button{min-width:30px;min-height:30px;border-radius:999px;color:inherit;font-size:15px;flex-shrink:0}
+/* the engine's own words, never a paraphrase */
+.err{display:none;margin-top:14px;padding:10px 12px;border-radius:10px;font-size:12.5px;font-weight:600;
+  color:var(--red);background:var(--red-wash);border:1px solid var(--red-line);line-height:1.45}
+.err.on{display:block}
+
+/* ---- planned versus actual ---- */
+.hrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:11px 0;
+  border-bottom:1px solid var(--line-subtle)}
+.hrow:last-child{border-bottom:none}
+.hrow .hnm{flex:1;min-width:130px;font-size:14px;font-weight:700;line-height:1.3}
+.hrow .hnm small{display:block;font-size:11px;font-weight:600;color:var(--ink-4)}
+.fig{min-width:62px;text-align:right;font-variant-numeric:tabular-nums}
+.fig b{display:block;font-size:15px;font-weight:800;line-height:1.2}
+.fig small{display:block;font-size:9.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-4)}
+.fig.up b{color:var(--amber)}
+.fig.down b{color:var(--info)}
+.hrow.total{border-top:1.5px solid var(--line);border-bottom:none;margin-top:2px}
+.hrow.total .hnm{color:var(--ink-3);font-size:12.5px;letter-spacing:.05em;text-transform:uppercase}
+
+/* the sheet, the shape the floor editor and the book already use */
+.sheet{background:var(--surface);border-radius:16px;box-shadow:var(--shadow-lg);width:min(460px,100%);
+  max-height:calc(var(--vph) - 40px);display:flex;flex-direction:column;animation:pop .15s ease-out}
+.s-b{flex:1;overflow-y:auto;padding:2px 18px 14px}
+.s-f{display:flex;gap:8px;padding:10px 18px 16px;border-top:1px solid var(--line-subtle)}
+.s-f .btn{flex:1;min-height:46px;border-radius:999px;font-size:15px;font-weight:600}
+.fl{font-size:12.5px;font-weight:700;margin:14px 0 5px}
+.fl small{font-weight:400;color:var(--ink-4)}
+.fld{width:100%;min-height:var(--tap);border-radius:10px;border:1px solid var(--line);background:var(--panel);
+  color:var(--ink);font:inherit;padding:0 12px}
+.times{display:flex;gap:10px}
+.times>div{flex:1;min-width:0}
+.opts{display:flex;gap:7px;flex-wrap:wrap}
+.opt{min-height:var(--tap);border-radius:999px;padding:0 15px;font-size:13.5px;font-weight:600;
+  background:var(--surface-2);color:var(--ink-2);border:1.5px solid transparent;transition:transform .1s}
+.opt:active{transform:scale(.96)}
+.opt.on{background:var(--brand-wash);color:var(--ink);border-color:var(--brand)}
+.danger{min-height:var(--tap);border-radius:999px;padding:0 18px;width:100%;background:transparent;
+  border:1.5px solid var(--red);color:var(--red);font-size:14px;font-weight:600;margin-top:16px;
+  transition:transform .1s}
+.danger:active{transform:scale(.97)}
+.confirm{padding:12px;border-radius:12px;background:var(--brand-wash);margin-top:4px}
+.confirm p{font-size:13px;color:var(--ink-2);line-height:1.5}
+
+@media (min-width:821px){
+  /* the grid the ticket asks for, and only where there is width for it */
+  .grid{display:block}
+  .dayswitch,.phoneday{display:none}
+}
+@media (max-width:820px){
+  .ov{padding:0;align-items:flex-end}
+  .modal,.sheet{width:100%;border-radius:16px 16px 0 0}
+  .sheet{max-height:calc(var(--vph) - 24px);padding-bottom:var(--safe-b);animation:rise .18s ease-out}
+  .day{gap:10px}
+  .day .dnm{min-width:66px}
+  .hrow .hnm{min-width:100%}
+  .fig{flex:1;text-align:center}
+}
+@keyframes rise{from{transform:translateY(16px);opacity:.6}to{transform:none;opacity:1}}
+/* ============================================================
+   APP SHELL (UI-T1, DESIGN.md section 5 "App shell")
+   Navigation is a place you go, so it lives in the left icon rail with
+   its badge counts. The topbar is where you are: venue, screen, and
+   session state, nothing you navigate with. Icons are inline SVG in one
+   stroke style, never emoji.
+
+   This block is duplicated verbatim on all nine navigable pages. Each
+   page is a self-contained zero-dependency file, so duplication is the
+   accepted cost; keep the block identical everywhere so extracting it
+   later is mechanical rather than a merge.
+   ============================================================ */
+/* minmax(0,1fr), not 1fr: a grid item's automatic minimum is its
+   min-content width, so one unshrinkable chip in the topbar would push
+   the whole shell wider than the phone and the page would scroll
+   sideways. The content column is allowed to be narrower than its
+   contents; the contents clip or ellipsis instead. */
+.shell{display:grid;grid-template-columns:var(--rail) minmax(0,1fr);grid-template-rows:var(--topbar) 1fr;
+  height:var(--vph);overflow:hidden}
+.navrail{grid-row:1/3;background:var(--panel);border-right:1px solid var(--line);overflow-y:auto;
+  display:flex;flex-direction:column;align-items:center;gap:4px;padding:12px 0 14px;
+  transition:background-color .25s ease,border-color .25s ease}
+.rail-logo{width:38px;height:38px;flex-shrink:0;border-radius:999px;background:var(--brand);color:var(--brand-ink);
+  display:flex;align-items:center;justify-content:center;font-weight:800;font-size:17px;margin-bottom:12px}
+.nav-btn{width:66px;min-height:var(--tap);flex-shrink:0;padding:7px 0 6px;border-radius:12px;text-decoration:none;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;position:relative;
+  color:var(--ink-3);font-size:11px;font-weight:600;transition:background-color .15s ease,color .15s ease}
+.nav-btn svg{width:23px;height:23px;fill:none;stroke:currentColor;stroke-width:1.8;
+  stroke-linecap:round;stroke-linejoin:round}
+.nav-btn:active{transform:scale(.96)}
+.nav-btn.on{background:var(--brand-wash);color:var(--ink)}
+.nav-btn:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+/* the badge sits over the icon, never over the label: text that wraps and a
+   badge that floats collide the moment the rail narrows */
+.nav-badge{position:absolute;top:2px;right:8px;min-width:18px;height:18px;padding:0 5px;border-radius:999px;
+  background:var(--red);color:#fff;font-size:11px;font-weight:700;line-height:18px;text-align:center;
+  font-variant-numeric:tabular-nums}
+.nav-badge:empty{display:none}
+.rail-spacer{flex:1}
+.rail-foot{font-size:10px;color:var(--ink-4);text-align:center;padding:0 8px;line-height:1.35}
+.topbar{display:flex;align-items:center;gap:12px;min-width:0;overflow:hidden;padding:0 16px;
+  background:var(--panel);border-bottom:1px solid var(--line);
+  transition:background-color .25s ease,border-color .25s ease}
+.venue{min-width:0}
+.venue b{display:block;font-size:15px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.venue small{display:block;font-size:10px;color:var(--ink-4);letter-spacing:.05em;text-transform:uppercase;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.screen-title{flex-shrink:0;font-size:13px;font-weight:700;color:var(--ink-2);
+  background:var(--surface-2);border-radius:999px;padding:5px 12px;white-space:nowrap}
+.top-meta{margin-left:auto;display:flex;align-items:center;gap:10px;flex-shrink:0}
+.shellbody{min-width:0;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+@media (hover:hover){
+  .nav-btn:hover{background:var(--surface-2);color:var(--ink)}
+  .nav-btn.on:hover{background:var(--brand-wash)}
+}
+@media (hover:none){.nav-btn:hover{background:none;color:var(--ink-3)}.nav-btn.on:hover{background:var(--brand-wash);color:var(--ink)}}
+@media (max-width:980px) and (min-width:821px){
+  :root{--rail:64px}
+  .nav-btn{width:52px;font-size:0;gap:0}
+  .nav-btn svg{width:25px;height:25px}
+  .rail-foot{display:none}
+}
+/* Phones: the rail becomes the bottom tab bar (DESIGN.md section 8), safe
+   area included, and the topbar stays one row. The screen title goes with
+   the rail: the active tab already says which screen you are on, and the
+   row is worth more to the session chrome than to a second label. */
+@media (max-width:820px){
+  .shell{grid-template-columns:minmax(0,1fr)}
+  .navrail{position:fixed;left:0;right:0;bottom:0;top:auto;grid-row:auto;z-index:150;overflow:visible;
+    flex-direction:row;justify-content:space-around;align-items:center;gap:2px;
+    height:calc(58px + var(--safe-b));padding:4px 4px calc(4px + var(--safe-b));
+    border-right:none;border-top:1px solid var(--line)}
+  .rail-logo,.rail-spacer,.rail-foot,.screen-title{display:none}
+  .nav-btn{width:auto;flex:1;min-height:48px;font-size:10px;gap:1px;padding:4px 0}
+  .nav-btn svg{width:21px;height:21px}
+  .shellbody{padding-bottom:calc(58px + var(--safe-b))}
+  .topbar{padding:0 12px;gap:8px}
+  .venue small{display:none}
+}
+</style>
+</head>
+<body>
+<div class="shell">
+  <!-- ===== APP SHELL: navigation rail (UI-T1). Identical markup on all nine
+       navigable pages; only which entry carries "on" differs. ===== -->
+  <nav class="navrail" aria-label="Screens">
+    <div class="rail-logo" aria-hidden="true">R</div>
+    <a class="nav-btn" href="/pos"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3.5h12v17l-3-1.8-3 1.8-3-1.8-3 1.8z"/><path d="M9.2 8.6h5.6M9.2 12.6h5.6"/></svg>Service</a>
+    <a class="nav-btn" href="/tables"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="5"/><path d="M12 3.6v2.2M12 18.2v2.2M3.6 12h2.2M18.2 12h2.2"/></svg>Tables<span class="nav-badge" id="navTables"></span></a>
+    <a class="nav-btn" href="/reservations"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5.4" width="17" height="15.1" rx="2.6"/><path d="M3.5 10.4h17M8.2 3.4v3.6M15.8 3.4v3.6"/></svg>Bookings</a>
+    <a class="nav-btn" href="/kds"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 18.6h17"/><path d="M5.5 18.6a6.5 6.5 0 0 1 13 0"/><path d="M12 12.1V9.9"/></svg>Kitchen<span class="nav-badge" id="navKds"></span></a>
+    <a class="nav-btn" href="/menu"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5.6" cy="7" r="1.1"/><circle cx="5.6" cy="12" r="1.1"/><circle cx="5.6" cy="17" r="1.1"/><path d="M9.6 7h8.8M9.6 12h8.8M9.6 17h8.8"/></svg>Menu</a>
+    <a class="nav-btn" href="/close"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="7.5" width="17" height="11" rx="2.5"/><path d="M3.5 12.6h17M10 15.8h4"/></svg>Close</a>
+    <a class="nav-btn" href="/reports"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.6 19.6h16.8"/><path d="M6.6 19.6v-6.4M12 19.6V5.4M17.4 19.6v-9"/></svg>Reports</a>
+    <a class="nav-btn on" aria-current="page" href="/schedule"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.2"/><path d="M12 7.3v5l3.4 2"/></svg>Shifts</a>
+    <a class="nav-btn" href="/settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7.6h9.2M18.4 7.6h1.6M4 16.4h4.6M13.8 16.4h6.2"/><circle cx="15.6" cy="7.6" r="2.4"/><circle cx="11.2" cy="16.4" r="2.4"/></svg>Settings</a>
+    <div class="rail-spacer"></div>
+    <div class="rail-foot">Concept build.<br>Demo data only.</div>
+  </nav>
+  <header class="topbar">
+    <div class="venue"><b data-venue-name>RestaurantOS</b><small>RestaurantOS shifts · live from the server</small></div>
+    <div class="screen-title">Schedule</div>
+    <div class="top-meta">
+      <span class="chip mut" id="whoChip">Not signed in</span>
+    </div>
+  </header>
+  <div class="shellbody">
+<div class="wrap">
+  <div class="views">
+    <button class="view on" data-view="mine">My week</button>
+    <button class="view" data-view="plan">Plan<svg class="lk" id="lkPlan" viewBox="0 0 20 20" aria-hidden="true"><rect x="4" y="8.6" width="12" height="8" rx="2"/><path d="M6.8 8.6V6.6a3.2 3.2 0 0 1 6.4 0v2"/></svg></button>
+    <button class="view" data-view="hours">Hours<svg class="lk" id="lkHours" viewBox="0 0 20 20" aria-hidden="true"><rect x="4" y="8.6" width="12" height="8" rx="2"/><path d="M6.8 8.6V6.6a3.2 3.2 0 0 1 6.4 0v2"/></svg></button>
+  </div>
+
+  <div id="body"></div>
+</div>
+  </div>
+</div>
+
+<!-- the manager gate, asked the way Settings asks and held for the visit.
+     The server checks it again on every call, which is where the real gate
+     lives; this only decides which view the screen will draw. -->
+<div class="ov" id="ovPin"><div class="modal">
+  <div class="m-h"><div><h3>Manager PIN</h3><div class="sub">Planning the week is manager work</div></div><button class="m-x" data-close="ovPin">✕</button></div>
+  <div class="m-b">
+    <input class="fld" id="pinFld" inputmode="numeric" maxlength="6" placeholder="••••" autocomplete="off" aria-label="Manager PIN">
+    <p class="hint">Held for this visit and sent with every read and every change. The server checks it again each time. Demo manager: Marco B. · 1122</p>
+  </div>
+  <div class="m-f"><button class="btn btn-p btn-lg" id="pinGo">Continue</button></div>
+</div></div>
+
+<!-- one sheet for both jobs: adding a shift to an empty cell and editing the
+     one you tapped -->
+<div class="ov" id="ovShift"><div class="sheet">
+  <div class="m-h"><div><h3 id="shTitle">Add a shift</h3><div class="sub" id="shSub"></div></div><button class="m-x" data-close="ovShift">✕</button></div>
+  <div class="s-b" id="shBody"></div>
+  <div class="s-f" id="shFoot"></div>
+</div></div>
+
+<!-- publish: one deliberate act, and the confirm says what it does -->
+<div class="ov" id="ovPub"><div class="modal">
+  <div class="m-h"><div><h3>Publish the week</h3><div class="sub" id="pubSub"></div></div><button class="m-x" data-close="ovPub">✕</button></div>
+  <div class="m-b">
+    <div class="confirm"><p id="pubLine"></p></div>
+    <p class="hint">Publishing does not lock anything. You can keep editing afterwards, and a change to a shift that is already out there is live the moment you save it.</p>
+    <div class="err" id="pubErr"></div>
+  </div>
+  <div class="m-f"><button class="btn btn-p btn-lg" id="pubGo">Publish the week</button></div>
+</div></div>
+
+<div class="toasts" id="toasts"></div>
+
+<script>
+/* Schedule (E24-T5): the other half of the clock, on a screen.
+   E24-T4 owns every rule and every number; this page formats three reads and
+   posts three commands. It never adds up an hour of its own: the totals, the
+   per-shift hours and the planned-versus-actual variance all arrive already
+   worked out, because a page that does its own arithmetic is a second opinion
+   waiting to disagree with the server on a Friday.
+
+   Phone first (D31): a server checks their week standing in a break room, so
+   their own view is the default, needs no PIN, and reads in five seconds. The
+   manager's grid is the thing that gets folded on a small screen, never the
+   employee's list. */
+const $=s=>document.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+/* the SHARED device key, the same one the lock screen signs in with and the
+   POS reads its session from. A per-page id would give this screen a device
+   nobody has ever signed in on, which is the one thing "my week" cannot have. */
+const DEVICE=(()=>{try{let d=localStorage.getItem("ros.device");if(!d){d="web-"+crypto.randomUUID().slice(0,8);localStorage.setItem("ros.device",d);}return d;}catch(_){return "web-anon";}})();
+
+function toast(m,err){const el=document.createElement("div");el.className="toast"+(err?" err":"");el.textContent=m;
+  $("#toasts").appendChild(el);setTimeout(()=>el.remove(),3400);}
+
+/* ---------- dates, and only ever as labels ----------
+   The server buckets a shift onto a service date on its own clock and hands
+   back both the date and the wall-clock times. Everything here turns those
+   into words; nothing re-derives them from a timestamp, because the browser's
+   timezone is not the restaurant's. */
+const ymd=d=>d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+const todayYmd=()=>ymd(new Date());
+function dayShift(on,n){const p=on.split("-").map(Number);const dt=new Date(p[0],p[1]-1,p[2]);dt.setDate(dt.getDate()+n);return ymd(dt);}
+function dateOf(on){const p=on.split("-").map(Number);return new Date(p[0],p[1]-1,p[2]);}
+const dayName=on=>dateOf(on).toLocaleDateString([],{weekday:"short"});
+const dayLong=on=>dateOf(on).toLocaleDateString([],{weekday:"long"});
+const dayNum=on=>String(dateOf(on).getDate());
+const dayPretty=on=>dateOf(on).toLocaleDateString([],{weekday:"short",day:"numeric",month:"short"});
+/* "16:00" as a person says it. The server's own wall-clock string, in words:
+   parsing it is presentation, and re-deriving it from the UTC stamp would put
+   the restaurant's evening in whatever zone this phone happens to be in. */
+function clock12(hm){
+  const [h,m]=String(hm||"").split(":").map(Number);
+  if(!Number.isFinite(h))return String(hm||"");
+  const ampm=h<12?"AM":"PM";
+  const hour=h%12===0?12:h%12;
+  return hour+":"+String(m||0).padStart(2,"0")+" "+ampm;
+}
+const hrs=n=>(Math.round(n*10)/10)+(Math.abs(n)===1?" hour":" hours");
+const plural=(n,w)=>n+" "+w+(n===1?"":"s");
+
+/* ---------- state ----------
+   `week`, `myWeek` and `hours` are the three reads, held verbatim. Nothing is
+   written back into them; a command is followed by a re-read. */
+let view="mine",weekOf=todayYmd(),hoursOn=todayYmd();
+let mgrPin=null,pinThen=null;
+let myWeek=null,week=null,hours=null,me=null,sh=null,warning="";
+
+async function loadWho(){
+  try{me=(await fetch("/v1/session?deviceId="+encodeURIComponent(DEVICE)).then(r=>r.json())).employee;}catch(_){me=null;}
+  const chip=$("#whoChip");
+  chip.textContent=me?me.name+(me.role==="manager"?" · manager":""):"Not signed in";
+  chip.className="chip "+(me?"green":"mut");
+}
+
+/* every gated call carries the PIN, in the BODY and never in a URL: a manager
+   PIN in a query string lands in a log and a history list (E24-T2's rule, and
+   the reason E24-T4 serves both gated reads over POST) */
+async function post(url,body){
+  const res=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify(body)});
+  const data=await res.json().catch(()=>({}));
+  return{ok:res.ok,reason:data.reason||"The server refused that",data:data};
+}
+const cmd=(url,body)=>post(url,Object.assign({operationId:crypto.randomUUID(),deviceId:DEVICE,managerPin:mgrPin},body));
+/* a PIN the server will not take is not a typo to live with. Only the two
+   sentences the engine uses when the MANAGER's PIN is the problem. */
+const badPin=r=>/requires a manager's PIN|not recognized as a manager/.test(r||"");
+
+function askPin(then){
+  pinThen=then;
+  $("#pinFld").value=mgrPin||"";
+  $("#ovPin").classList.add("open");
+  setTimeout(()=>$("#pinFld").focus(),60);
+}
+$("#pinGo").onclick=()=>{
+  const v=$("#pinFld").value.trim();
+  if(!/^[0-9]{4,6}$/.test(v)){toast("A PIN is 4 to 6 digits",true);return;}
+  mgrPin=v;$("#ovPin").classList.remove("open");
+  const then=pinThen;pinThen=null;if(then)then();
+};
+$("#pinFld").onkeydown=e=>{if(e.key==="Enter")$("#pinGo").click();};
+
+/* ---------- the reads ---------- */
+
+async function refresh(){
+  if(view==="mine"){
+    try{
+      myWeek=await fetch("/v1/schedule/mine?deviceId="+encodeURIComponent(DEVICE)
+        +"&weekOf="+encodeURIComponent(weekOf)).then(r=>r.json());
+    }catch(_){myWeek=null;}
+    if(myWeek&&myWeek.weekOf)adoptWeek(myWeek.weekOf);
+    render();return;
+  }
+  if(view==="plan"){
+    const r=await post("/v1/schedule/week",{managerPin:mgrPin,weekOf:weekOf});
+    if(!r.ok){lostPin(r.reason);return;}
+    week=r.data;adoptWeek(week.weekOf);
+    render();return;
+  }
+  const r=await post("/v1/insights/labor",{managerPin:mgrPin,date:hoursOn});
+  if(!r.ok){lostPin(r.reason);return;}
+  hours=r.data;
+  render();
+}
+
+/* a refused PIN drops back to the employee's own view rather than leaving a
+   manager screen half drawn */
+function lostPin(reason){
+  toast(reason,true);
+  if(badPin(reason))mgrPin=null;
+  view="mine";
+  refresh().catch(()=>{});
+}
+
+/* ---------- render ---------- */
+
+function render(){
+  document.querySelectorAll(".view").forEach(b=>b.classList.toggle("on",b.dataset.view===view));
+  $("#lkPlan").style.display=mgrPin?"none":"";
+  $("#lkHours").style.display=mgrPin?"none":"";
+  if(view==="mine")return renderMine();
+  if(view==="plan")return renderPlan();
+  renderHours();
+}
+
+function weekBar(sub){
+  const end=dayShift(weekOf,6);
+  return `<div class="wkbar">
+    <button class="wknav" id="wkPrev" aria-label="The week before">‹</button>
+    <div class="wklabel">${esc(dayPretty(weekOf))} to ${esc(dayPretty(end))}<small>${esc(sub||"")}</small></div>
+    <button class="wknav" id="wkNext" aria-label="The week after">›</button>
+    <button class="thisweek" id="wkNow" ${weekOf===thisWeekOf()?"hidden":""}>This week</button>
+  </div>`;
+}
+/* The Monday the SERVER picks, so "This week" lands on the same seven days it
+   would. The first week any read names is the one containing today, because
+   that is what the page asked for at boot; after that the label just follows. */
+let thisWeek=null;
+function adoptWeek(monday){weekOf=monday;if(!thisWeek)thisWeek=monday;}
+const thisWeekOf=()=>thisWeek||weekOf;
+
+function wireWeekBar(){
+  const prev=$("#wkPrev"),next=$("#wkNext"),now=$("#wkNow");
+  if(prev)prev.onclick=()=>{weekOf=dayShift(weekOf,-7);warning="";refresh().catch(()=>{});};
+  if(next)next.onclick=()=>{weekOf=dayShift(weekOf,7);warning="";refresh().catch(()=>{});};
+  if(now)now.onclick=()=>{weekOf=thisWeekOf();warning="";refresh().catch(()=>{});};
+}
+
+/* ---- my week: the default, and the whole reason this screen is on a phone ---- */
+function renderMine(){
+  if(!myWeek||myWeek.ok!==true){
+    $("#body").innerHTML=`<div class="lock">
+      <p>Sign in on this device and your shifts appear here. Nothing else is needed: no PIN, no setup, and nobody else's week.</p>
+      <a class="btn btn-p" href="/" style="text-decoration:none">Sign in</a>
+    </div>
+    <p class="note">Only published shifts show up here. A week a manager is still building is nobody else's business until they say it is.</p>`;
+    return;
+  }
+  const w=myWeek;
+  $("#body").innerHTML=weekBar(w.employee.name)
+    +`<div class="tally">${esc(plural(w.shifts,"shift"))} · ${esc(hrs(w.plannedHours))}</div>`
+    +`<div style="margin-top:12px">`+w.days.map(d=>{
+      const on=d.date===todayYmd();
+      return `<div class="day ${on?"today":""}">
+        <div class="dnm">${esc(dayName(d.date))}<small>${esc(dayNum(d.date))} ${esc(dateOf(d.date).toLocaleDateString([],{month:"short"}))}</small></div>
+        <div class="dbody">${d.shifts.length
+          ? d.shifts.map(s=>`<div class="sh"><b>${esc(clock12(s.from))} to ${esc(clock12(s.to))}</b>
+              <span class="role">${esc(s.roleForShift)}</span>
+              <span class="hrs">${esc(hrs(s.hours))}</span></div>`).join("")
+          : `<div class="off">Off</div>`}</div>
+      </div>`;
+    }).join("")+`</div>`
+    +`<p class="note">Published shifts only. If a manager is still building next week you will not see it here until they publish it, which is the point: a schedule you can watch change under you is worse than no schedule.</p>`;
+  wireWeekBar();
+}
+
+/* ---- the manager's week ---- */
+function renderPlan(){
+  const w=week;
+  const drafts=w.totals.draft;
+  $("#body").innerHTML=weekBar(esc(plural(w.totals.shifts,"shift"))+" · "+esc(hrs(w.totals.plannedHours)))
+    +`<div class="tally">
+      ${drafts?`<span class="chip amber">${esc(plural(drafts,"draft"))}</span>`:`<span class="chip green">all published</span>`}
+      <span>${esc(plural(w.totals.published,"shift"))} the floor can see</span>
+      <button class="btn btn-p" id="pubBtn" style="margin-left:auto">Publish week</button>
+    </div>`
+    +`<div class="warn ${warning?"on":""}"><p>${esc(warning)}</p><button id="warnX" aria-label="Dismiss">✕</button></div>`
+    +daySwitch()+phoneDay()+grid()
+    +`<p class="note">Amber is a draft, green is already out there. Tap any cell to add a shift or any shift to change it. An overlap is a warning and never a refusal: a split double is real life, and so is deliberately double-covering a Saturday.</p>`;
+  wireWeekBar();
+  $("#pubBtn").onclick=publishForm;
+  const x=$("#warnX");if(x)x.onclick=()=>{warning="";render();};
+  document.querySelectorAll("[data-cell]").forEach(b=>b.onclick=()=>{
+    const [employeeId,date]=b.dataset.cell.split("|");
+    openShift(null,employeeId,date);
+  });
+  document.querySelectorAll("[data-shift]").forEach(b=>b.onclick=()=>{
+    const s=allShifts().find(x=>x.id===b.dataset.shift);
+    if(s)openShift(s,s.employeeId,s.date);
+  });
+  document.querySelectorAll("[data-day]").forEach(b=>b.onclick=()=>{planDay=b.dataset.day;render();});
+}
+
+const allShifts=()=>week.employees.flatMap(e=>e.days.flatMap(d=>d.shifts));
+let planDay=null;
+const currentDay=()=>{
+  if(planDay&&week.days.includes(planDay))return planDay;
+  return week.days.includes(todayYmd())?todayYmd():week.days[0];
+};
+
+function shiftPill(s){
+  return `<button class="pill ${s.published?"live":"draft"}" data-shift="${esc(s.id)}">
+    ${esc(clock12(s.from))}<span>${esc(s.roleForShift)}</span></button>`;
+}
+
+/* the phone's day switcher: seven chips, the count on each, so a manager can
+   see where the holes are without opening a day */
+function daySwitch(){
+  const on=currentDay();
+  return `<div class="dayswitch">`+week.days.map(d=>{
+    const n=allShifts().filter(s=>s.date===d).length;
+    return `<button class="dchip ${d===on?"on":""}" data-day="${esc(d)}">
+      ${esc(dayName(d))}<b>${esc(dayNum(d))}</b><span class="cnt">${n?n:"·"}</span></button>`;
+  }).join("")+`</div>`;
+}
+
+/* ONE DAY at a time on a handheld, never a grid pushed sideways */
+function phoneDay(){
+  const d=currentDay();
+  return `<div class="phoneday">`+week.employees.map(e=>{
+    const mine=e.days.find(x=>x.date===d).shifts;
+    return `<div class="prow">
+      <div class="pnm">${esc(e.name)}<small>${esc(e.title)}${e.active?"":" · no longer here"}</small></div>
+      <div class="pshifts">${mine.map(shiftPill).join("")}
+        <button class="addbtn" data-cell="${esc(e.id)}|${esc(d)}">+</button></div>
+    </div>`;
+  }).join("")+`</div>`;
+}
+
+/* and the grid the ticket asks for, where there is room to draw it */
+function grid(){
+  return `<div class="grid">
+    <div class="grow ghead">
+      <div class="gname">Who</div>
+      ${week.days.map(d=>`<div class="gday">${esc(dayName(d))}<small>${esc(dayNum(d))}</small></div>`).join("")}
+    </div>`
+    +week.employees.map(e=>`<div class="grow">
+      <div class="gname">${esc(e.name)}<small>${esc(e.title)}${e.days.some(d=>d.shifts.length)?" · "+esc(hrs(e.plannedHours)):""}</small></div>
+      ${e.days.map(d=>`<div class="gc"><div class="cell">
+        ${d.shifts.map(shiftPill).join("")}
+        <button class="cadd" data-cell="${esc(e.id)}|${esc(d.date)}" aria-label="Add a shift">+</button>
+      </div></div>`).join("")}
+    </div>`).join("")+`</div>`;
+}
+
+/* ---- the add / edit sheet ---- */
+function openShift(existing,employeeId,date){
+  const who=week.employees.find(e=>e.id===employeeId);
+  sh={id:existing?existing.id:null,employeeId:employeeId,date:date,
+    from:existing?existing.from:"16:00",to:existing?existing.to:"22:00",
+    role:existing?existing.roleForShift:(who?who.title:""),
+    published:existing?existing.published:false,
+    confirming:false,err:""};
+  $("#shTitle").textContent=(existing?"Edit ":"Add ")+(who?who.name+"'s shift":"a shift");
+  $("#shSub").textContent=dayLong(date)+" "+dayPretty(date);
+  renderSheet();
+  $("#ovShift").classList.add("open");
+}
+
+function renderSheet(){
+  const editing=!!sh.id;
+  $("#shBody").innerHTML=`
+    ${editing?`<div style="margin-top:12px">${sh.published
+      ?`<span class="chip green">published</span> <span class="note" style="display:inline">changing this is live the moment you save</span>`
+      :`<span class="chip amber">draft</span> <span class="note" style="display:inline">nobody but you can see it yet</span>`}</div>`:""}
+    <div class="fl">Working as <small>what they are doing that night, not their job title</small></div>
+    <input class="fld" id="shRole" maxlength="40" autocomplete="off" placeholder="Server, Bar, Expo" value="${esc(sh.role)}" aria-label="Working as">
+    <div class="times">
+      <div><div class="fl">Starts</div><input class="fld" id="shFrom" type="time" value="${esc(sh.from)}" aria-label="Start time"></div>
+      <div><div class="fl">Ends</div><input class="fld" id="shTo" type="time" value="${esc(sh.to)}" aria-label="End time"></div>
+    </div>
+    <p class="hint">A shift that ends before it starts, or runs longer than sixteen hours, is refused by the server and its reason lands here.</p>
+    <div class="err ${sh.err?"on":""}">${esc(sh.err)}</div>
+    ${editing?(sh.confirming
+      ?`<div class="confirm" style="margin-top:16px;background:var(--red-wash)">
+          <p>Take this shift off the schedule?${sh.published?" It is published, so it disappears from their own view too." : ""}</p>
+          <button class="danger" id="shRmGo" style="margin-top:10px">Yes, remove it</button>
+        </div>`
+      :`<button class="danger" id="shRm">Remove this shift</button>`):""}`;
+  $("#shFoot").innerHTML=`<button class="btn btn-s" data-close="ovShift">Cancel</button>`
+    +`<button class="btn btn-p" id="shSave">${editing?"Save changes":"Add shift"}</button>`;
+  // the text and time fields write straight to state and never re-render:
+  // rebuilding the sheet under a keystroke would take the cursor with it
+  $("#shRole").oninput=()=>{sh.role=$("#shRole").value;};
+  $("#shFrom").oninput=()=>{sh.from=$("#shFrom").value;};
+  $("#shTo").oninput=()=>{sh.to=$("#shTo").value;};
+  const rm=$("#shRm");if(rm)rm.onclick=()=>{sh.confirming=true;renderSheet();};
+  const go=$("#shRmGo");if(go)go.onclick=removeShift;
+  $("#shSave").onclick=saveShift;
+}
+
+function sheetErr(reason){sh.err=reason;sh.confirming=false;renderSheet();if(badPin(reason))mgrPin=null;}
+
+/* the ISO the command takes, built from the day the cell belongs to and the
+   wall-clock time typed into it */
+function isoAt(date,hm){
+  const p=date.split("-").map(Number),t=String(hm||"").split(":").map(Number);
+  if(!Number.isFinite(t[0]))return "";
+  return new Date(p[0],p[1]-1,p[2],t[0],t[1]||0,0,0).toISOString();
+}
+
+async function saveShift(){
+  sh.err="";
+  if(!sh.from||!sh.to){sheetErr("A shift needs a start and an end.");return;}
+  // an end at or before the start is the overnight case: 22:00 to 02:00 is
+  // tomorrow morning, which is what a closing shift actually is
+  const start=isoAt(sh.date,sh.from);
+  const end=isoAt(sh.to<=sh.from?dayShift(sh.date,1):sh.date,sh.to);
+  const r=await cmd("/v1/schedule/shift",Object.assign(
+    {employeeId:sh.employeeId,roleForShift:sh.role.trim(),startsAt:start,endsAt:end},
+    sh.id?{id:sh.id}:{}));
+  if(!r.ok){sheetErr(r.reason);return;}
+  $("#ovShift").classList.remove("open");
+  // the engine's warning, shown in the page and never in the way of the work
+  warning=r.data.note||"";
+  await refresh();
+  toast(sh.id?"Shift saved":"Shift added");
+}
+
+async function removeShift(){
+  const r=await cmd("/v1/schedule/shift/"+encodeURIComponent(sh.id)+"/remove",{});
+  if(!r.ok){sheetErr(r.reason);return;}
+  $("#ovShift").classList.remove("open");
+  warning="";
+  await refresh();
+  toast(r.data.note||"Shift removed");
+}
+
+/* ---- publish ---- */
+function publishForm(){
+  const drafts=week.totals.draft;
+  $("#pubSub").textContent=dayPretty(weekOf)+" to "+dayPretty(dayShift(weekOf,6));
+  $("#pubLine").textContent=drafts
+    ? "Staff can see this week after you publish. "+plural(drafts,"draft shift")+" become visible to the people working them, right away."
+    : "Every shift this week is already published. Publishing again changes nothing.";
+  $("#pubErr").textContent="";$("#pubErr").classList.remove("on");
+  $("#ovPub").classList.add("open");
+}
+$("#pubGo").onclick=async()=>{
+  const r=await cmd("/v1/schedule/publish",{weekOf:weekOf});
+  if(!r.ok){
+    $("#pubErr").textContent=r.reason;$("#pubErr").classList.add("on");
+    if(badPin(r.reason))mgrPin=null;
+    return;
+  }
+  $("#ovPub").classList.remove("open");
+  warning="";
+  await refresh();
+  toast(r.data.note||"Week published");
+};
+
+/* ---- planned versus actual ----
+   Hours, and only hours. Nothing on this screen is multiplied by anything:
+   there is no wage stored anywhere to multiply by, which is the whole of
+   D28 rung 3 and the reason this line can be shown to a manager at all. */
+function renderHours(){
+  const h=hours;
+  $("#body").innerHTML=`<div class="wkbar">
+      <button class="wknav" id="hPrev" aria-label="The day before">‹</button>
+      <div class="wklabel">${esc(dayPretty(h.date))}<small>planned against actual</small></div>
+      <button class="wknav" id="hNext" aria-label="The day after">›</button>
+      <button class="thisweek" id="hNow" ${h.date===todayYmd()?"hidden":""}>Today</button>
+    </div>`
+    +(h.employees.length
+      ?`<div class="blk" style="margin-top:14px;padding:2px 15px">`
+        +h.employees.map(e=>hoursRow(e,e.name,e.title+(e.stillClockedIn?" · still on the clock":""))).join("")
+        +hoursRow(h.totals,"Everybody","")
+        +`</div>`
+      :`<div class="empty" style="margin-top:14px">Nobody was planned and nobody clocked in on ${esc(dayPretty(h.date))}.</div>`)
+    +`<p class="note">${esc(h.note)}</p>
+      <p class="note">Planned counts published shifts only, because measuring somebody against a plan they were never shown would be dishonest. Anybody still on the clock counts as no hours worked and is named rather than guessed at.</p>`;
+  $("#hPrev").onclick=()=>{hoursOn=dayShift(hoursOn,-1);refresh().catch(()=>{});};
+  $("#hNext").onclick=()=>{hoursOn=dayShift(hoursOn,1);refresh().catch(()=>{});};
+  const now=$("#hNow");if(now)now.onclick=()=>{hoursOn=todayYmd();refresh().catch(()=>{});};
+}
+
+function hoursRow(r,name,sub){
+  const v=r.varianceHours;
+  const cls=v>0?"up":v<0?"down":"";
+  const sign=v>0?"+":"";
+  return `<div class="hrow ${name==="Everybody"?"total":""}">
+    <div class="hnm">${esc(name)}${sub?`<small>${esc(sub)}</small>`:""}</div>
+    <div class="fig"><b>${esc(String(r.plannedHours))}</b><small>planned</small></div>
+    <div class="fig"><b>${esc(String(r.actualHours))}</b><small>actual</small></div>
+    <div class="fig ${cls}"><b>${esc(sign+String(v))}</b><small>difference</small></div>
+  </div>`;
+}
+
+/* ---------- wiring ---------- */
+document.querySelectorAll(".view").forEach(b=>b.onclick=()=>{
+  const want=b.dataset.view;
+  if(want===view)return;
+  warning="";
+  const go=()=>{view=want;refresh().catch(()=>toast("Cannot reach the server",true));};
+  // the two manager views ask once and hold it for the visit; the server
+  // checks the PIN again on every read behind them
+  if(want==="mine"||mgrPin)go();else askPin(go);
+});
+
+document.addEventListener("click",e=>{
+  const b=e.target.closest&&e.target.closest("[data-close]");
+  if(b)document.getElementById(b.dataset.close).classList.remove("open");
+});
+
+function setViewportH(){document.documentElement.style.setProperty("--vph",window.innerHeight+"px");}
+addEventListener("resize",setViewportH);setViewportH();
+
+(async()=>{
+  await loadWho();
+  await refresh();
+  // whatever week the server called "this one" is the week This week returns to
+  if(myWeek&&myWeek.weekOf)thisWeek=myWeek.weekOf;
+})().catch(()=>toast("Cannot reach the server",true));
+// a phone left on a shelf should not show yesterday's answer
+setInterval(()=>{if(!document.querySelector(".ov.open"))refresh().catch(()=>{});},30000);
+
+/* ---------- the venue's own name (E21-T2) ----------
+   The markup ships "RestaurantOS" and this replaces it with whatever the
+   restaurant is actually called. The demo's name is never in the markup: a
+   page that flashed "Osteria Nove" at somebody else's restaurant would be
+   worse than one that says nothing for forty milliseconds. Identical on all
+   nine pages; failure is silent, because a header is not worth an alarm. */
+let VENUE={name:"RestaurantOS",address:"",timezone:""};
+async function loadVenue(){
+  try{
+    const v=await fetch("/v1/venue").then(r=>r.json());
+    if(v&&v.name)VENUE=v;
+  }catch(_){}
+  document.querySelectorAll("[data-venue-name]").forEach(el=>{el.textContent=VENUE.name;});
+  document.querySelectorAll("[data-venue-address]").forEach(el=>{el.textContent=VENUE.address;});
+}
+const venueReady=loadVenue();
+
+/* ---------- APP SHELL: rail badge counts (UI-T1) ----------
+   Two cheap reads on the rail's own timer, so no page's existing poll
+   changes shape. Identical on all nine pages. Failure is silent: a badge
+   that cannot be read must never be louder than the screen behind it. */
+async function railBadges(){
+  const [checks,kds]=await Promise.all([
+    fetch("/v1/checks").then(r=>r.json()),
+    fetch("/v1/kds").then(r=>r.json()),
+  ]);
+  railBadge("navTables",(checks.checks||[]).filter(c=>c.status!=="closed"&&c.status!=="voided").length);
+  railBadge("navKds",(kds.tickets||[]).filter(t=>t.status==="open").length);
+}
+function railBadge(id,n){const el=document.getElementById(id);if(el)el.textContent=n>0?String(n):"";}
+railBadges().catch(()=>{});
+setInterval(()=>railBadges().catch(()=>{}),10000);
+</script>
+</body>
+</html>

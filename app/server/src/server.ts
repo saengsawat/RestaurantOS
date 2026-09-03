@@ -18,6 +18,7 @@ const REPORTS_PAGE = page("reports.html");
 const MENU_PAGE = page("menu.html");
 const SETTINGS_PAGE = page("settings.html");
 const RESERVATIONS_PAGE = page("reservations.html");
+const SCHEDULE_PAGE = page("schedule.html");
 const LOCK_PAGE = page("lock.html");
 
 interface EnvelopeBody {
@@ -119,6 +120,9 @@ export function buildServer(store: Store = new MemoryStore(), storeName = "memor
   app.get("/settings", async (_req, reply) => reply.type("text/html").send(SETTINGS_PAGE));
   // the eighth (E23-T3): the call-in book, one service day at a time
   app.get("/reservations", async (_req, reply) => reply.type("text/html").send(RESERVATIONS_PAGE));
+  // the ninth (E24-T5): a server's own week, and behind a manager PIN the
+  // week being built and the hours it turned into
+  app.get("/schedule", async (_req, reply) => reply.type("text/html").send(SCHEDULE_PAGE));
   app.get("/health/live", async () => ({ ok: true, service: "restaurantos-server", store: storeName }));
 
   /* -------------------------- sessions (E15) -------------------------- */

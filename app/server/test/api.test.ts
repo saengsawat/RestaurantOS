@@ -1664,7 +1664,7 @@ describe("modifier groups on the Menu screen (E5-T3)", () => {
     expect(page).toContain('id="draft"></div>');
     expect(page).toContain("86 it");
     expect(page).toContain("Set count");
-    expect(page.match(/<svg viewBox="0 0 24 24" aria-hidden="true">/g)).toHaveLength(8);
+    expect(page.match(/<svg viewBox="0 0 24 24" aria-hidden="true">/g)).toHaveLength(9);
   });
 });
 
@@ -1895,7 +1895,7 @@ describe("reads", () => {
     // rather than summing the scorecard rows (E19-T3)
     expect(page.body).toContain("declaredTipsTotalMinor");
     // and every other page can reach it, now through its rail entry (UI-T1)
-    for (const url of ["/pos", "/tables", "/kds", "/menu", "/close", "/reservations"]) {
+    for (const url of ["/pos", "/tables", "/kds", "/menu", "/close", "/reservations", "/schedule"]) {
       expect((await app.inject({ method: "GET", url })).body).toContain('class="nav-btn" href="/reports"');
     }
   });
@@ -1903,11 +1903,12 @@ describe("reads", () => {
   /* UI-T1: the shell DESIGN.md section 5 prescribes. Navigation is a place you
    * go, so it is the left icon rail with its badge counts; the topbar is where
    * you are. The markup is duplicated per page (each page is a self-contained
-   * zero-dependency file), so the assertion runs over all EIGHT (Settings
-   * joined in E21-T2, the call-in book in E23-T3) to keep them from drifting. */
-  it("gives all eight navigable pages the app shell: rail navigates, topbar identifies", async () => {
+   * zero-dependency file), so the assertion runs over all NINE (Settings
+   * joined in E21-T2, the book in E23-T3, the schedule in E24-T5) to keep them
+   * from drifting apart. */
+  it("gives all nine navigable pages the app shell: rail navigates, topbar identifies", async () => {
     const app = buildServer();
-    const screens = ["/pos", "/tables", "/reservations", "/kds", "/menu", "/close", "/reports", "/settings"];
+    const screens = ["/pos", "/tables", "/reservations", "/kds", "/menu", "/close", "/reports", "/schedule", "/settings"];
     for (const url of screens) {
       const body = (await app.inject({ method: "GET", url })).body;
       expect(body).toContain('<nav class="navrail" aria-label="Screens">');
@@ -1917,8 +1918,8 @@ describe("reads", () => {
       for (const dest of screens) expect(body).toContain(`href="${dest}"`);
       expect(body.match(/class="nav-btn on" aria-current="page"/g)).toHaveLength(1);
       expect(body).toContain(`class="nav-btn on" aria-current="page" href="${url}"`);
-      // eight icons, inline SVG in one stroke style, never emoji
-      expect(body.match(/<svg viewBox="0 0 24 24" aria-hidden="true">/g)).toHaveLength(8);
+      // nine icons, inline SVG in one stroke style, never emoji
+      expect(body.match(/<svg viewBox="0 0 24 24" aria-hidden="true">/g)).toHaveLength(9);
       // the rail carries the two live counts the data already supports
       expect(body).toContain('id="navTables"');
       expect(body).toContain('id="navKds"');
@@ -1937,9 +1938,9 @@ describe("reads", () => {
   /* E21-T2: the demo restaurant's name is not in anybody's markup any more.
    * Every page ships "RestaurantOS" and asks the server who it is actually
    * serving, so a second restaurant never sees somebody else's name flash. */
-  it("takes the venue's name off the walls of all eight pages and the lock screen", async () => {
+  it("takes the venue's name off the walls of all nine pages and the lock screen", async () => {
     const app = buildServer();
-    for (const url of ["/pos", "/tables", "/reservations", "/kds", "/menu", "/close", "/reports", "/settings", "/"]) {
+    for (const url of ["/pos", "/tables", "/reservations", "/kds", "/menu", "/close", "/reports", "/schedule", "/settings", "/"]) {
       const body = (await app.inject({ method: "GET", url })).body;
       expect(body, `${url} still names the demo venue`).not.toContain("<b>Osteria Nove</b>");
       expect(body, `${url} still names the demo venue`).not.toContain("<h1>Osteria Nove</h1>");
@@ -4132,7 +4133,7 @@ describe("the menu import lands on the Menu screen (E22-T3)", () => {
     expect(page).toContain('id="draftGroups"></div>');
     expect(page).toContain("function groupForm(src)");
     expect(page).toContain("function publishForm()");
-    expect(page.match(/<svg viewBox="0 0 24 24" aria-hidden="true">/g)).toHaveLength(8);
+    expect(page.match(/<svg viewBox="0 0 24 24" aria-hidden="true">/g)).toHaveLength(9);
   });
 });
 
@@ -4877,5 +4878,84 @@ describe("the schedule (E24-T4)", () => {
     // different seven days than the ones on their screen
     expect((await publish(app, 3, "not-a-date")).json().reason)
       .toBe("'not-a-date' is not a date; a week is named by any day inside it (YYYY-MM-DD)");
+  });
+});
+
+/* ---------------- the schedule on a screen (E24-T5) ----------------
+   The page is a formatter over E24-T4's three reads. Two things are being
+   held here: an employee's own view asks for nothing and shows only what is
+   published, and nothing on the page is ever multiplied by money, because
+   there is no money to multiply by. */
+describe("the schedule screen (E24-T5)", () => {
+  it("serves /schedule: my week by default, the manager views behind a PIN", async () => {
+    const app = buildServer();
+    const res = await app.inject({ method: "GET", url: "/schedule" });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-type"]).toContain("text/html");
+    const body = res.body;
+
+    // three views, and the employee's own is the one that loads
+    expect(body).toContain('data-view="mine"');
+    expect(body).toContain('data-view="plan"');
+    expect(body).toContain('data-view="hours"');
+    expect(body).toContain('let view="mine"');
+
+    // the employee's own week reads on the session and nothing else, off the
+    // SHARED device key the lock screen signs in with (a per-page id would be
+    // a device nobody has ever signed in on)
+    expect(body).toContain('localStorage.getItem("ros.device")');
+    expect(body).toContain('fetch("/v1/schedule/mine?deviceId="+encodeURIComponent(DEVICE)');
+    expect(body).toContain("Sign in on this device and your shifts appear here");
+    // and it says out loud why a draft is not there
+    expect(body).toContain("Published shifts only");
+
+    // the two manager reads are POSTs with the PIN in the body, never a URL
+    expect(body).toContain('post("/v1/schedule/week"');
+    expect(body).toContain('post("/v1/insights/labor"');
+    expect(body).not.toContain("managerPin=");
+    // gated once and held for the visit, the way Settings asks
+    expect(body).toContain('id="ovPin"');
+    expect(body).toContain('if(want==="mine"||mgrPin)go();else askPin(go);');
+    expect(body).toContain("/^[0-9]{4,6}$/.test(v)");
+
+    // the three commands
+    expect(body).toContain('cmd("/v1/schedule/shift"');
+    expect(body).toContain('"/v1/schedule/shift/"+encodeURIComponent(sh.id)+"/remove"');
+    expect(body).toContain('cmd("/v1/schedule/publish"');
+
+    // publish is one deliberate act, and the confirm says what it does
+    expect(body).toContain('id="ovPub"');
+    expect(body).toContain('id="pubGo"');
+    expect(body).toContain("Staff can see this week after you publish");
+
+    // draft and live wear the Menu page's own language
+    expect(body).toContain('class="pill ${s.published?"live":"draft"}"');
+    expect(body).toContain(".pill.draft{background:var(--amber-wash)");
+    expect(body).toContain(".pill.live{background:var(--green-wash)");
+    expect(body).toContain('<span class="chip amber">${esc(plural(drafts,"draft"))}</span>');
+
+    // the overlap warning comes off the response and sits in the page rather
+    // than in a dialog: it is a warning, and it never blocks the work
+    expect(body).toContain("warning=r.data.note||\"\"");
+    expect(body).toContain('class="warn ${warning?"on":""}"');
+
+    // a phone gets one day at a time, never a grid pushed sideways
+    expect(body).toContain('class="dayswitch"');
+    expect(body).toContain("function phoneDay()");
+    expect(body).toContain("@media (min-width:821px){");
+    expect(body).toContain(".dayswitch,.phoneday{display:none}");
+
+    // planned versus actual, in hours, off the read's own figures
+    expect(body).toContain("r.plannedHours");
+    expect(body).toContain("r.actualHours");
+    expect(body).toContain("r.varianceHours");
+    // nothing on this page turns an hour into money, and there is nowhere to
+    // type a rate: D28 rung 3 is never built (team-labor-spec section 4)
+    for (const forbidden of ["wageMinor", "hourlyRate", "payRate", "$\"+", "toFixed(2)", "id=\"shWage\""]) {
+      expect(body, `${forbidden} has no business on the schedule`).not.toContain(forbidden);
+    }
+    // the page formats and never computes: no hour is summed here
+    expect(body).not.toContain("reduce((a,s)=>a+s.minutes");
+    expect(body).not.toContain("/3600000");
   });
 });
