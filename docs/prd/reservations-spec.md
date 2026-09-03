@@ -25,7 +25,9 @@ This is the posture the product already takes everywhere human authority is invo
 
 Everything in v1 is something a staff member does at a terminal, because the input is a person on the phone.
 
-**Taking a booking.** Name, phone, party size, and a time, plus an optional table and an optional note ("anniversary", "wheelchair", "regular, likes Sala"). Only the time and the party size are required to save: a call from someone who will not give a name is still worth writing down. `INFERRED`
+**Taking a booking.** Name, phone, party size, and a time, plus an optional table and an optional note ("anniversary", "wheelchair", "regular, likes Sala"). Time, party size, and a name are required to save; phone, table, and note are not. `DOCUMENTED` [built as E23-T2, 2026-09-02]
+
+> Build note: this paragraph originally required only time and party size, but §4's own schema marked `name NOT NULL` and the build followed the schema. The ruling: a one-word name ("walk-in") costs the caller nothing and a nameless row is useless at the door when four parties arrive at once. The UI hints that any name will do.
 
 **The book view**, by service period, one day at a time. Reservations in time order with a covers total per period, so the host can see that Friday's second seating is already at 40 covers before a single walk-in arrives. Past-due bookings that were never seated stay visible until somebody marks them, because a reservation that quietly disappears at 7:31 is how a no-show goes unrecorded. `INFERRED`
 

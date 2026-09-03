@@ -11,7 +11,7 @@ Read `CLAUDE.md`, `design/restaurantos/DESIGN.md`, `docs/prd/reservations-spec.m
 
 ### 1. A Reservations screen (`/reservations`, new page on the shell)
 - The book, one day at a time: date switcher (Today default), reservations in time order grouped by service period with the covers total per period, exactly what the read returns.
-- A "New reservation" action: name, phone, party size (stepper), time, optional table (chips from the floor read), optional note. Party size and time are the only required fields to save. A past time warns inline and allows.
+- A "New reservation" action: name, phone, party size (stepper), time, optional table (chips from the floor read), optional note. Name, party size, and time are required (the engine refuses a nameless booking); the name field hints that any name will do ("even 'walk-in'"). A past time warns inline and allows.
 - Row actions: Seat (primary), No-show, Cancel; past-due booked rows visually flagged. When the read carries a `guestMatch`, the Seat confirm shows "This phone matches Somchai P. in the guestbook: attach?" (attach is opt-in, never silent).
 - Seat lands the user on Service with the new check open (the command did the work; the page just navigates).
 - Nav: the 8th rail entry, all pages, icon consistent with the set; bottom tab on mobile.
