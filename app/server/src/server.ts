@@ -74,6 +74,8 @@ function respond(reply: FastifyReply, outcome: CommandOutcome): unknown {
         ...(outcome.venue !== undefined ? { venue: outcome.venue } : {}),
         ...(outcome.employee !== undefined ? { employee: outcome.employee } : {}),
         ...(outcome.reservation !== undefined ? { reservation: outcome.reservation } : {}),
+        ...(outcome.plannedShift !== undefined ? { plannedShift: outcome.plannedShift } : {}),
+        ...(outcome.schedule !== undefined ? { schedule: outcome.schedule } : {}),
         ...(outcome.audit !== undefined ? { audit: outcome.audit } : {}),
         ...(outcome.refundDueMinor !== undefined ? { refundDueMinor: outcome.refundDueMinor } : {}),
         ...(outcome.note !== undefined ? { note: outcome.note } : {}),
@@ -196,6 +198,76 @@ export function buildServer(store: Store = new MemoryStore(), storeName = "memor
       // proposes, a person decides (D20)
       ...(typeof body.guestId === "string" ? { guestId: body.guestId } : {}),
       ...(body.confirmOverride === true ? { confirmOverride: true } : {}),
+    }));
+  });
+
+  /* ------------------ the schedule (E24-T4, D28 rung 2) ------------------
+     What was MEANT to happen, beside the clock records of what did.
+
+     DEVIATION FROM THE TICKET, flagged for review. E24-T4 specifies
+     `GET /v1/schedule?weekOf=...&managerPin=...`, but a manager's PIN in a
+     query string lands in the server log, the browser history, and any
+     referrer header the page emits. E24-T2 met the same question one ticket
+     earlier and answered it in a comment on `/v1/staff/directory`: a gated
+     READ is served over POST here so the PIN travels in the body. The hours
+     export (E24-T3) does the same. Both gated reads below follow that
+     precedent rather than re-open a decision this epic already made; the
+     shape and the fields are otherwise exactly what the ticket asked for.
+     `/v1/schedule/mine` stays a GET, because a deviceId is not a secret. */
+
+  /** The manager's week: every active employee, seven days, drafts and
+   *  published together, because the person building the week is the one
+   *  person meant to see it mid-edit. */
+  app.post("/v1/schedule/week", async (req, reply) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const result = await engine.schedule(body.managerPin, typeof body.weekOf === "string" ? body.weekOf : undefined);
+    if (!result.ok) return reply.code(422).send({ status: "REJECTED", reason: result.reason });
+    return result;
+  });
+
+  /** An employee's own week, published rows only, on nothing but the session
+   *  they already signed in with. A server checking their Tuesday between
+   *  tables must not have to go and find a manager. */
+  app.get("/v1/schedule/mine", async (req, reply) => {
+    const { deviceId, weekOf } = req.query as { deviceId?: string; weekOf?: string };
+    if (!deviceId) return reply.code(400).send({ status: "BAD_REQUEST", reason: "deviceId is required" });
+    const result = await engine.myShifts(deviceId, weekOf);
+    if (!result.ok) return reply.code(401).send({ status: "UNAUTHORIZED", reason: result.reason });
+    return result;
+  });
+
+  /** Add or edit one shift. An `id` in the body edits that row; no id writes
+   *  a new one, always as a draft. */
+  app.post("/v1/schedule/shift", async (req, reply) => {
+    const body = (req.body ?? {}) as EnvelopeBody & Record<string, unknown>;
+    const envelope = readEnvelope(body);
+    if ("error" in envelope) return reply.code(400).send({ status: "BAD_REQUEST", reason: envelope.error });
+    return respond(reply, await engine.upsertPlannedShift(envelope, {
+      ...managerPin(body),
+      ...(typeof body.id === "string" ? { id: body.id } : {}),
+      ...(typeof body.employeeId === "string" ? { employeeId: body.employeeId } : {}),
+      ...(typeof body.roleForShift === "string" ? { roleForShift: body.roleForShift } : {}),
+      ...(typeof body.startsAt === "string" ? { startsAt: body.startsAt } : {}),
+      ...(typeof body.endsAt === "string" ? { endsAt: body.endsAt } : {}),
+    }));
+  });
+
+  app.post("/v1/schedule/shift/:id/remove", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = (req.body ?? {}) as EnvelopeBody & Record<string, unknown>;
+    const envelope = readEnvelope(body);
+    if ("error" in envelope) return reply.code(400).send({ status: "BAD_REQUEST", reason: envelope.error });
+    return respond(reply, await engine.removePlannedShift(envelope, id, managerPin(body).managerPin));
+  });
+
+  /** One act, the whole week, the menu's own discipline. */
+  app.post("/v1/schedule/publish", async (req, reply) => {
+    const body = (req.body ?? {}) as EnvelopeBody & Record<string, unknown>;
+    const envelope = readEnvelope(body);
+    if ("error" in envelope) return reply.code(400).send({ status: "BAD_REQUEST", reason: envelope.error });
+    return respond(reply, await engine.publishSchedule(envelope, {
+      ...managerPin(body),
+      weekOf: String(body.weekOf ?? ""),
     }));
   });
 
@@ -634,6 +706,18 @@ export function buildServer(store: Store = new MemoryStore(), storeName = "memor
 
   app.get("/v1/insights/servers", async () => engine.insightsServers());
   app.get("/v1/insights/heatmap", async () => engine.insightsHeatmap());
+
+  /** Planned against actual for one day (E24-T4), in HOURS and never in
+   *  money. Manager-gated, and therefore a POST with the PIN in the body for
+   *  the reason spelled out on the schedule routes above; it keeps its
+   *  /v1/insights name because that is where the ticket put it and where the
+   *  Labor screen will look for it. */
+  app.post("/v1/insights/labor", async (req, reply) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const result = await engine.labor(body.managerPin, typeof body.date === "string" ? body.date : undefined);
+    if (!result.ok) return reply.code(422).send({ status: "REJECTED", reason: result.reason });
+    return result;
+  });
 
   app.post("/v1/drawer/open", async (req, reply) => {
     const body = (req.body ?? {}) as EnvelopeBody & { drawerName?: unknown; openingFloatMinor?: unknown };

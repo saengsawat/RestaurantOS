@@ -27,7 +27,7 @@ import type { MenuEntry } from "./menu.js";
 import { isBlankRecord, parseCsv } from "./csv.js";
 import { defaultTitle, PIN_RULE, pinHash, STAFF, type DirectoryEntry, type Employee, type RosterEntry } from "./staff.js";
 import { randomUUID } from "node:crypto";
-import { addDays, dateAt, isValidYmd, lastCompletedPeriod, PAY_PERIODS, periodContaining, sameName, serviceDateOf, TABLE_SHAPES, type CashEvent, type CheckAggregate, type DraftGroup, type DrawerSession, type Envelope, type FloorTable, type Guest, type KitchenTicket, type MenuDraft, type MenuSnapshot, type OrderLine, type PayPeriod, type Reservation, type PayPeriodKind, type Store, type TableShape, type Venue } from "./types.js";
+import { addDays, dateAt, isValidYmd, lastCompletedPeriod, PAY_PERIODS, periodContaining, sameName, serviceDateOf, TABLE_SHAPES, weekDays, weekStart, type CashEvent, type CheckAggregate, type DraftGroup, type DrawerSession, type Envelope, type FloorTable, type Guest, type KitchenTicket, type MenuDraft, type MenuSnapshot, type OrderLine, type PayPeriod, type PlannedShift, type Reservation, type PayPeriodKind, type Store, type TableShape, type Venue } from "./types.js";
 import type { GroupIndex } from "@restaurantos/domain";
 
 export const TAX_RATE = { num: 8_875, den: 100_000 };
@@ -47,7 +47,7 @@ function usd(minor: number): string {
 // an employee who holds the manager role. See Engine.manager().
 
 export type CommandOutcome =
-  | { kind: "applied"; check?: CheckView; tickets?: KitchenTicket[]; session?: DrawerSession; day?: unknown; menu?: unknown; guest?: unknown; venue?: Venue; employee?: RosterEntry; reservation?: Reservation; audit?: unknown; refundDueMinor?: number; note?: string }
+  | { kind: "applied"; check?: CheckView; tickets?: KitchenTicket[]; session?: DrawerSession; day?: unknown; menu?: unknown; guest?: unknown; venue?: Venue; employee?: RosterEntry; reservation?: Reservation; plannedShift?: PlannedShift; schedule?: unknown; audit?: unknown; refundDueMinor?: number; note?: string }
   | { kind: "replay"; result: CommandOutcome }
   | { kind: "conflict"; expectedVersion: number | undefined; currentVersion: number }
   | { kind: "rejected"; reason: string; modifierErrors?: readonly ModifierError[] }
@@ -2182,6 +2182,392 @@ export class Engine {
     lines.push("# hours and declared tips only; wage, overtime, and tax rules are the payroll provider's");
 
     return { ok: true, period, csv: lines.join("\n") + "\n" };
+  }
+
+  /* ---------------- the schedule (E24-T4, D28 rung 2) ----------------
+
+     The other half of the clock. `Shift` records what happened, captured at
+     the terminal while service ran; `PlannedShift` records what was supposed
+     to, and holding both is what turns "who is here" into "who was meant to
+     be, and what was the difference".
+
+     Two rules shape everything below, and both come straight from the spec.
+
+     PUBLISHED IS THE GATE. A manager builds next week in private and
+     publishes it in one act, the menu's own draft-then-publish discipline,
+     because a schedule staff can watch change under them is worse than no
+     schedule. `/schedule/mine` never returns a draft row, ever, and that is
+     asserted rather than assumed.
+
+     NOTHING HERE COSTS ANYTHING. No wage rate, no hourly rate, no overtime
+     split, on this row or on the employee or anywhere else. Hours planned
+     against hours worked is a complete and honest answer in hours, and
+     multiplying it by a rate is the exact step that turns a labor report
+     into a payroll calculation. Payroll is a compliance product; we export
+     to one and never become one (spec section 4, D28 rung 3). */
+
+  /** The longest a single shift can be planned for. Sixteen hours is a
+   *  double with a break in it; anything past that is somebody typing 2 AM
+   *  when they meant 2 PM, and catching it here costs a manager one retype
+   *  instead of costing an employee a wrong week. */
+  private static readonly MAX_SHIFT_MS = 16 * 3_600_000;
+
+  /** Local wall-clock time, the way a schedule is read out loud. The whole
+   *  system buckets its business day on server-local time (serviceDateOf), so
+   *  a shift's hours are shown on the same clock they were bucketed by. */
+  private static clockOf(iso: string): string {
+    const d = new Date(iso);
+    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  }
+
+  /** Whole minutes, which is the exact figure. Hours are a presentation of
+   *  it, carried alongside so a caller can print one without dividing and a
+   *  caller can total the other without a float drifting. */
+  private static minutes(fromIso: string, toIso: string): number {
+    return Math.max(0, Math.round((Date.parse(toIso) - Date.parse(fromIso)) / 60_000));
+  }
+  private static hours(minutes: number): number {
+    return Math.round(minutes / 0.6) / 100;
+  }
+
+  /** The planned shifts of one week, in time order. `weekOf` is any date in
+   *  the week; the week itself always starts on its Monday, so a manager who
+   *  names Thursday and a manager who names Monday publish the same seven
+   *  days. */
+  private async weekOfShifts(weekOf: string): Promise<{ monday: string; days: string[]; shifts: PlannedShift[] }> {
+    const monday = weekStart(weekOf);
+    const days = weekDays(monday);
+    const within = new Set(days);
+    const shifts = (await this.store.listPlannedShifts())
+      // bucketed by the service date the shift STARTS on, the same local-day
+      // rule the day report and the book already use, so a shift that runs
+      // past midnight belongs to the night it began
+      .filter((s) => within.has(serviceDateOf(s.startsAt)))
+      .sort((a, b) => a.startsAt.localeCompare(b.startsAt) || a.createdAt.localeCompare(b.createdAt));
+    return { monday, days, shifts };
+  }
+
+  /** One shift as a page prints it: the row plus the two figures every view
+   *  of it needs. Derived, never stored. */
+  private static shiftView(s: PlannedShift) {
+    const minutes = Engine.minutes(s.startsAt, s.endsAt);
+    return {
+      ...s,
+      date: serviceDateOf(s.startsAt),
+      from: Engine.clockOf(s.startsAt),
+      to: Engine.clockOf(s.endsAt),
+      minutes,
+      hours: Engine.hours(minutes),
+    };
+  }
+
+  /**
+   * Write one planned shift, new or edited. Manager-gated: the schedule is
+   * the manager's instrument, and an employee changing their own shift is a
+   * conversation rather than a command.
+   *
+   * A NEW shift is always a draft. An EDIT to an already-published one stays
+   * published, which is the one judgement worth stating out loud: reverting
+   * it to draft would make the shift vanish from the employee's own view
+   * until somebody remembered to publish again, and a Saturday that quietly
+   * disappears is a worse failure than a Saturday that visibly moved. The
+   * private-until-published property still holds where it matters, because
+   * next week is all drafts until the week is published once.
+   *
+   * Overlap WARNS and saves. A split double is real life (lunch, a break,
+   * then dinner reads as two shifts), and so is a manager deliberately
+   * double-covering a Saturday. The response says what it noticed and then
+   * does what it was told.
+   */
+  async upsertPlannedShift(
+    envelope: Envelope,
+    input: {
+      managerPin?: string; id?: string; employeeId?: string;
+      roleForShift?: string; startsAt?: string; endsAt?: string;
+    },
+  ): Promise<CommandOutcome> {
+    const replay = await this.store.opResult(envelope.operationId);
+    if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
+    const target = (input.id ?? "").trim();
+    const refuse = (reason: string) =>
+      this.remember(envelope, { kind: "rejected", reason }, "planned_shift", target || "new");
+
+    const approver = await this.manager(input.managerPin);
+    if (!approver) return refuse(this.managerRefusal(input.managerPin, "editing the schedule"));
+
+    const existing = target ? await this.store.getPlannedShift(target) : undefined;
+    if (target && !existing) return refuse(`no planned shift ${target}`);
+
+    const employeeId = (input.employeeId ?? existing?.employeeId ?? "").trim();
+    const employee = employeeId ? await this.store.getEmployee(employeeId) : undefined;
+    if (!employee) return refuse("that employee is not on the roster");
+    if (!employee.active) {
+      return refuse(`${employee.name} is no longer on the roster; only somebody who still works here can be scheduled`);
+    }
+
+    const rawStart = input.startsAt ?? existing?.startsAt ?? "";
+    const rawEnd = input.endsAt ?? existing?.endsAt ?? "";
+    const start = Date.parse(rawStart);
+    if (!Number.isFinite(start)) return refuse(`'${rawStart}' is not a date and time`);
+    const end = Date.parse(rawEnd);
+    if (!Number.isFinite(end)) return refuse(`'${rawEnd}' is not a date and time`);
+    if (end <= start) return refuse("a shift has to end after it starts");
+    if (end - start > Engine.MAX_SHIFT_MS) {
+      const hours = Math.round((end - start) / 360_000) / 10;
+      return refuse(`${hours} hours is a typo rather than a double; a planned shift tops out at 16`);
+    }
+
+    // what they are working AS. Blank falls back to their job title, which is
+    // true rather than empty and keeps a manager from typing "Server" onto
+    // every row of a week; it is still a separate field, and changing it
+    // never touches the title or the permission role underneath
+    const roleForShift = (input.roleForShift ?? existing?.roleForShift ?? "").trim()
+      || employee.title || defaultTitle(employee.role);
+
+    const shift: PlannedShift = {
+      id: existing?.id ?? randomUUID(),
+      employeeId: employee.id,
+      roleForShift,
+      startsAt: new Date(start).toISOString(),
+      endsAt: new Date(end).toISOString(),
+      // new shifts land as drafts; an edit keeps whatever the row already was
+      published: existing?.published ?? false,
+      createdBy: existing?.createdBy ?? this.actorId(envelope) ?? approver.id,
+      createdAt: existing?.createdAt ?? new Date().toISOString(),
+    };
+
+    const clash = (await this.store.listPlannedShifts()).find((s) =>
+      s.id !== shift.id && s.employeeId === shift.employeeId
+      && Date.parse(s.startsAt) < end && start < Date.parse(s.endsAt));
+
+    await this.store.putPlannedShift(shift);
+    const note = clash
+      ? `${employee.name} is already on ${Engine.clockOf(clash.startsAt)} to ${Engine.clockOf(clash.endsAt)}`
+        + ` on ${serviceDateOf(clash.startsAt)}. Saved anyway: a split double is real life.`
+      : undefined;
+    return this.remember(envelope, {
+      kind: "applied", plannedShift: shift, ...(note ? { note } : {}),
+    }, "planned_shift", shift.id);
+  }
+
+  /** Take a shift off the schedule. A real delete, unlike deactivating an
+   *  employee or retiring a table: nothing points at a shift that was never
+   *  worked, and what actually happened lives in the clock's own records,
+   *  which this feature never touches. */
+  async removePlannedShift(envelope: Envelope, id: string, managerPin?: string): Promise<CommandOutcome> {
+    const replay = await this.store.opResult(envelope.operationId);
+    if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
+    const refuse = (reason: string) => this.remember(envelope, { kind: "rejected", reason }, "planned_shift", id);
+
+    if (!(await this.manager(managerPin))) return refuse(this.managerRefusal(managerPin, "editing the schedule"));
+    const shift = await this.store.getPlannedShift(id);
+    if (!shift) return refuse(`no planned shift ${id}`);
+
+    await this.store.removePlannedShift(id);
+    const who = (await this.store.getEmployee(shift.employeeId))?.name ?? "that shift";
+    return this.remember(envelope, {
+      kind: "applied", plannedShift: shift,
+      note: `${who}'s ${Engine.clockOf(shift.startsAt)} shift on ${serviceDateOf(shift.startsAt)} is off the schedule.`
+        + (shift.published ? " It was published, so it disappears from their own view too." : ""),
+    }, "planned_shift", id);
+  }
+
+  /**
+   * Publish a week, in one act, exactly as the menu publishes a draft.
+   *
+   * Idempotent by design and by intent: running it again after more edits is
+   * the same command, and re-publishing a week where nothing changed simply
+   * says so. `weekOf` is any date in the week, so a manager cannot publish a
+   * different seven days than the ones they were looking at.
+   */
+  async publishSchedule(envelope: Envelope, input: { managerPin?: string; weekOf?: string }): Promise<CommandOutcome> {
+    const replay = await this.store.opResult(envelope.operationId);
+    if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
+    const asked = (input.weekOf ?? "").trim();
+    const refuse = (reason: string) => this.remember(envelope, { kind: "rejected", reason }, "schedule", asked || "week");
+
+    if (!(await this.manager(input.managerPin))) return refuse(this.managerRefusal(input.managerPin, "publishing the schedule"));
+    if (!isValidYmd(asked)) return refuse(`'${asked}' is not a date; a week is named by any day inside it (YYYY-MM-DD)`);
+
+    const { monday, shifts } = await this.weekOfShifts(asked);
+    if (!shifts.length) return refuse(`nothing is planned for the week of ${monday}`);
+
+    const drafts = shifts.filter((s) => !s.published);
+    for (const s of drafts) await this.store.putPlannedShift({ ...s, published: true });
+
+    return this.remember(envelope, {
+      kind: "applied",
+      schedule: { weekOf: monday, shifts: shifts.length, published: drafts.length, alreadyPublished: shifts.length - drafts.length },
+      note: drafts.length
+        ? `${drafts.length} shift${drafts.length === 1 ? "" : "s"} published for the week of ${monday}; the floor can see the week now.`
+        : `The week of ${monday} was already published; nothing changed.`,
+    }, "schedule", monday);
+  }
+
+  /**
+   * The manager's week: every active employee, seven days, drafts and
+   * published together, because the person building the week is the one
+   * person who is supposed to see it mid-edit.
+   *
+   * Everything countable here is counted at read (D19). An employee with no
+   * shifts still gets a row, so the week is a grid a manager can fill rather
+   * than a list that only shows what already exists.
+   */
+  async schedule(pin: unknown, weekOf?: string) {
+    if (!(await this.manager(pin))) return { ok: false as const, reason: this.managerRefusal(pin, "reading the schedule") };
+
+    const on = weekOf && isValidYmd(weekOf) ? weekOf : serviceDate();
+    const { monday, days, shifts } = await this.weekOfShifts(on);
+    const roster = await this.staff();
+
+    // active employees always, plus anybody inactive who is still on this
+    // week: letting a row vanish would hide a shift that is still real
+    const scheduled = new Set(shifts.map((s) => s.employeeId));
+    const people = roster.filter((e) => e.active || scheduled.has(e.id));
+
+    const employees = people.map((e) => {
+      const mine = shifts.filter((s) => s.employeeId === e.id).map(Engine.shiftView);
+      const minutes = mine.reduce((a, s) => a + s.minutes, 0);
+      return {
+        id: e.id, name: e.name, title: e.title ?? defaultTitle(e.role), role: e.role, active: e.active,
+        days: days.map((date) => ({ date, shifts: mine.filter((s) => s.date === date) })),
+        shifts: mine.length,
+        plannedMinutes: minutes,
+        plannedHours: Engine.hours(minutes),
+      };
+    });
+
+    const draft = shifts.filter((s) => !s.published).length;
+    const minutes = shifts.reduce((a, s) => a + Engine.minutes(s.startsAt, s.endsAt), 0);
+    return {
+      ok: true as const,
+      weekOf: monday,
+      days,
+      employees,
+      totals: {
+        shifts: shifts.length,
+        draft,
+        published: shifts.length - draft,
+        plannedMinutes: minutes,
+        plannedHours: Engine.hours(minutes),
+      },
+      // the one thing a manager wants to know at a glance about a week
+      allPublished: shifts.length > 0 && draft === 0,
+    };
+  }
+
+  /**
+   * One employee's own week, and only the published half of it.
+   *
+   * No manager PIN: a server checking their Tuesday between tables must not
+   * have to find a manager, and the session they already signed in with says
+   * who they are. A draft row is invisible here in every circumstance, which
+   * is the entire promise the publish gate makes.
+   */
+  async myShifts(deviceId: string, weekOf?: string) {
+    const me = this.sessions.get(deviceId);
+    if (!me) return { ok: false as const, reason: "sign in on this device to see your shifts" };
+
+    const on = weekOf && isValidYmd(weekOf) ? weekOf : serviceDate();
+    const { monday, days, shifts } = await this.weekOfShifts(on);
+    const mine = shifts.filter((s) => s.employeeId === me.id && s.published).map(Engine.shiftView);
+    const minutes = mine.reduce((a, s) => a + s.minutes, 0);
+    return {
+      ok: true as const,
+      employee: { id: me.id, name: me.name },
+      weekOf: monday,
+      days: days.map((date) => ({ date, shifts: mine.filter((s) => s.date === date) })),
+      shifts: mine.length,
+      plannedMinutes: minutes,
+      plannedHours: Engine.hours(minutes),
+    };
+  }
+
+  /**
+   * Planned against actual, for one service date. The first line on the
+   * Operator Console's Labor screen that is true rather than illustrative.
+   *
+   * HOURS, and only hours. There is no wage on the row it reads, on the
+   * employee it names, or anywhere in the schema, so this read could not
+   * become a payroll calculation even by accident. That absence is the
+   * feature (spec section 4).
+   *
+   * Planned counts PUBLISHED shifts only: a draft is a manager's thinking,
+   * not a commitment, and measuring somebody against a plan they were never
+   * shown would be dishonest. A shift somebody is still clocked into
+   * contributes no actual hours and is named, exactly as the payroll export
+   * excludes and names one, because a quietly short number is the failure
+   * this whole rung exists to avoid.
+   */
+  async labor(pin: unknown, date?: string) {
+    if (!(await this.manager(pin))) return { ok: false as const, reason: this.managerRefusal(pin, "reading the labor report") };
+
+    const on = date && isValidYmd(date) ? date : serviceDate();
+    const [planned, actual, roster] = await Promise.all([
+      this.store.listPlannedShifts(),
+      this.store.listShifts(),
+      this.staff(),
+    ]);
+    const known = new Map(roster.map((e) => [e.id, e]));
+
+    interface Row {
+      employeeId: string; name: string; title: string;
+      plannedMinutes: number; actualMinutes: number; stillClockedIn: boolean;
+    }
+    const rows = new Map<string, Row>();
+    const row = (employeeId: string, fallbackName: string): Row => {
+      let found = rows.get(employeeId);
+      if (!found) {
+        const e = known.get(employeeId);
+        found = {
+          employeeId,
+          name: e?.name ?? fallbackName,
+          title: e?.title ?? "",
+          plannedMinutes: 0, actualMinutes: 0, stillClockedIn: false,
+        };
+        rows.set(employeeId, found);
+      }
+      return found;
+    };
+
+    for (const s of planned) {
+      if (!s.published || serviceDateOf(s.startsAt) !== on) continue;
+      row(s.employeeId, "Off the roster").plannedMinutes += Engine.minutes(s.startsAt, s.endsAt);
+    }
+    for (const s of actual) {
+      if (serviceDateOf(s.clockIn) !== on) continue;
+      const r = row(s.employeeId, s.employeeName);
+      // somebody still on the clock: counted as nothing and named, never
+      // guessed at by measuring against now
+      if (!s.clockOut) { r.stillClockedIn = true; continue; }
+      r.actualMinutes += Engine.minutes(s.clockIn, s.clockOut);
+    }
+
+    const employees = [...rows.values()]
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((r) => ({
+        ...r,
+        // positive means they worked longer than the plan said
+        varianceMinutes: r.actualMinutes - r.plannedMinutes,
+        plannedHours: Engine.hours(r.plannedMinutes),
+        actualHours: Engine.hours(r.actualMinutes),
+        varianceHours: Engine.hours(r.actualMinutes - r.plannedMinutes),
+      }));
+
+    const plannedMinutes = employees.reduce((a, e) => a + e.plannedMinutes, 0);
+    const actualMinutes = employees.reduce((a, e) => a + e.actualMinutes, 0);
+    return {
+      ok: true as const,
+      date: on,
+      employees,
+      totals: {
+        plannedMinutes, actualMinutes, varianceMinutes: actualMinutes - plannedMinutes,
+        plannedHours: Engine.hours(plannedMinutes),
+        actualHours: Engine.hours(actualMinutes),
+        varianceHours: Engine.hours(actualMinutes - plannedMinutes),
+      },
+      note: "Hours only. Nothing here is multiplied by a wage, because no wage is stored: what anybody is paid is the payroll provider's arithmetic, never ours.",
+    };
   }
 
   /** The PIN must be unambiguous across ACTIVE employees: sign-in identifies

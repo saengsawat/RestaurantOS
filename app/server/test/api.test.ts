@@ -4516,3 +4516,366 @@ describe("the reservations screen and the floor badge (E23-T3)", () => {
     expect(page).toContain('href="/reservations"');
   });
 });
+
+/* ---------------- the schedule (E24-T4, D28 rung 2) ----------------
+   The other half of the clock. Two things are being defended here, and the
+   assertions are shaped around them rather than around the CRUD.
+
+   PUBLISHED IS THE GATE: an employee's own view must never, under any
+   circumstance, show a row a manager has not published. Half the tests below
+   are that one sentence, asked from different angles.
+
+   NOTHING COSTS ANYTHING: not one assertion in this block is about money,
+   because there is no wage on the row, on the employee, or in the schema.
+   The planned-versus-actual report is in hours and stays there (spec §4). */
+describe("the schedule (E24-T4)", () => {
+  const MGR = "1122";
+  const GIA_PIN = "2468";
+  const GIA = "33333333-3333-3333-3333-333333333333";
+  const MARCO = "66666666-6666-4666-8666-666666666666";
+  const SOFIA = "77777777-7777-4777-8777-777777777777";
+
+  /** a Monday, and the week this block plans against */
+  const MON = "2026-09-07";
+  const TUE = "2026-09-08";
+  const SAT = "2026-09-12";
+  const NEXT_MON = "2026-09-14";
+
+  /** a local-time instant: the whole calendar runs on the server's own clock */
+  const at = (ymd: string, h: number, min = 0) => {
+    const [y, m, d] = ymd.split("-").map(Number);
+    return new Date(y!, m! - 1, d!, h, min).toISOString();
+  };
+  const today = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+
+  const plan = (app: ReturnType<typeof buildServer>, n: number, body: Record<string, unknown>) =>
+    app.inject({ method: "POST", url: "/v1/schedule/shift", payload: { ...ENV(n), managerPin: MGR, ...body } });
+
+  const publish = (app: ReturnType<typeof buildServer>, n: number, weekOf: string, pin: string | null = MGR) =>
+    app.inject({ method: "POST", url: "/v1/schedule/publish",
+      payload: { ...ENV(n), ...(pin === null ? {} : { managerPin: pin }), weekOf } });
+
+  const week = async (app: ReturnType<typeof buildServer>, weekOf?: string, pin: string | null = MGR) => {
+    const res = await app.inject({ method: "POST", url: "/v1/schedule/week",
+      payload: { ...(pin === null ? {} : { managerPin: pin }), ...(weekOf ? { weekOf } : {}) } });
+    return { code: res.statusCode, body: res.json() };
+  };
+
+  const mine = async (app: ReturnType<typeof buildServer>, deviceId: string, weekOf?: string) => {
+    const res = await app.inject({ method: "GET",
+      url: `/v1/schedule/mine?deviceId=${encodeURIComponent(deviceId)}${weekOf ? `&weekOf=${weekOf}` : ""}` });
+    return { code: res.statusCode, body: res.json() };
+  };
+
+  const labor = async (app: ReturnType<typeof buildServer>, date?: string, pin: string | null = MGR) => {
+    const res = await app.inject({ method: "POST", url: "/v1/insights/labor",
+      payload: { ...(pin === null ? {} : { managerPin: pin }), ...(date ? { date } : {}) } });
+    return { code: res.statusCode, body: res.json() };
+  };
+
+  /** every shift the week read holds, flattened out of the by-employee grid */
+  const allShifts = (body: { employees: { days: { shifts: unknown[] }[] }[] }) =>
+    body.employees.flatMap((e) => e.days.flatMap((d) => d.shifts)) as
+      { id: string; published: boolean; date: string; from: string; to: string; hours: number; roleForShift: string }[];
+
+  it("keeps a draft private and publishes the week in one act", async () => {
+    const app = buildServer();
+    const device = "gia-handheld";
+    // Gia signs in, which is how the floor identifies itself; nothing about
+    // the schedule needs a PIN beyond that session
+    expect((await app.inject({ method: "POST", url: "/v1/session",
+      payload: { deviceId: device, pin: GIA_PIN } })).statusCode).toBe(200);
+
+    const drafted = await plan(app, 1, { employeeId: GIA, startsAt: at(TUE, 16), endsAt: at(TUE, 22), roleForShift: "Bar" });
+    expect(drafted.statusCode).toBe(200);
+    expect(drafted.json().plannedShift).toMatchObject({ employeeId: GIA, roleForShift: "Bar", published: false });
+
+    // the manager sees it; the person it is about does not, and that is the
+    // whole promise the publish gate makes
+    const draftWeek = await week(app, TUE);
+    expect(draftWeek.code).toBe(200);
+    expect(draftWeek.body.weekOf).toBe(MON);
+    expect(draftWeek.body.totals).toMatchObject({ shifts: 1, draft: 1, published: 0 });
+    expect(draftWeek.body.allPublished).toBe(false);
+    expect(allShifts(draftWeek.body)).toHaveLength(1);
+
+    const beforePublish = await mine(app, device, TUE);
+    expect(beforePublish.code).toBe(200);
+    expect(beforePublish.body.employee.name).toBe("Gia R.");
+    expect(beforePublish.body.shifts).toBe(0);
+    expect(beforePublish.body.days.flatMap((d: { shifts: unknown[] }) => d.shifts)).toEqual([]);
+
+    // one act, the whole week, and any day inside it names the same seven
+    const published = await publish(app, 2, SAT);
+    expect(published.statusCode).toBe(200);
+    expect(published.json().schedule).toMatchObject({ weekOf: MON, shifts: 1, published: 1, alreadyPublished: 0 });
+    expect(published.json().note).toContain("the floor can see the week now");
+
+    const after = await mine(app, device, TUE);
+    expect(after.body.shifts).toBe(1);
+    expect(after.body.plannedHours).toBe(6);
+    expect(after.body.plannedMinutes).toBe(360);
+    const tuesday = after.body.days.find((d: { date: string }) => d.date === TUE);
+    expect(tuesday.shifts[0]).toMatchObject({ roleForShift: "Bar", from: "16:00", to: "22:00", hours: 6, published: true });
+    // and the seven days come back whether or not anything is on them
+    expect(after.body.days).toHaveLength(7);
+    expect(after.body.days[0].date).toBe(MON);
+  });
+
+  it("publishes one week without touching the next, and re-publishes after an edit", async () => {
+    const app = buildServer();
+    await plan(app, 1, { employeeId: GIA, startsAt: at(TUE, 16), endsAt: at(TUE, 22) });
+    await plan(app, 2, { employeeId: SOFIA, startsAt: at(NEXT_MON, 17), endsAt: at(NEXT_MON, 23) });
+
+    expect((await publish(app, 3, MON)).statusCode).toBe(200);
+    expect((await week(app, MON)).body.totals).toMatchObject({ shifts: 1, draft: 0, published: 1 });
+    // next week is still the manager's private draft
+    expect((await week(app, NEXT_MON)).body.totals).toMatchObject({ shifts: 1, draft: 1, published: 0 });
+
+    // more edits land as drafts, and the same command publishes them
+    await plan(app, 4, { employeeId: MARCO, startsAt: at(SAT, 15), endsAt: at(SAT, 23), roleForShift: "Expo" });
+    expect((await week(app, MON)).body.totals).toMatchObject({ shifts: 2, draft: 1, published: 1 });
+    const again = await publish(app, 5, MON);
+    expect(again.json().schedule).toMatchObject({ published: 1, alreadyPublished: 1 });
+    expect((await week(app, MON)).body.allPublished).toBe(true);
+
+    // and running it a third time with nothing to do says exactly that
+    const third = await publish(app, 6, MON);
+    expect(third.statusCode).toBe(200);
+    expect(third.json().note).toContain("was already published; nothing changed");
+
+    // a week with nothing on it is refused rather than silently "published"
+    const empty = await publish(app, 7, "2026-10-05");
+    expect(empty.statusCode).toBe(422);
+    expect(empty.json().reason).toBe("nothing is planned for the week of 2026-10-05");
+  });
+
+  it("warns about an overlap and saves it anyway", async () => {
+    const app = buildServer();
+    await plan(app, 1, { employeeId: GIA, startsAt: at(SAT, 11), endsAt: at(SAT, 15), roleForShift: "Server" });
+    // a split double reads as two shifts and a manager double-covering a
+    // Saturday is a decision, so this is a warning and never a refusal
+    const overlapping = await plan(app, 2, { employeeId: GIA, startsAt: at(SAT, 14), endsAt: at(SAT, 22) });
+    expect(overlapping.statusCode).toBe(200);
+    expect(overlapping.json().note).toBe(
+      "Gia R. is already on 11:00 to 15:00 on 2026-09-12. Saved anyway: a split double is real life.");
+    expect((await week(app, SAT)).body.totals.shifts).toBe(2);
+
+    // a genuine split double, touching but not overlapping, says nothing
+    const clean = await plan(app, 3, { employeeId: SOFIA, startsAt: at(SAT, 11), endsAt: at(SAT, 15) });
+    const second = await plan(app, 4, { employeeId: SOFIA, startsAt: at(SAT, 17), endsAt: at(SAT, 23) });
+    expect(clean.json().note).toBeUndefined();
+    expect(second.json().note).toBeUndefined();
+    // two people on the same hours is not an overlap: it is a Saturday
+    expect((await week(app, SAT)).body.totals.shifts).toBe(4);
+  });
+
+  it("refuses the typos, and refuses to schedule somebody who no longer works here", async () => {
+    const app = buildServer();
+
+    const backwards = await plan(app, 1, { employeeId: GIA, startsAt: at(TUE, 22), endsAt: at(TUE, 16) });
+    expect(backwards.statusCode).toBe(422);
+    expect(backwards.json().reason).toBe("a shift has to end after it starts");
+
+    const zero = await plan(app, 2, { employeeId: GIA, startsAt: at(TUE, 16), endsAt: at(TUE, 16) });
+    expect(zero.json().reason).toBe("a shift has to end after it starts");
+
+    // 2 AM when they meant 2 PM: caught here costs one retype, missed it
+    // costs somebody a wrong week
+    const marathon = await plan(app, 3, { employeeId: GIA, startsAt: at(TUE, 6), endsAt: at(TUE, 23) });
+    expect(marathon.statusCode).toBe(422);
+    expect(marathon.json().reason).toBe("17 hours is a typo rather than a double; a planned shift tops out at 16");
+    // and exactly 16 is fine, because it is a real double with a break in it
+    expect((await plan(app, 4, { employeeId: GIA, startsAt: at(TUE, 7), endsAt: at(TUE, 23) })).statusCode).toBe(200);
+
+    expect((await plan(app, 5, { employeeId: "nobody", startsAt: at(TUE, 16), endsAt: at(TUE, 22) })).json().reason)
+      .toBe("that employee is not on the roster");
+    expect((await plan(app, 6, { startsAt: at(TUE, 16), endsAt: at(TUE, 22) })).json().reason)
+      .toBe("that employee is not on the roster");
+    expect((await plan(app, 7, { employeeId: GIA, startsAt: "next tuesday", endsAt: at(TUE, 22) })).json().reason)
+      .toBe("'next tuesday' is not a date and time");
+
+    const gone = await app.inject({ method: "POST", url: `/v1/staff/${SOFIA}/deactivate`,
+      payload: { ...ENV(8), managerPin: MGR } });
+    expect(gone.statusCode).toBe(200);
+    expect((await plan(app, 9, { employeeId: SOFIA, startsAt: at(TUE, 16), endsAt: at(TUE, 22) })).json().reason)
+      .toBe("Sofia T. is no longer on the roster; only somebody who still works here can be scheduled");
+  });
+
+  it("edits keep a published shift published, and removing one takes it off both views", async () => {
+    const app = buildServer();
+    const device = "gia-handheld";
+    await app.inject({ method: "POST", url: "/v1/session", payload: { deviceId: device, pin: GIA_PIN } });
+
+    const first = await plan(app, 1, { employeeId: GIA, startsAt: at(TUE, 16), endsAt: at(TUE, 22) });
+    const id = first.json().plannedShift.id as string;
+    await publish(app, 2, MON);
+    expect((await mine(app, device, TUE)).body.days.find((d: { date: string }) => d.date === TUE).shifts[0].from).toBe("16:00");
+
+    // moving a PUBLISHED shift keeps it published: reverting it to draft
+    // would make Gia's Tuesday vanish from her own screen until somebody
+    // remembered to publish again, and a shift that disappears is worse
+    // than one that visibly moved
+    const moved = await plan(app, 3, { id, startsAt: at(TUE, 17), endsAt: at(TUE, 23) });
+    expect(moved.json().plannedShift).toMatchObject({ id, published: true });
+    const afterEdit = await mine(app, device, TUE);
+    expect(afterEdit.body.days.find((d: { date: string }) => d.date === TUE).shifts[0]).toMatchObject({ from: "17:00", to: "23:00" });
+    // one row edited, never a second one written
+    expect(afterEdit.body.shifts).toBe(1);
+
+    // a blank role falls back to their job title rather than to nothing
+    expect(moved.json().plannedShift.roleForShift).toBe("Server");
+
+    const removed = await app.inject({ method: "POST", url: `/v1/schedule/shift/${id}/remove`,
+      payload: { ...ENV(4), managerPin: MGR } });
+    expect(removed.statusCode).toBe(200);
+    expect(removed.json().note).toContain("is off the schedule");
+    expect(removed.json().note).toContain("It was published");
+    expect((await mine(app, device, TUE)).body.shifts).toBe(0);
+    expect((await week(app, TUE)).body.totals.shifts).toBe(0);
+
+    const twice = await app.inject({ method: "POST", url: `/v1/schedule/shift/${id}/remove`,
+      payload: { ...ENV(5), managerPin: MGR } });
+    expect(twice.statusCode).toBe(422);
+    expect(twice.json().reason).toBe(`no planned shift ${id}`);
+  });
+
+  it("counts planned against actual in hours, and never in money", async () => {
+    const store = new MemoryStore();
+    await store.init();
+    // planted clock records, so a whole day can be lived through inside a test
+    const clock = (id: string, name: string, from: number, to?: number): Shift => ({
+      id: `sh-${id}-${from}`, employeeId: id, employeeName: name,
+      clockIn: at(SAT, from), ...(to === undefined ? {} : { clockOut: at(SAT, to) }),
+    });
+    await store.putShift(clock(GIA, "Gia R.", 16, 23));      // planned 6, worked 7
+    await store.putShift(clock(SOFIA, "Sofia T.", 17));       // planned 6, still on the clock
+    await store.putShift(clock(MARCO, "Marco B.", 15, 22));   // never planned, worked 7
+    const app = buildServer(store);
+
+    await plan(app, 1, { employeeId: GIA, startsAt: at(SAT, 16), endsAt: at(SAT, 22) });
+    await plan(app, 2, { employeeId: SOFIA, startsAt: at(SAT, 17), endsAt: at(SAT, 23) });
+    // a DRAFT is a manager's thinking rather than a commitment, so nobody is
+    // measured against one they were never shown
+    const draftOnly = await labor(app, SAT);
+    expect(draftOnly.body.totals.plannedMinutes).toBe(0);
+
+    await publish(app, 3, SAT);
+    const report = await labor(app, SAT);
+    expect(report.code).toBe(200);
+    expect(report.body.date).toBe(SAT);
+
+    const rows = report.body.employees as {
+      employeeId: string; name: string; plannedHours: number; actualHours: number;
+      varianceHours: number; stillClockedIn: boolean;
+    }[];
+    expect(rows.map((r) => r.name)).toEqual(["Gia R.", "Marco B.", "Sofia T."]);
+    expect(rows[0]).toMatchObject({ plannedHours: 6, actualHours: 7, varianceHours: 1, stillClockedIn: false });
+    // planned and never turned up would read the same way with a minus: this
+    // one turned up and has not left, which is a different fact and is named
+    expect(rows[2]).toMatchObject({ plannedHours: 6, actualHours: 0, varianceHours: -6, stillClockedIn: true });
+    // worked without being on the schedule at all
+    expect(rows[1]).toMatchObject({ plannedHours: 0, actualHours: 7, varianceHours: 7 });
+    expect(report.body.totals).toMatchObject({ plannedHours: 12, actualHours: 14, varianceHours: 2 });
+    // the exact figures are the minutes; the hours are their presentation
+    expect(report.body.totals).toMatchObject({ plannedMinutes: 720, actualMinutes: 840, varianceMinutes: 120 });
+    expect(report.body.note).toContain("no wage is stored");
+
+    // §4, asserted rather than assumed: not one figure anywhere in this
+    // report, or in the week it reads from, is about money. The note is
+    // stripped first because it is the one place the word "wage" belongs,
+    // and it is there to say the report does not use one.
+    const money = [{ ...report.body, note: undefined }, (await week(app, SAT)).body];
+    for (const payload of money.map((p) => JSON.stringify(p).toLowerCase())) {
+      for (const forbidden of ["wage", "rate", "minor", "pay", "gross", "net_", "tax", "overtime"]) {
+        expect(payload, `${forbidden} has no business on a labor report`).not.toContain(forbidden);
+      }
+    }
+  });
+
+  it("gates the manager views on a manager, and an employee's own week on nothing but their session", async () => {
+    const app = buildServer();
+    await plan(app, 1, { employeeId: GIA, startsAt: at(TUE, 16), endsAt: at(TUE, 22) });
+    await publish(app, 2, MON);
+
+    // a server's PIN is not a manager's, and no PIN at all is neither
+    for (const [pin, reason] of [
+      [GIA_PIN, "PIN not recognized as a manager"],
+      [null, "reading the schedule requires a manager's PIN"],
+    ] as const) {
+      const res = await week(app, TUE, pin);
+      expect(res.code).toBe(422);
+      expect(res.body.reason).toBe(reason);
+    }
+    expect((await labor(app, TUE, GIA_PIN)).body.reason).toBe("PIN not recognized as a manager");
+    expect((await labor(app, TUE, null)).body.reason).toBe("reading the labor report requires a manager's PIN");
+    expect((await publish(app, 3, MON, GIA_PIN)).json().reason).toBe("PIN not recognized as a manager");
+    expect((await app.inject({ method: "POST", url: "/v1/schedule/shift",
+      payload: { ...ENV(4), managerPin: GIA_PIN, employeeId: GIA, startsAt: at(TUE, 16), endsAt: at(TUE, 22) } }))
+      .json().reason).toBe("PIN not recognized as a manager");
+
+    // and the employee's own week needs a session and nothing more
+    const device = "gia-handheld";
+    const anonymous = await mine(app, device, TUE);
+    expect(anonymous.code).toBe(401);
+    expect(anonymous.body.reason).toBe("sign in on this device to see your shifts");
+    await app.inject({ method: "POST", url: "/v1/session", payload: { deviceId: device, pin: GIA_PIN } });
+    const signedIn = await mine(app, device, TUE);
+    expect(signedIn.code).toBe(200);
+    expect(signedIn.body.shifts).toBe(1);
+    // it is THEIR week, never anybody else's: Sofia's Saturday is not here
+    await plan(app, 5, { employeeId: SOFIA, startsAt: at(TUE, 17), endsAt: at(TUE, 23) });
+    await publish(app, 6, MON);
+    expect((await mine(app, device, TUE)).body.shifts).toBe(1);
+  });
+
+  it("replays a dropped write instead of writing it twice", async () => {
+    const app = buildServer();
+    const op = { ...ENV(1), managerPin: MGR, employeeId: GIA, startsAt: at(TUE, 16), endsAt: at(TUE, 22) };
+    const first = await app.inject({ method: "POST", url: "/v1/schedule/shift", payload: op });
+    const retry = await app.inject({ method: "POST", url: "/v1/schedule/shift", payload: op });
+    expect(retry.json()).toEqual(first.json());
+    expect((await week(app, TUE)).body.totals.shifts).toBe(1);
+
+    // and a dropped publish reply must not double-count the week either
+    const pub = { ...ENV(2), managerPin: MGR, weekOf: MON };
+    const p1 = await app.inject({ method: "POST", url: "/v1/schedule/publish", payload: pub });
+    const p2 = await app.inject({ method: "POST", url: "/v1/schedule/publish", payload: pub });
+    expect(p2.json()).toEqual(p1.json());
+    expect(p1.json().schedule.published).toBe(1);
+  });
+
+  it("defaults both reads to the week and the day nobody named", async () => {
+    const app = buildServer();
+    const device = "gia-handheld";
+    await app.inject({ method: "POST", url: "/v1/session", payload: { deviceId: device, pin: GIA_PIN } });
+    const now = today();
+
+    await plan(app, 1, { employeeId: GIA, startsAt: at(now, 16), endsAt: at(now, 22), roleForShift: "Expo" });
+    await publish(app, 2, now);
+
+    const thisWeek = await week(app);
+    expect(thisWeek.code).toBe(200);
+    expect(thisWeek.body.days).toContain(now);
+    expect(thisWeek.body.totals.shifts).toBe(1);
+
+    const myWeek = await mine(app, device);
+    expect(myWeek.body.shifts).toBe(1);
+    expect(myWeek.body.days.find((d: { date: string }) => d.date === now).shifts[0].roleForShift).toBe("Expo");
+
+    const todayLabor = await labor(app);
+    expect(todayLabor.body.date).toBe(now);
+    expect(todayLabor.body.totals.plannedHours).toBe(6);
+    // signing in clocked her in and she has not clocked out, so the actual
+    // side is nothing yet and says why
+    expect(todayLabor.body.employees[0]).toMatchObject({ name: "Gia R.", actualHours: 0, stillClockedIn: true });
+
+    // a week is named by any day inside it, so a manager cannot publish a
+    // different seven days than the ones on their screen
+    expect((await publish(app, 3, "not-a-date")).json().reason)
+      .toBe("'not-a-date' is not a date; a week is named by any day inside it (YYYY-MM-DD)");
+  });
+});

@@ -15,6 +15,7 @@ import {
   type Guest,
   type MenuSnapshot,
   type OpMeta,
+  type PlannedShift,
   type Reservation,
   type Shift,
   type Store,
@@ -220,4 +221,15 @@ export class MemoryStore implements Store {
   /** retired tables included, which is the whole point of the method: the
    *  floor array keeps a retired row so history stays whole (E6-T2) */
   async listAllTableNames() { return this.floor.map((t) => t.name); }
+
+  /* the schedule (E24-T4). What was MEANT to happen, beside the shifts above
+     that record what did. Which week a row belongs to and how it compares
+     with the clock are both computed at read; nothing here stores either. */
+  private plannedShifts = new Map<string, PlannedShift>();
+  async listPlannedShifts() { return [...this.plannedShifts.values()]; }
+  async getPlannedShift(id: string) { return this.plannedShifts.get(id); }
+  async putPlannedShift(shift: PlannedShift) { this.plannedShifts.set(shift.id, { ...shift }); }
+  /** A real delete: a shift nobody worked has no history worth keeping, which
+   *  is what makes it different from an employee or a table. */
+  async removePlannedShift(id: string) { this.plannedShifts.delete(id); }
 }

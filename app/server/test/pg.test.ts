@@ -715,10 +715,12 @@ describe.skipIf(!PGBIN)("PostgreSQL persistence (E4)", () => {
       expect(sql(`SELECT count(*) FROM information_schema.columns
                   WHERE table_name = 'location' AND column_name = '${column}'`), column).toBe("1");
     }
-    // and STILL nothing that turns hours into money, on either table
+    // and STILL nothing that turns hours into money, on any of the tables
+    // labor touches (planned_shift joined the list in E24-T4)
     for (const column of ["wage_minor", "wage_rate", "hourly_rate", "ssn", "tax_id", "bank_account"]) {
       expect(sql(`SELECT count(*) FROM information_schema.columns
-                  WHERE table_name IN ('location', 'employee') AND column_name = '${column}'`), column).toBe("0");
+                  WHERE table_name IN ('location', 'employee', 'shift', 'planned_shift')
+                    AND column_name = '${column}'`), column).toBe("0");
     }
 
     const seeded = (await app.inject({ method: "GET", url: "/v1/venue" })).json();
@@ -937,5 +939,120 @@ describe.skipIf(!PGBIN)("PostgreSQL persistence (E4)", () => {
     expect(noShow.statusCode).toBe(200);
     expect(sql(`SELECT status FROM reservation WHERE id = '${orphan.id}'`)).toBe("no_show");
     expect(sql(`SELECT count(*) FROM reservation WHERE id = '${orphan.id}'`)).toBe("1");
+  }, 60_000);
+
+  /* ------------- the schedule (E24-T4, D28 rung 2) -------------
+   * The week's arithmetic and the planned-versus-actual report are proven
+   * against the memory store in api.test.ts. What only Postgres can prove:
+   * migration 0011's table and its constraint exist, the draft gate survives
+   * a restart (the whole point of a schedule staff cannot see early), a
+   * removal is a real delete rather than a tombstone, and there is STILL
+   * nothing anywhere that turns an hour into money. */
+
+  it("keeps a planned week across a restart, publishes it once, and stores no wage beside it", async () => {
+    const app = buildServer(store, "postgres");
+    const MGR = "1122";
+    const GIA = "33333333-3333-3333-3333-333333333333";
+    // Marco rather than Sofia: an earlier test in this file let Sofia go,
+    // and the engine is right to refuse to schedule somebody who no longer
+    // works here (api.test.ts asserts that refusal on its own)
+    const MARCO = "66666666-6666-4666-8666-666666666666";
+    const MON = "2026-09-07";
+    const TUE = "2026-09-08";
+    const at = (ymd: string, h: number) => {
+      const [y, m, d] = ymd.split("-").map(Number);
+      return new Date(y!, m! - 1, d!, h).toISOString();
+    };
+
+    // 0011 landed, with the columns the sketch named and the one constraint
+    // that cannot be argued with from the application side
+    expect(sql(`SELECT count(*) FROM information_schema.tables WHERE table_name = 'planned_shift'`)).toBe("1");
+    for (const column of ["employee_id", "role_for_shift", "starts_at", "ends_at", "published", "created_by"]) {
+      expect(sql(`SELECT count(*) FROM information_schema.columns
+                  WHERE table_name = 'planned_shift' AND column_name = '${column}'`), column).toBe("1");
+    }
+    expect(sql(`SELECT count(*) FROM information_schema.table_constraints
+                WHERE table_name = 'planned_shift' AND constraint_name = 'planned_shift_runs_forward'`)).toBe("1");
+    // and NOTHING that turns hours into money, on the new table or the old
+    // ones. D28 rung 3 is never built, and this is where that stays true.
+    for (const column of ["wage_minor", "wage_rate", "hourly_rate", "pay_rate", "ssn", "tax_id", "bank_account"]) {
+      expect(sql(`SELECT count(*) FROM information_schema.columns
+                  WHERE table_name IN ('planned_shift', 'shift', 'employee', 'location')
+                    AND column_name = '${column}'`), column).toBe("0");
+    }
+
+    const plan = async (n: number, body: Record<string, unknown>) => {
+      const res = await app.inject({ method: "POST", url: "/v1/schedule/shift",
+        payload: ENV({ managerPin: MGR, ...body }) });
+      expect(res.statusCode, JSON.stringify(res.json())).toBe(200);
+      return res.json().plannedShift as { id: string; published: boolean };
+    };
+
+    const gia = await plan(1, { employeeId: GIA, startsAt: at(TUE, 16), endsAt: at(TUE, 22), roleForShift: "Bar" });
+    const marco = await plan(2, { employeeId: MARCO, startsAt: at(TUE, 17), endsAt: at(TUE, 23) });
+
+    // real rows, real FKs, and the draft gate closed
+    expect(sql(`SELECT role_for_shift FROM planned_shift WHERE id = '${gia.id}'`)).toBe("Bar");
+    expect(sql(`SELECT published FROM planned_shift WHERE id = '${gia.id}'`)).toBe("f");
+    expect(sql(`SELECT e.display_name FROM planned_shift ps JOIN employee e ON e.id = ps.employee_id
+                WHERE ps.id = '${gia.id}'`)).toBe("Gia R.");
+    // created_by is NOT NULL and it is a real person: every write travels a
+    // manager's PIN, so there is always somebody to name
+    expect(sql(`SELECT count(*) FROM planned_shift WHERE created_by IS NULL`)).toBe("0");
+    // the shape the whole feature refuses to have: this row costs nothing
+    expect(sql(`SELECT count(*) FROM information_schema.columns
+                WHERE table_name = 'planned_shift' AND data_type IN ('money', 'numeric')`)).toBe("0");
+
+    /* the manager goes home mid-draft; next week is still nobody else's business */
+    await store.end();
+    store = new PgStore(url);
+    await store.init();
+    const app2 = buildServer(store, "postgres");
+
+    const device = "gia-handheld";
+    await app2.inject({ method: "POST", url: "/v1/session", payload: { deviceId: device, pin: "2468" } });
+    const beforePublish = await app2.inject({ method: "GET", url: `/v1/schedule/mine?deviceId=${device}&weekOf=${TUE}` });
+    expect(beforePublish.statusCode).toBe(200);
+    expect(beforePublish.json().shifts).toBe(0);
+
+    const managerWeek = await app2.inject({ method: "POST", url: "/v1/schedule/week",
+      payload: { managerPin: MGR, weekOf: TUE } });
+    expect(managerWeek.json().weekOf).toBe(MON);
+    expect(managerWeek.json().totals).toMatchObject({ shifts: 2, draft: 2, published: 0 });
+
+    const published = await app2.inject({ method: "POST", url: "/v1/schedule/publish",
+      payload: ENV({ managerPin: MGR, weekOf: TUE }) });
+    expect(published.statusCode).toBe(200);
+    expect(sql(`SELECT count(*) FROM planned_shift WHERE published`)).toBe("2");
+
+    const afterPublish = await app2.inject({ method: "GET", url: `/v1/schedule/mine?deviceId=${device}&weekOf=${TUE}` });
+    expect(afterPublish.json().shifts).toBe(1);
+    expect(afterPublish.json().days.find((d: { date: string }) => d.date === TUE).shifts[0])
+      .toMatchObject({ roleForShift: "Bar", from: "16:00", to: "22:00", hours: 6 });
+
+    /* the report only Postgres can prove joins two real tables */
+    const labor = await app2.inject({ method: "POST", url: "/v1/insights/labor",
+      payload: { managerPin: MGR, date: TUE } });
+    expect(labor.statusCode).toBe(200);
+    expect(labor.json().totals).toMatchObject({ plannedHours: 12, actualHours: 0 });
+
+    /* removing a shift is a real delete: nothing points at a shift nobody
+       worked, and the clock's own record of what DID happen is untouched */
+    const shiftsBefore = sql("SELECT count(*) FROM shift");
+    const removed = await app2.inject({ method: "POST", url: `/v1/schedule/shift/${marco.id}/remove`,
+      payload: ENV({ managerPin: MGR }) });
+    expect(removed.statusCode).toBe(200);
+    expect(sql(`SELECT count(*) FROM planned_shift WHERE id = '${marco.id}'`)).toBe("0");
+    expect(sql("SELECT count(*) FROM shift"), "the clock owns what happened").toBe(shiftsBefore);
+
+    // and the survivor is still there, still published, after one more restart
+    await store.end();
+    store = new PgStore(url);
+    await store.init();
+    const app3 = buildServer(store, "postgres");
+    const survivor = await app3.inject({ method: "POST", url: "/v1/schedule/week",
+      payload: { managerPin: MGR, weekOf: MON } });
+    expect(survivor.json().totals).toMatchObject({ shifts: 1, draft: 0, published: 1 });
+    expect(survivor.json().allPublished).toBe(true);
   }, 60_000);
 });

@@ -242,6 +242,28 @@ export function isValidYmd(value: string): boolean {
   return ymd(dateAt(value)) === value;
 }
 
+/** The Monday of the week a date falls in (E24-T4).
+ *
+ *  A schedule week starts on Monday, and that is a constant rather than a
+ *  venue setting on the same argument the lunch/dinner split was made one:
+ *  nothing in the product needed the concept before the schedule did, and
+ *  inventing a knob ahead of an operator asking for it is how a settings
+ *  screen fills up with controls nobody turns. Monday because it keeps a
+ *  restaurant's two busiest nights in one week instead of splitting the
+ *  weekend across two, and because the demo's pay cycles already start on
+ *  one. Deck F can move it later like any other answer. */
+export function weekStart(date: string): string {
+  // getDay() is 0 on Sunday, so Sunday belongs to the week that began six
+  // days earlier rather than to the one starting tomorrow
+  const back = (dateAt(date).getDay() + 6) % 7;
+  return addDays(date, -back);
+}
+
+/** The seven service dates of the week beginning on `monday`. */
+export function weekDays(monday: string): string[] {
+  return Array.from({ length: 7 }, (_, i) => addDays(monday, i));
+}
+
 /** The period the given date falls inside. */
 export function periodContaining(venue: Venue, date: string): PayPeriod {
   if (venue.payPeriod === "semimonthly") {
@@ -411,6 +433,15 @@ export interface Store {
   listShifts(): Promise<Shift[]>;
   putShift(shift: Shift): Promise<void>;
 
+  /** The schedule (E24-T4). Plain rows: which week a shift belongs to, and
+   *  how planned hours compare with worked ones, are both computed at read
+   *  and stored nowhere. Removal here is a real delete, unlike an employee or
+   *  a table, because a shift that was never worked has no history to keep. */
+  listPlannedShifts(): Promise<PlannedShift[]>;
+  getPlannedShift(id: string): Promise<PlannedShift | undefined>;
+  putPlannedShift(shift: PlannedShift): Promise<void>;
+  removePlannedShift(id: string): Promise<void>;
+
   /** guests and their check links (E20). Deleting a guest purges identity and
    *  drops the links; it never touches a check. */
   listGuests(): Promise<Guest[]>;
@@ -489,6 +520,33 @@ export interface CheckGuestLink {
   guestId: string;
   attachedBy?: string;
   attachedAt: string;
+}
+
+/** One shift somebody was MEANT to work (E24-T4, team-labor-spec §3).
+ *
+ *  The other half of the clock. `Shift` below is what actually happened, and
+ *  until now that was the only half the system held, which is why it could
+ *  answer "who is here" and not "who was meant to be". Nothing in here costs
+ *  anything: there is no wage rate on this row, on the employee, or anywhere
+ *  else, because hours planned against hours worked is a complete and honest
+ *  answer in hours, and turning it into dollars is the step that would make
+ *  it payroll (spec §4, D28 rung 3). */
+export interface PlannedShift {
+  id: string;
+  employeeId: string;
+  /** What they are working AS that night: neither their job title nor their
+   *  permission role, because a sous chef runs the pass on Tuesday and
+   *  expedites on Saturday, and a server picks up a bar shift. Free text, and
+   *  nothing in the engine ever branches on it. */
+  roleForShift: string;
+  /** UTC ISO, like every other timestamp here */
+  startsAt: string;
+  endsAt: string;
+  /** The draft gate, the menu's own discipline: a manager builds next week in
+   *  private, and staff see nothing until it is published once. */
+  published: boolean;
+  createdBy?: string;
+  createdAt: string;
 }
 
 /** One employee working one stretch (E14/E15). Sign-in auto-clocks-in;

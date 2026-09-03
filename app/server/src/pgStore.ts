@@ -33,6 +33,7 @@ import {
   type MenuDraft,
   type MenuSnapshot,
   type OpMeta,
+  type PlannedShift,
   type Reservation,
   type Shift,
   type Store,
@@ -1047,6 +1048,56 @@ export class PgStore implements Store {
     }));
   }
 
+
+  /* ------------------- the schedule (E24-T4) -------------------
+   * What was MEANT to happen, in its own table beside the shifts above that
+   * record what did. This feature never writes to `shift`: the clock owns
+   * what actually happened, and the planned-versus-actual report is a join
+   * over the two computed at read (D19). */
+
+  async listPlannedShifts(): Promise<PlannedShift[]> {
+    const r = await this.pool.query(
+      `SELECT id, employee_id, role_for_shift, starts_at, ends_at, published, created_by, created_at
+       FROM planned_shift WHERE location_id = $1 ORDER BY starts_at, created_at`,
+      [LOC],
+    );
+    return r.rows.map((row) => ({
+      id: row.id as string,
+      employeeId: row.employee_id as string,
+      roleForShift: row.role_for_shift as string,
+      startsAt: new Date(row.starts_at as string).toISOString(),
+      endsAt: new Date(row.ends_at as string).toISOString(),
+      published: row.published === true,
+      ...(row.created_by ? { createdBy: row.created_by as string } : {}),
+      createdAt: new Date(row.created_at as string).toISOString(),
+    }));
+  }
+
+  async getPlannedShift(id: string): Promise<PlannedShift | undefined> {
+    return (await this.listPlannedShifts()).find((s) => s.id === id);
+  }
+
+  async putPlannedShift(shift: PlannedShift): Promise<void> {
+    // created_by is NOT NULL here, and it can be: every write travels a
+    // manager's PIN, so there is always a real employee to name even when
+    // the terminal itself is unsigned
+    await this.pool.query(
+      `INSERT INTO planned_shift (id, org_id, location_id, employee_id, role_for_shift,
+                                  starts_at, ends_at, published, created_by, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,COALESCE($10, now()))
+       ON CONFLICT (id) DO UPDATE SET employee_id = $4, role_for_shift = $5,
+         starts_at = $6, ends_at = $7, published = $8`,
+      [shift.id, ORG, LOC, shift.employeeId, shift.roleForShift,
+       shift.startsAt, shift.endsAt, shift.published, shift.createdBy ?? EMP, shift.createdAt],
+    );
+  }
+
+  /** A real delete, unlike an employee or a table: a shift nobody worked has
+   *  no history pointing at it, so keeping a tombstone would only make the
+   *  week harder to read. What DID happen is in `shift` and is never touched. */
+  async removePlannedShift(id: string): Promise<void> {
+    await this.pool.query("DELETE FROM planned_shift WHERE id = $1 AND location_id = $2", [id, LOC]);
+  }
 
   /* --------------------------- guests (E20) ---------------------------
    * Identity in `guest`, attachment in `check_guest`, and nothing else:
