@@ -2029,6 +2029,41 @@ describe("reads", () => {
     expect(body).toContain('showErr("#vErr",r.reason)');
   });
 
+  /* E21-T3 (D32): the picker was always first-party and always filtered, but
+   * it rendered nothing until somebody typed, so the field read as a textbox
+   * demanding a precisely spelled zone. Discoverability, not a new mechanism:
+   * the browser still supplies every name, and nothing ships with the page. */
+  it("the timezone picker shows itself before anybody types (E21-T3)", async () => {
+    const body = (await buildServer().inject({ method: "GET", url: "/settings" })).body;
+
+    // the field says what it does now
+    expect(body).toContain('placeholder="Type a city, or tap a suggestion"');
+    expect(body).not.toContain('placeholder="Type a city, e.g. Chicago"');
+
+    // suggestions on focus, and on an untyped field: this device first, then
+    // the zone the venue is already set to, then the common ones
+    expect(body).toContain('$("#vTz").onfocus=renderTz');
+    expect(body).toContain('Intl.DateTimeFormat().resolvedOptions().timeZone');
+    expect(body).toContain('add(DEVICE_TZ,"This device")');
+    expect(body).toContain('add(tzPick||VENUE.timezone,"Saved")');
+    expect(body).toContain('const COMMON_TZ=["America/New_York","America/Chicago","America/Denver","America/Los_Angeles","America/Phoenix","Pacific/Honolulu"]');
+    expect(body).toContain('class="tzhint"');
+    expect(body).toContain("Or type a city to search every zone this browser knows.");
+
+    // still no zone data of our own, and still the old fallback for a runtime
+    // that cannot enumerate them
+    expect(body).toContain('Intl.supportedValuesOf("timeZone")');
+    expect(body).toContain("This browser will not list its timezones");
+    expect(body).not.toContain("<select");
+
+    // and free text cannot be saved: a value that is not on the browser's own
+    // list is a typo, and the page says so instead of posting it
+    expect(body).toContain("Pick a timezone from the list");
+    expect(body).toContain("if(ZONES.length&&!ZONES.includes(tz)){");
+    // the guard stands down when there is no list to judge against
+    expect(body).toContain("ZONES.length&&");
+  });
+
   /* E24-T2: the Team rows grow the people directory. */
   it("the Settings Team rows carry the gated directory (E24-T2)", async () => {
     const app = buildServer();

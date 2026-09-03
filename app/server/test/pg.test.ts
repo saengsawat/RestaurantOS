@@ -846,6 +846,14 @@ describe.skipIf(!PGBIN)("PostgreSQL persistence (E4)", () => {
     const app = buildServer(store, "postgres");
     const MGR = "1122";
     const soon = new Date(Date.now() + 20 * 60_000).toISOString();
+    // the service date the booking actually belongs to, on the server-local
+    // calendar serviceDateOf buckets by. Asking for "today" would lose a
+    // booking taken twenty minutes before midnight, which is a fact about the
+    // clock this test is running on rather than about the code.
+    const dayOf = (iso: string) => {
+      const d = new Date(iso);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    };
 
     // 0010 landed, table_id is a real FK, and the two windows backfilled
     expect(sql(`SELECT count(*) FROM information_schema.tables WHERE table_name = 'reservation'`)).toBe("1");
@@ -877,7 +885,7 @@ describe.skipIf(!PGBIN)("PostgreSQL persistence (E4)", () => {
     await store.init();
     const app10 = buildServer(store, "postgres");
 
-    const day = (await app10.inject({ method: "GET", url: "/v1/reservations" })).json();
+    const day = (await app10.inject({ method: "GET", url: `/v1/reservations?date=${dayOf(soon)}` })).json();
     const row = day.reservations.find((r: { id: string }) => r.id === id);
     expect(row).toMatchObject({ name: "Somchai", partySize: 4, tableName: "Table 3", note: "anniversary", status: "booked" });
     // the phone match is computed at read, against real guest rows
@@ -917,7 +925,7 @@ describe.skipIf(!PGBIN)("PostgreSQL persistence (E4)", () => {
     store = new PgStore(url);
     await store.init();
     const app11 = buildServer(store, "postgres");
-    const orphan = (await app11.inject({ method: "GET", url: "/v1/reservations" })).json()
+    const orphan = (await app11.inject({ method: "GET", url: `/v1/reservations?date=${dayOf(soon)}` })).json()
       .reservations.find((r: { name: string }) => r.name === "Ploy");
     // the table is off the floor plan and the promise is still on the books
     expect(orphan).toMatchObject({ tableName: "Table 2", status: "booked" });

@@ -131,14 +131,20 @@ textarea.fld{padding:10px 12px;min-height:76px;resize:vertical;line-height:1.5}
 .fold{display:none}
 .fold.on{display:block}
 /* the timezone picker: a filtered list, not a 400-row select. Typing three
-   letters of a city is faster than scrolling half the planet. */
-.tzlist{display:flex;flex-direction:column;gap:4px;margin-top:6px;max-height:216px;overflow-y:auto}
+   letters of a city is faster than scrolling half the planet, and since
+   E21-T3 the list shows itself before anybody has typed anything at all. */
+.tzlist{display:flex;flex-direction:column;gap:4px;margin-top:6px;max-height:246px;overflow-y:auto}
 .tzlist:empty{display:none}
-.tz{min-height:var(--tap);border-radius:10px;padding:0 12px;text-align:left;background:var(--surface-2);
+.tz{display:flex;align-items:center;gap:8px;min-height:var(--tap);border-radius:10px;padding:0 12px;
+  text-align:left;background:var(--surface-2);
   color:var(--ink-2);font-size:13.5px;font-weight:600;transition:transform .1s}
 .tz:active{transform:scale(.98)}
 .tz.on{background:var(--brand-wash);color:var(--ink);box-shadow:inset 0 0 0 1.5px var(--brand)}
-.tzmore{font-size:11.5px;color:var(--ink-4);padding:4px 2px}
+/* why a suggestion is on the list, said in two words rather than guessed at */
+.tzhint{margin-left:auto;flex-shrink:0;font-size:10.5px;font-weight:700;letter-spacing:.05em;
+  text-transform:uppercase;color:var(--ink-4)}
+.tz.on .tzhint{color:var(--ink-3)}
+.tzmore{font-size:11.5px;color:var(--ink-4);padding:4px 2px;line-height:1.45}
 /* the engine's own words, never a paraphrase */
 .err{display:none;margin-top:14px;padding:10px 12px;border-radius:10px;font-size:12.5px;font-weight:600;
   color:var(--red);background:var(--red-wash);border:1px solid var(--red-line);line-height:1.45}
@@ -272,7 +278,7 @@ textarea.fld{padding:10px 12px;min-height:76px;resize:vertical;line-height:1.5}
     <div class="fl">Address</div>
     <input class="fld" id="vAddr" maxlength="160" autocomplete="off" placeholder="What the receipt prints">
     <div class="fl">Timezone</div>
-    <input class="fld" id="vTz" autocomplete="off" placeholder="Type a city, e.g. Chicago">
+    <input class="fld" id="vTz" autocomplete="off" placeholder="Type a city, or tap a suggestion">
     <div class="tzlist" id="tzList"></div>
     <p class="note">The business day still buckets on the server's own clock, so changing this does not move which day a late check lands on yet. That wiring is its own ticket.</p>
     <div class="fl">Pay period</div>
@@ -407,18 +413,64 @@ document.addEventListener("click",e=>{
 
 function showErr(id,msg){const el=$(id);el.textContent=msg||"";el.classList.toggle("on",!!msg);}
 
+/* ---- the timezone picker shows itself (E21-T3, D32) ----
+   The picker was already first-party and already filtered from the first
+   keystroke, but it rendered nothing until somebody typed, so the field read
+   as a textbox demanding a precisely spelled zone. This is discoverability,
+   not a new mechanism: no zone data ships with the page, the browser still
+   supplies every name below, and the old empty-list fallback still stands. */
+const DEVICE_TZ=(()=>{try{return Intl.DateTimeFormat().resolvedOptions().timeZone||"";}catch(_){return "";}})();
+/* the zones a US restaurant actually picks from, in the order the country
+   runs. A starting point, never a limit: typing searches the whole list. */
+const COMMON_TZ=["America/New_York","America/Chicago","America/Denver","America/Los_Angeles","America/Phoenix","Pacific/Honolulu"];
+
+/** What an untyped field offers: where this device thinks it is, what the
+ *  venue is set to now, then the common ones, with nothing listed twice. */
+function tzSuggestions(){
+  const out=[];
+  const add=(z,hint)=>{
+    z=(z||"").trim();
+    // never offer a name this runtime does not know; the server would refuse
+    // it and the suggestion would be a trap
+    if(!z||out.some(s=>s.z===z)||(ZONES.length&&!ZONES.includes(z)))return;
+    out.push({z:z,hint:hint||""});
+  };
+  add(DEVICE_TZ,"This device");
+  add(tzPick||VENUE.timezone,"Saved");
+  COMMON_TZ.forEach(z=>add(z,""));
+  return out;
+}
+/** A field still holding the zone it already has is not a search: nobody has
+ *  asked for anything yet, so the suggestions are still the useful answer. */
+const tzUntyped=()=>{const v=$("#vTz").value.trim();return !v||v===tzPick;};
+
 function renderTz(){
-  const q=$("#vTz").value.trim().toLowerCase();
-  if(!q||(ZONES.includes($("#vTz").value.trim())&&$("#vTz").value.trim()===tzPick)){$("#tzList").innerHTML="";return;}
+  const raw=$("#vTz").value.trim();
+  if(tzUntyped()){
+    const list=tzSuggestions();
+    $("#tzList").innerHTML=list.map(s=>
+      `<button class="tz ${s.z===tzPick?"on":""}" data-tz="${esc(s.z)}">${esc(s.z)}${
+        s.hint?`<span class="tzhint">${esc(s.hint)}</span>`:""}</button>`).join("")
+      +(list.length
+        ?`<div class="tzmore">Or type a city to search every zone this browser knows.</div>`
+        :`<div class="tzmore">This browser will not list its timezones; type one and let the server be the judge.</div>`);
+    wireTz();
+    return;
+  }
+  const q=raw.toLowerCase();
   const hits=ZONES.filter(z=>z.toLowerCase().includes(q));
   $("#tzList").innerHTML=hits.slice(0,6).map(z=>
     `<button class="tz ${z===tzPick?"on":""}" data-tz="${esc(z)}">${esc(z)}</button>`).join("")
     +(hits.length>6?`<div class="tzmore">${hits.length-6} more; keep typing</div>`:"")
     +(hits.length?"":`<div class="tzmore">No timezone matches that.</div>`);
+  wireTz();
+}
+function wireTz(){
   document.querySelectorAll("[data-tz]").forEach(b=>b.onclick=()=>{
-    tzPick=b.dataset.tz;$("#vTz").value=tzPick;$("#tzList").innerHTML="";});
+    tzPick=b.dataset.tz;$("#vTz").value=tzPick;$("#tzList").innerHTML="";showErr("#vErr","");});
 }
 $("#vTz").oninput=renderTz;
+$("#vTz").onfocus=renderTz;
 
 /* the pay period (E24-T3). WHEN the venue pays, never what: there is no wage
    field on this page and rung 3 is the reason there never will be one. */
@@ -444,8 +496,20 @@ function fillVenue(){
 
 $("#vSave").onclick=()=>gated(async()=>{
   showErr("#vErr","");
+  const tz=$("#vTz").value.trim();
+  // free text cannot be saved (E21-T3). The browser handed us the whole list,
+  // so a value that is not on it is a typo, and the server refuses it anyway;
+  // catching it here says so without a round trip. The guard stands down when
+  // the runtime cannot enumerate zones, because then this page has no list to
+  // judge against and the server is the only judge there is.
+  if(ZONES.length&&!ZONES.includes(tz)){
+    showErr("#vErr","Pick a timezone from the list");
+    renderTz();
+    $("#vTz").focus();
+    return;
+  }
   const r=await cmd("/v1/venue",{
-    name:$("#vName").value,address:$("#vAddr").value,timezone:$("#vTz").value.trim(),
+    name:$("#vName").value,address:$("#vAddr").value,timezone:tz,
     payPeriod:period,...($("#vAnchor").value?{payPeriodAnchor:$("#vAnchor").value}:{})});
   if(!r.ok){showErr("#vErr",r.reason);return;}
   await loadVenue();   // the topbar follows immediately, like every other page will on its next load
