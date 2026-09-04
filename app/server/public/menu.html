@@ -186,6 +186,11 @@ a.btn{text-decoration:none;color:inherit}
 .screen-title{flex-shrink:0;font-size:13px;font-weight:700;color:var(--ink-2);
   background:var(--surface-2);border-radius:999px;padding:5px 12px;white-space:nowrap}
 .top-meta{margin-left:auto;display:flex;align-items:center;gap:10px;flex-shrink:0}
+/* the breadcrumb back to the hub (D35/UI-T5): Menu, Reports and Settings no
+   longer have their own rail entry to tap back with */
+.office-crumb{min-height:44px;display:inline-flex;align-items:center;gap:4px;padding:0 12px;border-radius:999px;
+  background:var(--surface-2);color:var(--ink-2);font-size:12.5px;font-weight:700;text-decoration:none}
+.office-crumb:active{transform:scale(.96)}
 .shellbody{min-width:0;min-height:0;display:flex;flex-direction:column;overflow:hidden}
 @media (hover:hover){
   .nav-btn:hover{background:var(--surface-2);color:var(--ink)}
@@ -219,26 +224,25 @@ a.btn{text-decoration:none;color:inherit}
 </head>
 <body>
 <div class="shell">
-  <!-- ===== APP SHELL: navigation rail (UI-T1). Identical markup on all nine
-       navigable pages; only which entry carries "on" differs. ===== -->
+  <!-- ===== APP SHELL: navigation rail (UI-T1, restructured D35/UI-T5). Identical
+       markup on all ten navigable pages; only which entry carries "on" differs.
+       Office reads "on" here: Menu is behind the hub now, not on the rail. ===== -->
   <nav class="navrail" aria-label="Screens">
     <div class="rail-logo" aria-hidden="true">R</div>
     <a class="nav-btn" href="/pos"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3.5h12v17l-3-1.8-3 1.8-3-1.8-3 1.8z"/><path d="M9.2 8.6h5.6M9.2 12.6h5.6"/></svg>Service</a>
     <a class="nav-btn" href="/tables"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="5"/><path d="M12 3.6v2.2M12 18.2v2.2M3.6 12h2.2M18.2 12h2.2"/></svg>Tables<span class="nav-badge" id="navTables"></span></a>
     <a class="nav-btn" href="/reservations"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5.4" width="17" height="15.1" rx="2.6"/><path d="M3.5 10.4h17M8.2 3.4v3.6M15.8 3.4v3.6"/></svg>Bookings</a>
     <a class="nav-btn" href="/kds"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 18.6h17"/><path d="M5.5 18.6a6.5 6.5 0 0 1 13 0"/><path d="M12 12.1V9.9"/></svg>Kitchen<span class="nav-badge" id="navKds"></span></a>
-    <a class="nav-btn on" aria-current="page" href="/menu"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5.6" cy="7" r="1.1"/><circle cx="5.6" cy="12" r="1.1"/><circle cx="5.6" cy="17" r="1.1"/><path d="M9.6 7h8.8M9.6 12h8.8M9.6 17h8.8"/></svg>Menu</a>
     <a class="nav-btn" href="/close"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="7.5" width="17" height="11" rx="2.5"/><path d="M3.5 12.6h17M10 15.8h4"/></svg>Close</a>
-    <a class="nav-btn" href="/reports"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.6 19.6h16.8"/><path d="M6.6 19.6v-6.4M12 19.6V5.4M17.4 19.6v-9"/></svg>Reports</a>
     <a class="nav-btn" href="/schedule"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.2"/><path d="M12 7.3v5l3.4 2"/></svg>Shifts</a>
-    <a class="nav-btn" href="/settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7.6h9.2M18.4 7.6h1.6M4 16.4h4.6M13.8 16.4h6.2"/><circle cx="15.6" cy="7.6" r="2.4"/><circle cx="11.2" cy="16.4" r="2.4"/></svg>Settings</a>
+    <a class="nav-btn on" aria-current="page" href="/office"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="8.2" width="17" height="11.5" rx="2"/><path d="M8.5 8.2V6.6a2 2 0 0 1 2-2h3a2 2 0 0 1 2 2v1.6M3.5 13.2h17"/></svg>Office</a>
     <div class="rail-spacer"></div>
     <div class="rail-foot">Concept build.<br>Demo data only.</div>
   </nav>
   <header class="topbar">
     <div class="venue"><b data-venue-name>RestaurantOS</b><small>RestaurantOS menu manager · live from the server</small></div>
     <div class="screen-title">Menu</div>
-    <div class="top-meta"></div>
+    <div class="top-meta"><a class="office-crumb" href="/office">&larr; Office</a></div>
   </header>
   <div class="shellbody">
 <div class="wrap">
@@ -286,8 +290,11 @@ const DEVICE=(()=>{try{let d=localStorage.getItem("ros.device");if(!d){d="web-"+
 function dget(url){return fetch(url,{headers:{"x-device-id":DEVICE}});}
 const THIS_SCREEN="menu";
 const RAIL_SCREEN={"/pos":"service","/tables":"tables","/reservations":"reservations",
-  "/kds":"kitchen","/menu":"menu","/close":"cash","/reports":"reports",
-  "/schedule":"schedule","/settings":"settings"};
+  "/kds":"kitchen","/close":"cash","/schedule":"schedule"};
+/* Office (D35/UI-T5) is not one of staff.ts's nine screens: it is a hub over
+   four of them, so its own rail entry is gated on ANY of that family being
+   visible, never hardcoded to which roles that happens to be today. */
+const OFFICE_FAMILY=["menu","reports","cash","settings"];
 async function applyVisibility(){
   let employee=null,visibility=null;
   try{
@@ -295,8 +302,9 @@ async function applyVisibility(){
     employee=s.employee;visibility=s.visibility;
   }catch(_){}
   if(visibility)document.querySelectorAll(".navrail .nav-btn[href]").forEach(a=>{
-    const scr=RAIL_SCREEN[a.getAttribute("href")];
-    a.style.display=(scr&&!visibility[scr])?"none":"";
+    const href=a.getAttribute("href");
+    const vis=href==="/office"?OFFICE_FAMILY.some(s=>visibility[s]):visibility[RAIL_SCREEN[href]];
+    a.style.display=vis?"":"none";
   });
   if(employee&&visibility&&!visibility[THIS_SCREEN]){
     document.body.insertAdjacentHTML("beforeend",`<div class="refusal"><div class="refusal-card">

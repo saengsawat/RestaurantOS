@@ -1701,7 +1701,8 @@ describe("modifier groups on the Menu screen (E5-T3)", () => {
     expect(page).toContain('id="draft"></div>');
     expect(page).toContain("86 it");
     expect(page).toContain("Set count");
-    expect(page.match(/<svg viewBox="0 0 24 24" aria-hidden="true">/g)).toHaveLength(9);
+    // D35/UI-T5 trimmed the rail to seven icons (Menu and Reports left it)
+    expect(page.match(/<svg viewBox="0 0 24 24" aria-hidden="true">/g)).toHaveLength(7);
   });
 });
 
@@ -1931,32 +1932,42 @@ describe("reads", () => {
     // and the Tips tile takes declared cash from the server's own total
     // rather than summing the scorecard rows (E19-T3)
     expect(page.body).toContain("declaredTipsTotalMinor");
-    // and every other page can reach it, now through its rail entry (UI-T1)
-    for (const url of ["/pos", "/tables", "/kds", "/menu", "/close", "/reservations", "/schedule"]) {
-      expect((await app.inject({ method: "GET", url })).body).toContain('class="nav-btn" href="/reports"');
-    }
+    // D35/UI-T5: Reports left the rail for the Office hub, so it is reached
+    // from there now rather than from every floor screen's own rail entry
+    // (the card and its href are built by the hub's own script at runtime)
+    expect((await app.inject({ method: "GET", url: "/office" })).body).toContain('card("Reports","/reports"');
   });
 
   /* UI-T1: the shell DESIGN.md section 5 prescribes. Navigation is a place you
    * go, so it is the left icon rail with its badge counts; the topbar is where
    * you are. The markup is duplicated per page (each page is a self-contained
-   * zero-dependency file), so the assertion runs over all NINE (Settings
-   * joined in E21-T2, the book in E23-T3, the schedule in E24-T5) to keep them
-   * from drifting apart. */
-  it("gives all nine navigable pages the app shell: rail navigates, topbar identifies", async () => {
+   * zero-dependency file), so the assertion runs over all TEN (Settings
+   * joined in E21-T2, the book in E23-T3, the schedule in E24-T5, the hub in
+   * UI-T5) to keep them from drifting apart.
+   *
+   * D35/UI-T5 split the rail in two: the floor keeps a rail entry per screen
+   * (Service, Tables, Bookings, Kitchen, Close, Shifts), while Menu, Reports
+   * and Settings collapse into ONE entry, Office, and that entry reads "on"
+   * on all four office pages because you are "in the office" on any of them. */
+  it("gives all ten navigable pages the app shell: rail navigates, topbar identifies", async () => {
     const app = buildServer();
-    const screens = ["/pos", "/tables", "/reservations", "/kds", "/menu", "/close", "/reports", "/schedule", "/settings"];
-    for (const url of screens) {
+    const railScreens = ["/pos", "/tables", "/reservations", "/kds", "/close", "/schedule", "/office"];
+    const officeFamily = ["/office", "/menu", "/reports", "/settings"];
+    const pages = [...railScreens.filter((s) => s !== "/office"), ...officeFamily];
+    for (const url of pages) {
       const body = (await app.inject({ method: "GET", url })).body;
       expect(body).toContain('<nav class="navrail" aria-label="Screens">');
       expect(body).toContain('class="shellbody"');
-      // every screen is reachable from every screen, and exactly one entry is
-      // marked current: the one you are on
-      for (const dest of screens) expect(body).toContain(`href="${dest}"`);
+      // every rail screen is reachable from every page, and exactly one entry
+      // is marked current: the one you are on, or Office when you are behind it
+      for (const dest of railScreens) expect(body).toContain(`href="${dest}"`);
+      for (const dest of ["/menu", "/reports", "/settings"]) expect(body, `${url} still carries a rail entry to ${dest}`).not.toContain(`class="nav-btn" href="${dest}"`);
       expect(body.match(/class="nav-btn on" aria-current="page"/g)).toHaveLength(1);
-      expect(body).toContain(`class="nav-btn on" aria-current="page" href="${url}"`);
-      // nine icons, inline SVG in one stroke style, never emoji
-      expect(body.match(/<svg viewBox="0 0 24 24" aria-hidden="true">/g)).toHaveLength(9);
+      const onHref = officeFamily.includes(url) ? "/office" : url;
+      expect(body).toContain(`class="nav-btn on" aria-current="page" href="${onHref}"`);
+      // seven icons now (nine minus Menu and Reports, plus one for Office),
+      // inline SVG in one stroke style, never emoji
+      expect(body.match(/<svg viewBox="0 0 24 24" aria-hidden="true">/g)).toHaveLength(7);
       // the rail carries the two live counts the data already supports
       expect(body).toContain('id="navTables"');
       expect(body).toContain('id="navKds"');
@@ -1967,6 +1978,9 @@ describe("reads", () => {
       expect(body).not.toContain('<nav class="nav">');
       // and the shell is still sized with --vph, never a percentage height
       expect(body).toContain("height:var(--vph)");
+      // the three office pages carry a breadcrumb back to the hub; the hub
+      // and the floor screens do not need one
+      if (["/menu", "/reports", "/settings"].includes(url)) expect(body).toContain('class="office-crumb"');
     }
     // the lock screen stays a fullscreen PIN pad: no rail, nowhere to go yet
     expect((await app.inject({ method: "GET", url: "/" })).body).not.toContain("navrail");
@@ -4178,7 +4192,8 @@ describe("the menu import lands on the Menu screen (E22-T3)", () => {
     expect(page).toContain('id="draftGroups"></div>');
     expect(page).toContain("function groupForm(src)");
     expect(page).toContain("function publishForm()");
-    expect(page.match(/<svg viewBox="0 0 24 24" aria-hidden="true">/g)).toHaveLength(9);
+    // D35/UI-T5 trimmed the rail to seven icons (Menu and Reports left it)
+    expect(page.match(/<svg viewBox="0 0 24 24" aria-hidden="true">/g)).toHaveLength(7);
   });
 });
 
@@ -5401,7 +5416,7 @@ describe("each role sees its own app (E25-T2)", () => {
       // hidden with display, never removed: a role switch on the same page
       // (sign in as somebody else without a reload) has to be able to show a
       // rail entry back, not just take it away once
-      expect(body, `${url} removes rather than hides a rail entry`).toContain('a.style.display=(scr&&!visibility[scr])?"none":"";');
+      expect(body, `${url} removes rather than hides a rail entry`).toContain('a.style.display=vis?"":"none";');
       expect(body, `${url} misses the refusal card`).toContain('class="refusal"');
       expect(body, `${url} misses the refusal card class`).toContain('class="refusal-card"');
       expect(body, `${url} does not name who is signed in on a refusal`).toContain("You are signed in as");
@@ -5442,5 +5457,81 @@ describe("each role sees its own app (E25-T2)", () => {
     expect(body).toContain('id="aOwnerGate"');
     expect(body).toContain('id="aOwnPin"');
     expect(body).toContain('role==="owner"?{managerPin:$("#aOwnPin").value.trim()}:{}');
+  });
+});
+
+/* -------------- the back office gets a front door (D35/UI-T5) -------------- */
+describe("the back office hub (UI-T5)", () => {
+  it("serves /office with one card per area, matrix-gated like the rails", async () => {
+    const app = buildServer();
+    const res = await app.inject({ method: "GET", url: "/office" });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-type"]).toContain("text/html");
+    const body = res.body;
+
+    // one card per back-office area, each linking straight to its screen
+    expect(body).toContain('card("Menu","/menu"');
+    expect(body).toContain('card("Reports","/reports"');
+    expect(body).toContain('card("Schedule","/schedule?view=plan"');
+    expect(body).toContain('card("Venue & team","/settings"');
+    // sub-links land on the anchors the target pages actually carry
+    expect(body).toContain('href:"/menu#live"');
+    expect(body).toContain('href:"/menu#btnImport"');
+    expect(body).toContain('href:"/settings#team"');
+    expect(body).toContain('href:"/settings#payroll"');
+    // and those anchors land on real ids on the pages they point at
+    const settingsBody = (await app.inject({ method: "GET", url: "/settings" })).body;
+    expect(settingsBody).toContain('id="team">Team<');
+    expect(settingsBody).toContain('id="payroll">Payroll export<');
+
+    // stats read the EXISTING reads only, formatted and never computed
+    expect(body).toContain("dget(\"/v1/menu/draft\")");
+    expect(body).toContain("dget(\"/v1/day\")");
+    expect(body).toContain('/v1/schedule/week"');
+    expect(body).toContain('dget("/v1/staff")');
+    // a failed fetch degrades the card, never breaks it: every stat function
+    // is one try/catch returning an empty string on failure, not a throw
+    expect(body.match(/\}catch\(_\)\{return "";\}/g)?.length).toBeGreaterThanOrEqual(4);
+
+    // the hub is matrix-gated like every rail, hardcoded nowhere but the
+    // family of screens it stands in for
+    expect(body).toContain('const OFFICE_FAMILY=["menu","reports","cash","settings"];');
+    expect(body).toContain("OFFICE_FAMILY.some(s=>visibility[s])");
+
+    // phone-first: a single column that grows into a grid, never the other way
+    expect(body).toContain(".hub{display:grid;grid-template-columns:1fr;gap:14px");
+    expect(body).toContain("@media (min-width:640px){.hub{grid-template-columns:1fr 1fr}}");
+  });
+
+  it("restructures the rail on all ten pages: floor screens keep theirs, Menu/Reports/Settings collapse into Office", async () => {
+    const app = buildServer();
+    for (const url of ["/pos", "/tables", "/reservations", "/kds", "/close", "/schedule", "/office", "/menu", "/reports", "/settings"]) {
+      const body = (await app.inject({ method: "GET", url })).body;
+      expect(body, `${url} rail missing Office`).toContain('href="/office"');
+      expect(body, `${url} rail still carries Menu`).not.toContain('href="/menu"><svg');
+      expect(body, `${url} rail still carries Reports`).not.toContain('href="/reports"><svg');
+      expect(body, `${url} rail still carries Settings`).not.toContain('href="/settings"><svg');
+    }
+  });
+
+  it("lands sign-in by role: server on Service, kitchen on Kitchen, manager and owner on the hub", async () => {
+    const body = (await buildServer().inject({ method: "GET", url: "/" })).body;
+    expect(body).toContain('emp.role==="kitchen"?"/kds":(emp.role==="manager"||emp.role==="owner")?"/office":"/pos"');
+  });
+
+  it("still lets a deep link reach Menu, Reports and Settings directly, breadcrumbed back to the hub", async () => {
+    const app = buildServer();
+    for (const url of ["/menu", "/reports", "/settings"]) {
+      const res = await app.inject({ method: "GET", url });
+      expect(res.statusCode, `${url} deep link`).toBe(200);
+      const body = res.body;
+      expect(body, `${url} missing the Office breadcrumb`).toContain('class="office-crumb" href="/office"');
+      expect(body, `${url} rail should mark Office current, not itself`)
+        .toContain('class="nav-btn on" aria-current="page" href="/office"');
+    }
+    // the schedule deep link opens straight to the Plan tab
+    const schedule = (await app.inject({ method: "GET", url: "/schedule" })).body;
+    expect(schedule).toContain('new URLSearchParams(location.search).get("view")');
+    expect(schedule).toContain('.view[data-view="${wantView}"]');
   });
 });

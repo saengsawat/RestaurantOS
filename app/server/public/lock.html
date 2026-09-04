@@ -143,7 +143,11 @@ async function submit(){
   if(res.ok){
     const emp=(await res.json()).employee;
     $("#who").textContent=emp.name+" · "+(ROLE_LABEL[emp.role]||emp.role);
-    setTimeout(()=>{location.href="/pos";},350);
+    // landing by role (D35/UI-T5): the floor for whoever runs it day to day,
+    // the hub for whoever runs the business. Kitchen lands on its own board
+    // rather than Service, because a line cook has no reason to see checks.
+    const landing=emp.role==="kitchen"?"/kds":(emp.role==="manager"||emp.role==="owner")?"/office":"/pos";
+    setTimeout(()=>{location.href=landing;},350);
     return;
   }
   $("#who").textContent="PIN not recognized";
