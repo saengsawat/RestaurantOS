@@ -14,6 +14,7 @@ Read `CLAUDE.md`, `design/restaurantos/DESIGN.md`, `docs/tickets/E25-T1-roles-co
 3. **Settings' Team section** gains the two new roles in its role picker, labeled plainly (Owner, Manager, Kitchen, Server) with one line each on what they see; picking owner/manager routes through the owner-PIN path the core built. Titles stay the free-text field they are.
 4. **The lock screen** shows the role under the name on successful sign-in ("Nico F. · Kitchen") so the demo reads instantly.
 5. **One CSS line on every page while you are in them**: `.toasts{pointer-events:none}` (schedule.html already has it; E24-T5 found toasts landing exactly on a bottom sheet's action row on phones and deadening the button for three seconds).
+6. **Every page's reads identify themselves** (the E25-T1 worker's flag): pages send the shared `ros.device` id on their GET reads, via the `x-device-id` header the server now accepts, so the visibility gate can actually bite for a signed-in device. Mutations already carry deviceId in the envelope; this is only the reads.
 
 ## Invariants
 

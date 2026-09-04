@@ -1,6 +1,6 @@
 /** Zero-setup Store for dev and tests. State dies with the process. */
 import { GROUPS, MENU, SNAPSHOT_ID } from "./menu.js";
-import { pinHash, STAFF, type DirectoryEntry, type Employee, type RosterEntry } from "./staff.js";
+import { pinHash, STAFF, type DirectoryEntry, type Employee, type Role, type RosterEntry } from "./staff.js";
 import {
   FLOOR,
   sameName,
@@ -125,6 +125,9 @@ export class MemoryStore implements Store {
   // pinHash rides alongside the roster entry and never leaves this class
   private employees: (DirectoryEntry & { pinHash: string })[] = STAFF.map((s) => ({
     id: s.id, name: s.name, role: s.role, active: true, pinHash: pinHash(s.demoPin),
+    // the chef's title says Chef while his permission level says kitchen,
+    // which is D28's two-field rule standing up in the seed itself
+    ...(s.title !== undefined ? { title: s.title } : {}),
   }));
 
   async getVenue() { return { ...this.venue }; }
@@ -175,6 +178,12 @@ export class MemoryStore implements Store {
   async setEmployeeActive(id: string, active: boolean) {
     const e = this.employees.find((x) => x.id === id);
     if (e) e.active = active;
+  }
+  /** A REPLACEMENT, matching PG's delete-then-insert on employee_role: one
+   *  person, one permission level, never two at once (E25-T1). */
+  async setEmployeeRole(id: string, role: Role) {
+    const e = this.employees.find((x) => x.id === id);
+    if (e) e.role = role;
   }
 
   /** A deactivated employee's PIN opens nothing: not a session, not an

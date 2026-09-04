@@ -15,7 +15,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { GROUPS, MENU, SNAPSHOT_ID } from "./menu.js";
-import { pinHash, ROLE_IDS, STAFF, type DirectoryEntry, type Employee, type RosterEntry } from "./staff.js";
+import { isRole, pinHash, ROLE_IDS, STAFF, type DirectoryEntry, type Employee, type Role, type RosterEntry } from "./staff.js";
 import {
   FLOOR,
   serviceDateOf,
@@ -48,6 +48,21 @@ const DEV = "44444444-4444-4444-4444-444444444444"; // default device row for FK
 const SNAP = "55555555-5555-5555-5555-555555555555";
 
 const MIGRATIONS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "migrations");
+
+/**
+ * `role.name` into a permission level (E25-T1).
+ *
+ * That column is a venue's own vocabulary: 0001 documents it as holding
+ * 'Server', 'Manager', 'Line cook'. The four permission levels are a closed
+ * set, so this is where the one becomes the other, and anything the enum does
+ * not recognize reads as the least-privileged floor role. That direction is
+ * deliberate: a role somebody typed by hand into the database can never widen
+ * what a PIN may approve, it can only fail to widen it.
+ */
+function roleOf(name: unknown): Role {
+  const value = String(name ?? "").toLowerCase();
+  return isRole(value) ? value : "server";
+}
 
 export class PgStore implements Store {
   private pool: pg.Pool;
@@ -110,12 +125,20 @@ export class PgStore implements Store {
         // manager reset and an employee they deactivated must survive the
         // restart instead of being overwritten back to the demo values
         await c.query(
-          `INSERT INTO employee (id, org_id, location_id, display_name, pin_hash) VALUES ($1, $2, $3, $4, $5)
+          `INSERT INTO employee (id, org_id, location_id, display_name, pin_hash, title) VALUES ($1, $2, $3, $4, $5, $6)
            ON CONFLICT (id) DO NOTHING`,
-          [s.id, ORG, LOC, s.name, pinHash(s.demoPin)],
+          [s.id, ORG, LOC, s.name, pinHash(s.demoPin), s.title ?? null],
         );
+        // NOT "ON CONFLICT DO NOTHING" on the pair: employee_role's primary
+        // key is (employee_id, role_id), so once E25-T1 made a level
+        // changeable, a promoted Nico had no Kitchen row for the conflict to
+        // catch and every restart quietly handed him back the level a manager
+        // had taken away, leaving him holding two at once. Seed a level only
+        // for somebody who has none, which is the same rule as the employee
+        // row above (E21-T1): the seed opens a venue, it does not correct one.
         await c.query(
-          "INSERT INTO employee_role (employee_id, role_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+          `INSERT INTO employee_role (employee_id, role_id)
+           SELECT $1, $2 WHERE NOT EXISTS (SELECT 1 FROM employee_role WHERE employee_id = $1)`,
           [s.id, ROLE_IDS[s.role]],
         );
       }
@@ -785,7 +808,7 @@ export class PgStore implements Store {
     return {
       id: r.rows[0].id as string,
       name: r.rows[0].display_name as string,
-      role: (r.rows[0].role as string).toLowerCase() === "manager" ? "manager" : "server",
+      role: roleOf(r.rows[0].role),
     };
   }
 
@@ -919,7 +942,7 @@ export class PgStore implements Store {
     return r.rows.map((row) => ({
       id: row.id as string,
       name: row.display_name as string,
-      role: String(row.role ?? "").toLowerCase() === "manager" ? "manager" as const : "server" as const,
+      role: roleOf(row.role),
       active: row.active as boolean,
       ...(row.title ? { title: row.title as string } : {}),
     }));
@@ -945,7 +968,7 @@ export class PgStore implements Store {
     return r.rows.map((row) => ({
       id: row.id as string,
       name: row.display_name as string,
-      role: String(row.role ?? "").toLowerCase() === "manager" ? "manager" as const : "server" as const,
+      role: roleOf(row.role),
       active: row.active as boolean,
       ...(row.title ? { title: row.title as string } : {}),
       ...(row.phone ? { phone: row.phone as string } : {}),
@@ -1009,6 +1032,29 @@ export class PgStore implements Store {
 
   async setEmployeeActive(id: string, active: boolean): Promise<void> {
     await this.pool.query("UPDATE employee SET active = $1 WHERE id = $2 AND location_id = $3", [active, id, LOC]);
+  }
+
+  /** Promotion and demotion (E25-T1). employee_role has a composite primary
+   *  key, so it would happily hold two levels for one person; the DELETE is
+   *  what makes a promotion a change rather than an addition. Both statements
+   *  in one transaction, because a person with no role between them would
+   *  read back as a server. */
+  async setEmployeeRole(id: string, role: Role): Promise<void> {
+    const c = await this.pool.connect();
+    try {
+      await c.query("BEGIN");
+      await c.query("DELETE FROM employee_role WHERE employee_id = $1", [id]);
+      await c.query(
+        "INSERT INTO employee_role (employee_id, role_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+        [id, ROLE_IDS[role]],
+      );
+      await c.query("COMMIT");
+    } catch (err) {
+      await c.query("ROLLBACK");
+      throw err;
+    } finally {
+      c.release();
+    }
   }
 
   async putShift(shift: Shift): Promise<void> {
