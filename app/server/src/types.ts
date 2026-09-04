@@ -7,7 +7,7 @@
  */
 import type { CheckStatus, GroupIndex, OrderItemStatus, SelectedModifier } from "@restaurantos/domain";
 import type { MenuEntry } from "./menu.js";
-import type { DirectoryEntry, Employee, RosterEntry } from "./staff.js";
+import type { DirectoryEntry, Employee, Role, RosterEntry } from "./staff.js";
 
 export interface Envelope {
   operationId: string;
@@ -420,6 +420,12 @@ export interface Store {
   setEmployeePin(id: string, pinHash: string): Promise<void>;
   /** Deactivation is soft, always: checks.server_id still points here. */
   setEmployeeActive(id: string, active: boolean): Promise<void>;
+  /** Promotion and demotion (E25-T1). Its own method rather than a field on
+   *  updateEmployee: this is the one write that changes what a PIN may
+   *  approve, and the engine puts an owner gate in front of it. In PG it is a
+   *  REPLACEMENT of the employee_role rows, never an addition, so nobody ends
+   *  up holding two permission levels at once. */
+  setEmployeeRole(id: string, role: Role): Promise<void>;
 
   /** The whole record, personal half included (E24-T2). The ONLY way the
    *  contact fields leave a store, and the engine gates every call to it on a

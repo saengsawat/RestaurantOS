@@ -464,6 +464,9 @@ describe.skipIf(!PGBIN)("PostgreSQL persistence (E4)", () => {
   it("keeps a renamed venue, a new hire, a reset PIN, and a deactivation across a restart", async () => {
     const app = buildServer(store, "postgres");
     const MGR = "1122";
+    // the venue's IDENTITY is the owner's since D33 (E25-T1). The roster is
+    // still a manager's, except for the people who can approve.
+    const OWNER = "1379";
     const roster = async (a: ReturnType<typeof buildServer>) =>
       (await a.inject({ method: "GET", url: "/v1/staff" })).json().staff as
         { id: string; name: string; role: string; active: boolean }[];
@@ -475,16 +478,19 @@ describe.skipIf(!PGBIN)("PostgreSQL persistence (E4)", () => {
       reservationLeadMinutes: 45, reservationHoldMinutes: 15,
     });
     const bad = await app.inject({ method: "POST", url: "/v1/venue",
-      payload: ENV({ managerPin: MGR, timezone: "America/Atlantis" }) });
+      payload: ENV({ managerPin: OWNER, timezone: "America/Atlantis" }) });
     expect(bad.statusCode).toBe(422);
     expect(bad.json().reason).toBe("America/Atlantis is not a timezone this machine knows");
     const rename = await app.inject({ method: "POST", url: "/v1/venue",
-      payload: ENV({ managerPin: MGR, name: "Trattoria Sedici", address: "16 Elm St, Austin", timezone: "America/Chicago" }) });
+      payload: ENV({ managerPin: OWNER, name: "Trattoria Sedici", address: "16 Elm St, Austin", timezone: "America/Chicago" }) });
     expect(rename.statusCode).toBe(200);
 
     /* --- the roster: no PIN on it, and a new hire lands in real rows --- */
     const before = await roster(app);
-    expect(before.map((s) => s.name)).toEqual(["Gia R.", "Marco B.", "Sofia T."]);
+    // seeded in one transaction, so every row shares a created_at and the
+    // tie-break is the display name: the five demo people, alphabetically
+    expect(before.map((s) => s.name)).toEqual(["Elena V.", "Gia R.", "Marco B.", "Nico F.", "Sofia T."]);
+    expect(before.map((s) => s.role)).toEqual(["owner", "server", "manager", "kitchen", "server"]);
     expect(JSON.stringify(before)).not.toContain("2468");
 
     const hired = await app.inject({ method: "POST", url: "/v1/staff",
@@ -514,11 +520,16 @@ describe.skipIf(!PGBIN)("PostgreSQL persistence (E4)", () => {
       payload: ENV({ managerPin: MGR }) });
     expect(out.statusCode).toBe(200);
 
+    // letting an APPROVER go is the owner's act now (D33), and Marco's own
+    // manager PIN will not do it. He stays active on purpose: the rest of this
+    // file signs in with 1122, and the last-approver guard itself is proven
+    // against the memory store where a roster can be taken apart safely.
     const marco = (await roster(app)).find((s) => s.name === "Marco B.")!;
-    const lastManager = await app.inject({ method: "POST", url: `/v1/staff/${marco.id}/deactivate`,
+    const byManager = await app.inject({ method: "POST", url: `/v1/staff/${marco.id}/deactivate`,
       payload: ENV({ managerPin: MGR }) });
-    expect(lastManager.statusCode).toBe(422);
-    expect(lastManager.json().reason).toBe("Marco B. is the only active manager; promote someone else first");
+    expect(byManager.statusCode).toBe(422);
+    expect(byManager.json().reason).toBe("letting Marco B. go is the owner's to do; this PIN is not an owner's");
+    expect((await roster(app)).find((s) => s.name === "Marco B.")!.active).toBe(true);
 
     /* THE RESTART: the seed must not undo any of it --- */
     await store.end();
@@ -533,7 +544,7 @@ describe.skipIf(!PGBIN)("PostgreSQL persistence (E4)", () => {
     });
 
     const after = await roster(app3);
-    expect(after.map((s) => s.name)).toEqual(["Gia R.", "Marco B.", "Sofia T.", "Luca P."]);
+    expect(after.map((s) => s.name)).toEqual(["Elena V.", "Gia R.", "Marco B.", "Nico F.", "Sofia T.", "Luca P."]);
     expect(after.find((s) => s.name === "Sofia T.")!.active).toBe(false);
     expect(after.find((s) => s.name === "Luca P.")).toMatchObject({ role: "server", active: true });
     expect(JSON.stringify(after)).not.toContain("4321");
@@ -728,7 +739,7 @@ describe.skipIf(!PGBIN)("PostgreSQL persistence (E4)", () => {
     expect(seeded.payPeriodAnchor).toBe("2026-01-05");
 
     const set = await app.inject({ method: "POST", url: "/v1/venue",
-      payload: ENV({ managerPin: MGR, payPeriod: "semimonthly", payPeriodAnchor: "2026-03-02" }) });
+      payload: ENV({ managerPin: "1379", payPeriod: "semimonthly", payPeriodAnchor: "2026-03-02" }) });
     expect(set.statusCode).toBe(200);
     expect(sql("SELECT pay_period FROM location")).toBe("semimonthly");
 
@@ -1055,4 +1066,75 @@ describe.skipIf(!PGBIN)("PostgreSQL persistence (E4)", () => {
     expect(survivor.json().totals).toMatchObject({ shifts: 1, draft: 0, published: 1 });
     expect(survivor.json().allPublished).toBe(true);
   }, 60_000);
+
+  /* ------------- the four permission levels (E25-T1, D33) -------------
+   * What only Postgres can prove about the widened enum: migration 0012
+   * applied, the two new role rows exist under the ids the seed uses, all
+   * four levels round-trip through the employee_role join, and a promotion
+   * REPLACES the row rather than adding a second one, which is the failure
+   * this schema invites (employee_role has a composite primary key, so one
+   * person could quietly hold two permission levels at once). */
+
+  it("round-trips all four permission levels, and a promotion replaces the row", async () => {
+    const app = buildServer(store, "postgres");
+    const OWNER = "1379";
+
+    expect(sql("SELECT count(*) FROM schema_migrations WHERE name = '0012_roles.sql'")).toBe("1");
+
+    // the two new rows, under the ids staff.ts ROLE_IDS names, so an upgraded
+    // database and a fresh one end up identical
+    expect(sql("SELECT name FROM role WHERE id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'")).toBe("Owner");
+    expect(sql("SELECT name FROM role WHERE id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'")).toBe("Kitchen");
+    // and no CHECK was invented on role.name: 0001 documents that column as a
+    // venue's own vocabulary, and shrinking it would not be expand-only
+    expect(sql(`SELECT count(*) FROM information_schema.check_constraints c
+                JOIN information_schema.constraint_column_usage u USING (constraint_name)
+                WHERE u.table_name = 'role' AND u.column_name = 'name'`)).toBe("0");
+
+    // all four levels, read back through the join the roster read uses
+    const roster = async (a: ReturnType<typeof buildServer>) =>
+      (await a.inject({ method: "GET", url: "/v1/staff" })).json().staff as
+        { id: string; name: string; role: string; title?: string }[];
+    const seeded = await roster(app);
+    expect(new Set(seeded.map((s) => s.role))).toEqual(new Set(["owner", "manager", "kitchen", "server"]));
+    // the chef's TITLE landed in employee.title while his LEVEL landed in
+    // employee_role: D28's two fields, in two columns, in one person
+    expect(seeded.find((s) => s.name === "Nico F.")).toMatchObject({ role: "kitchen", title: "Chef" });
+    expect(sql("SELECT title FROM employee WHERE display_name = 'Nico F.'")).toBe("Chef");
+
+    const nico = seeded.find((s) => s.name === "Nico F.")!;
+    const promoted = await app.inject({ method: "POST", url: `/v1/staff/${nico.id}/role`,
+      payload: ENV({ managerPin: OWNER, role: "server" }) });
+    expect(promoted.statusCode).toBe(200);
+
+    // ONE row, not two: the delete-then-insert is the whole point
+    expect(sql(`SELECT count(*) FROM employee_role WHERE employee_id = '${nico.id}'`)).toBe("1");
+    expect(sql(`SELECT r.name FROM employee_role er JOIN role r ON r.id = er.role_id
+                WHERE er.employee_id = '${nico.id}'`)).toBe("Server");
+
+    /* THE RESTART: a level is data now, so it comes back */
+    await store.end();
+    store = new PgStore(url);
+    await store.init();
+    const app2 = buildServer(store, "postgres");
+    const after = await roster(app2);
+    expect(after.find((s) => s.name === "Nico F.")!.role).toBe("server");
+    // and the boot seed did not hand him back the level a manager took away:
+    // still ONE row, still the one the command wrote
+    expect(sql(`SELECT count(*) FROM employee_role WHERE employee_id = '${nico.id}'`)).toBe("1");
+    // and the seed did not put him back where it found him, the same rule the
+    // roster learned in E21-T1
+    expect(after.find((s) => s.name === "Nico F.")!.title).toBe("Chef");
+
+    // his own PIN now opens Service and no longer opens the kitchen
+    const session = await app2.inject({ method: "POST", url: "/v1/session", payload: { deviceId: "pg-nico", pin: "2580" } });
+    expect(session.json().employee.role).toBe("server");
+    const visibility = (await app2.inject({ method: "GET", url: "/v1/session?deviceId=pg-nico" })).json().visibility;
+    expect(visibility).toMatchObject({ service: true, kitchen: false });
+    expect((await app2.inject({ method: "GET", url: "/v1/kds?deviceId=pg-nico" })).statusCode).toBe(403);
+
+    // put him back so the rest of the file finds the roster it expects
+    expect((await app2.inject({ method: "POST", url: `/v1/staff/${nico.id}/role`,
+      payload: ENV({ managerPin: OWNER, role: "kitchen" }) })).statusCode).toBe(200);
+  });
 });

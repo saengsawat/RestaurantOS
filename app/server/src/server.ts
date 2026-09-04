@@ -2,11 +2,12 @@
  * RestaurantOS API server (Fastify, provisional per D16).
  * Thin HTTP skin over the Engine; no business rule lives in a route.
  */
-import Fastify, { type FastifyInstance, type FastifyReply } from "fastify";
+import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { readFileSync } from "node:fs";
 import { Engine, type CommandOutcome } from "./engine.js";
 import { landingPage } from "./landing.js";
 import { MemoryStore } from "./memoryStore.js";
+import type { Screen } from "./staff.js";
 import type { Envelope, Store } from "./types.js";
 
 const page = (name: string) => readFileSync(new URL(`../public/${name}`, import.meta.url), "utf8");
@@ -61,6 +62,149 @@ function guestFields(body: Record<string, unknown>) {
   };
 }
 
+/* ------------------- the visibility gate (E25-T1, D33) -------------------
+   Every /v1 route belongs to exactly one screen, or is deliberately public.
+   The table below says which, the preHandler hook enforces it, and the boot
+   check underneath refuses to start a server whose table has a hole in it.
+
+   ONE TABLE, not fifty guard clauses. The rule itself lives in staff.ts
+   (VISIBILITY) and is applied in engine.allow(); this is only the routing
+   question, "which screen is this route part of", which is a fact about the
+   HTTP surface and therefore belongs to the HTTP file.
+
+   PUBLIC is spelled out per route rather than being the default, so adding a
+   route without deciding who may call it fails at boot instead of shipping
+   open. The public ones fall into three groups: what a page must read before
+   anybody has signed in (venue, roster, demo PINs, the live menu, the session
+   itself), what identifies its own caller (sign-in, clock-out, an employee's
+   own week), and the 86 board, which is the kitchen and the floor telling
+   each other what has run out and is nobody's private screen. */
+const PUBLIC = "public" as const;
+
+const ROUTE_SCREEN: Record<string, Screen | typeof PUBLIC> = {
+  "GET /v1/venue": PUBLIC,
+  "POST /v1/venue": "settings",
+
+  "GET /v1/reservations": "reservations",
+  "POST /v1/reservations": "reservations",
+  "POST /v1/reservations/:id/cancel": "reservations",
+  "POST /v1/reservations/:id/no-show": "reservations",
+  "POST /v1/reservations/:id/seat": "reservations",
+
+  "POST /v1/schedule/week": "schedule",
+  // an employee's OWN week, on nothing but the session they signed in with,
+  // which is the "(own view)" the matrix grants every role including kitchen
+  "GET /v1/schedule/mine": PUBLIC,
+  "POST /v1/schedule/shift": "schedule",
+  "POST /v1/schedule/shift/:id/remove": "schedule",
+  "POST /v1/schedule/publish": "schedule",
+
+  "GET /v1/payroll/period": "settings",
+  "POST /v1/staff/hours-export": "settings",
+  "GET /v1/staff": PUBLIC,
+  "GET /v1/staff/demo-pins": PUBLIC,
+  "POST /v1/staff/directory": "settings",
+  "POST /v1/staff": "settings",
+  "POST /v1/staff/:id": "settings",
+  "POST /v1/staff/:id/pin": "settings",
+  "POST /v1/staff/:id/deactivate": "settings",
+  "POST /v1/staff/:id/role": "settings",
+
+  "POST /v1/session": PUBLIC,
+  "POST /v1/session/signout": PUBLIC,
+  "GET /v1/session": PUBLIC,
+  "POST /v1/shifts/clockout": PUBLIC,
+
+  "GET /v1/menu": PUBLIC,
+  "GET /v1/menu/draft": "menu",
+  "POST /v1/menu/draft/item": "menu",
+  "POST /v1/menu/draft/group": "menu",
+  "POST /v1/menu/draft/group/remove": "menu",
+  "POST /v1/menu/draft/assign": "menu",
+  "POST /v1/menu/draft/remove": "menu",
+  "POST /v1/menu/draft/discard": "menu",
+  "POST /v1/menu/import": "menu",
+  "POST /v1/menu/publish": "menu",
+  // NOT the menu editor: 86ing the branzino is the kitchen saying it has run
+  // out, and gating it behind the editor would lock out the one role most
+  // likely to be holding the empty tray
+  "POST /v1/menu/86": PUBLIC,
+
+  "GET /v1/floor": "tables",
+  "POST /v1/floor/move": "tables",
+  "POST /v1/floor/add": "tables",
+  "POST /v1/floor/update": "tables",
+  "POST /v1/floor/resize": "tables",
+  "POST /v1/floor/retire": "tables",
+
+  "GET /v1/kds": "kitchen",
+  "POST /v1/kds/toggle": "kitchen",
+  "POST /v1/kds/serve": "kitchen",
+  "POST /v1/kds/recall": "kitchen",
+
+  "GET /v1/checks": "service",
+  "GET /v1/checks/:id": "service",
+  "GET /v1/checks/:id/split": "service",
+  "GET /v1/checks/:id/history": "service",
+  "POST /v1/checks": "service",
+  "POST /v1/checks/:id/items": "service",
+  // SENDING is a Service act, which is why it sits here and not with the KDS
+  // routes above: a server's device puts food in front of the kitchen, and
+  // only the kitchen bumps it back
+  "POST /v1/checks/:id/send": "service",
+  "POST /v1/checks/:id/hold": "service",
+  "POST /v1/checks/:id/release": "service",
+  "POST /v1/checks/:id/fire": "service",
+  "POST /v1/checks/:id/payments": "service",
+  "POST /v1/checks/:id/items/:itemId/void": "service",
+  "POST /v1/checks/:id/adjustments": "service",
+  "POST /v1/checks/:id/transfer": "service",
+  "POST /v1/checks/:id/merge": "service",
+  "POST /v1/checks/:id/close": "service",
+  "POST /v1/checks/:id/reopen": "service",
+  "POST /v1/checks/:id/guests": "service",
+  "POST /v1/checks/:id/guests/:guestId/detach": "service",
+  "GET /v1/guests": "service",
+  "GET /v1/guests/:id": "service",
+  "POST /v1/guests": "service",
+  "POST /v1/guests/:id/update": "service",
+  "POST /v1/guests/:id/merge": "service",
+  "POST /v1/guests/:id/delete": "service",
+
+  "GET /v1/day": "cash",
+  "POST /v1/day/close": "cash",
+  "POST /v1/day/reopen": "cash",
+  "POST /v1/drawer/open": "cash",
+  "POST /v1/drawer/event": "cash",
+  "POST /v1/drawer/close": "cash",
+
+  "GET /v1/insights/servers": "reports",
+  "GET /v1/insights/heatmap": "reports",
+  "POST /v1/insights/labor": "reports",
+};
+
+/**
+ * Who is asking, as far as HTTP can tell.
+ *
+ * The device comes from the mutation envelope, a `deviceId` query parameter,
+ * or an `x-device-id` header, in that order, so a read can identify itself
+ * without a PIN travelling in a URL.
+ *
+ * The PIN is `managerPin` and ONLY `managerPin`. Never `pin`: on the hire
+ * route `pin` is the NEW employee's, and reading it as the caller's would let
+ * anybody act as the person they just invented.
+ */
+function asker(req: FastifyRequest): { deviceId?: string; pin?: unknown } {
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const query = (req.query ?? {}) as Record<string, unknown>;
+  const header = req.headers["x-device-id"];
+  const deviceId = [body.deviceId, query.deviceId, header].find((v) => typeof v === "string" && v) as string | undefined;
+  return {
+    ...(deviceId ? { deviceId } : {}),
+    ...(typeof body.managerPin === "string" && body.managerPin ? { pin: body.managerPin } : {}),
+  };
+}
+
 function respond(reply: FastifyReply, outcome: CommandOutcome): unknown {
   switch (outcome.kind) {
     case "applied":
@@ -104,6 +248,40 @@ function respond(reply: FastifyReply, outcome: CommandOutcome): unknown {
 export function buildServer(store: Store = new MemoryStore(), storeName = "memory"): FastifyInstance {
   const app = Fastify({ logger: false });
   const engine = new Engine(store);
+
+  /* The gate (E25-T1). preHandler rather than onRequest because the body is
+     parsed by now, which is where a mutation's deviceId and a gated read's
+     managerPin both live.
+
+     403 FORBIDDEN, not 422 REJECTED. A rejected command is one the engine
+     considered and refused; this one never reached the engine and there is no
+     operation to remember, so it answers with the HTTP word for "I know who
+     you are and the answer is still no". The PIN-level refusals inside
+     commands (manager gates, the owner acts) keep their 422, because those
+     ARE decisions the engine made. */
+  app.addHook("preHandler", async (req, reply) => {
+    const screen = ROUTE_SCREEN[`${req.method} ${req.routeOptions.url}`];
+    if (!screen || screen === PUBLIC) return;
+    const verdict = await engine.allow(screen, asker(req));
+    if (!verdict.ok) return reply.code(403).send({ status: "FORBIDDEN", reason: verdict.reason });
+  });
+
+  /* Every /v1 route must have decided who may call it. A route registered
+     without a row above is a hole in the matrix that nothing else would
+     notice, so the server refuses to boot instead of serving it open. */
+  const unclassified: string[] = [];
+  app.addHook("onRoute", (route) => {
+    if (!route.url.startsWith("/v1/")) return;
+    for (const method of [route.method].flat()) {
+      if (method === "HEAD" || method === "OPTIONS") continue;
+      if (!(`${method} ${route.url}` in ROUTE_SCREEN)) unclassified.push(`${method} ${route.url}`);
+    }
+  });
+  app.addHook("onReady", async () => {
+    if (unclassified.length) {
+      throw new Error(`E25-T1: these routes are not in ROUTE_SCREEN, so nobody has said who may call them: ${unclassified.join(", ")}`);
+    }
+  });
 
   app.get("/", async (_req, reply) => reply.type("text/html").send(LOCK_PAGE));
   app.get("/api", async (_req, reply) => reply.type("text/html").send(landingPage()));
@@ -360,6 +538,20 @@ export function buildServer(store: Store = new MemoryStore(), storeName = "memor
     }));
   });
 
+  /** Promote or demote (E25-T1). Its own route because it is the one roster
+   *  write that changes what a PIN may approve; `/v1/staff/:id` still refuses
+   *  to touch the role no matter what a form posts at it. */
+  app.post("/v1/staff/:id/role", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = (req.body ?? {}) as EnvelopeBody & Record<string, unknown>;
+    const envelope = readEnvelope(body);
+    if ("error" in envelope) return reply.code(400).send({ status: "BAD_REQUEST", reason: envelope.error });
+    return respond(reply, await engine.setEmployeeRole(envelope, {
+      ...managerPin(body), employeeId: id,
+      ...(body.role !== undefined ? { role: String(body.role) } : {}),
+    }));
+  });
+
   app.post("/v1/staff/:id/deactivate", async (req, reply) => {
     const { id } = req.params as { id: string };
     const body = (req.body ?? {}) as EnvelopeBody & Record<string, unknown>;
@@ -390,9 +582,13 @@ export function buildServer(store: Store = new MemoryStore(), storeName = "memor
     return { ok: true };
   });
 
+  /** Who is signed in here, and the matrix row that goes with them (E25-T1).
+   *  The visibility comes down WITH the employee so a page never has to work
+   *  out from a role string which screens it may show; there is one matrix and
+   *  it lives on the server. */
   app.get("/v1/session", async (req) => {
     const { deviceId } = req.query as { deviceId?: string };
-    return { employee: deviceId ? engine.who(deviceId) : null };
+    return engine.session(deviceId);
   });
 
   app.get("/v1/menu", async () => engine.menu());

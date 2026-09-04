@@ -25,7 +25,7 @@ import {
 } from "@restaurantos/domain";
 import type { MenuEntry } from "./menu.js";
 import { isBlankRecord, parseCsv } from "./csv.js";
-import { defaultTitle, PIN_RULE, pinHash, STAFF, type DirectoryEntry, type Employee, type RosterEntry } from "./staff.js";
+import { atLeast, canSee, defaultTitle, isRole, OWNER_ONLY_ACTS, PIN_RULE, pinHash, ROLES, SCREEN_LABEL, STAFF, visibilityRow, type DirectoryEntry, type Employee, type Role, type RosterEntry, type Screen } from "./staff.js";
 import { randomUUID } from "node:crypto";
 import { addDays, dateAt, isValidYmd, lastCompletedPeriod, PAY_PERIODS, periodContaining, sameName, serviceDateOf, TABLE_SHAPES, weekDays, weekStart, type CashEvent, type CheckAggregate, type DraftGroup, type DrawerSession, type Envelope, type FloorTable, type Guest, type KitchenTicket, type MenuDraft, type MenuSnapshot, type OrderLine, type PayPeriod, type PlannedShift, type Reservation, type PayPeriodKind, type Store, type TableShape, type Venue } from "./types.js";
 import type { GroupIndex } from "@restaurantos/domain";
@@ -44,7 +44,7 @@ function usd(minor: number): string {
 }
 
 // Manager approval is now a real identity check (E15): the PIN must hash to
-// an employee who holds the manager role. See Engine.manager().
+// an employee at manager level or above. See Engine.manager().
 
 export type CommandOutcome =
   | { kind: "applied"; check?: CheckView; tickets?: KitchenTicket[]; session?: DrawerSession; day?: unknown; menu?: unknown; guest?: unknown; venue?: Venue; employee?: RosterEntry; reservation?: Reservation; plannedShift?: PlannedShift; schedule?: unknown; audit?: unknown; refundDueMinor?: number; note?: string }
@@ -476,18 +476,123 @@ export class Engine {
     return this.sessions.get(envelope.deviceId)?.id;
   }
 
-  /** The approval gate: the PIN must belong to an employee with the
-   *  manager role. Returns the approver so commands can record WHO. */
+  /* ------------------- the permission ladder (E25-T1, D33) -------------------
+     Two questions, and they are not the same question.
+
+     RANKED: "is this PIN allowed to approve?" That is `atLeast`, and since
+     D33 an owner passes every manager gate written since E12, because a
+     padrona who cannot approve a void in her own dining room is a bug.
+
+     LATERAL: "is this person allowed on this screen?" That is `allow` below,
+     and rank has nothing to do with it: kitchen and server sit side by side
+     and neither passes the other's doors. */
+
+  /** The approval gate: the PIN must belong to an employee at manager level
+   *  or above. Returns the approver so commands can record WHO. */
   private async manager(pin: unknown): Promise<Employee | undefined> {
+    return this.approver(pin, "manager");
+  }
+
+  /** The owner gate (D33). The same shape one rung up, for the three acts a
+   *  manager may see and may not do. */
+  private async owner(pin: unknown): Promise<Employee | undefined> {
+    return this.approver(pin, "owner");
+  }
+
+  private async approver(pin: unknown, floor: "owner" | "manager"): Promise<Employee | undefined> {
     if (typeof pin !== "string" || !pin) return undefined;
     const employee = await this.store.findEmployeeByPin(pin);
-    return employee?.role === "manager" ? employee : undefined;
+    return employee && atLeast(employee.role, floor) ? employee : undefined;
   }
 
   private managerRefusal(pin: unknown, what: string): string {
     return typeof pin === "string" && pin
       ? "PIN not recognized as a manager"
       : `${what} requires a manager's PIN`;
+  }
+
+  /** The same sentence one rung up. A manager who tries an owner-only act
+   *  gets told it is the owner's, not that their PIN is wrong: the PIN is
+   *  fine, the authority is not. */
+  private ownerRefusal(pin: unknown, what: string): string {
+    return typeof pin === "string" && pin
+      ? `${what} is the owner's to do; this PIN is not an owner's`
+      : `${what} requires the owner's PIN`;
+  }
+
+  /* ------------------------ the visibility gate (D33) ------------------------
+     One map (staff.ts VISIBILITY), enforced here, served at GET /v1/session.
+     A page renders the nav it is told to render; this is what actually stops
+     anybody, because a hidden button is a courtesy and a refused route is a
+     rule.
+
+     WHO IS ASKING, and it is two questions rather than one.
+
+     An APPROVAL PIN that belongs to a manager or an owner means one of them
+     is standing at this terminal, and the matrix steps aside: that is what an
+     approval PIN has meant on this system since E12, and a manager walking up
+     to a server's screen to approve something is the single most ordinary
+     thing that happens in a restaurant. The command's own gate then decides,
+     as it always did.
+
+     ANY OTHER PIN is not an approval: a server's, a kitchen's, a wrong one,
+     a made-up one. Those do not buy anything, so the device's own SESSION
+     answers instead, and the command's gate still gets its turn afterwards
+     and still prints its own sentence. That order is what keeps "PIN not
+     recognized as a manager" the answer to a server typing their own PIN into
+     a manager prompt, which is the sentence every screen already shows.
+
+     THE HOLE, NAMED: a device with NO session and no PIN is not refused. It
+     keeps the access it has had since E15, because the unsigned terminal is a
+     supported state in this build (`defaultOpener` opens checks in the first
+     active server's name) and every screen boots before anybody signs in.
+     Signing OUT is therefore a way around the matrix. Closing it means making
+     sign-in mandatory, which changes what an unsigned terminal IS and is a
+     founder decision (a D-level one), not something to smuggle in under a
+     roles ticket. E25-T1 enforces the matrix against every caller who says
+     who they are; making everyone say so is the next decision. */
+
+  /**
+   * May this caller work on this screen?
+   *
+   * Answers `ok` for an unidentified caller, per the note above. Every
+   * refusal names the screen and the role, because "forbidden" tells a server
+   * holding a phone nothing about what went wrong.
+   */
+  async allow(screen: Screen, who: { deviceId?: string; pin?: unknown }): Promise<{ ok: true; employee?: Employee } | { ok: false; reason: string }> {
+    const approver = await this.manager(who.pin);
+    if (approver) return { ok: true, employee: approver };
+
+    const employee = who.deviceId ? this.sessions.get(who.deviceId) : undefined;
+    if (!employee) return { ok: true };
+    if (!canSee(employee.role, screen)) {
+      return { ok: false, reason: `${SCREEN_LABEL[screen]} is not open to a ${employee.role} sign-in` };
+    }
+    return { ok: true, employee };
+  }
+
+  /**
+   * What the session read serves (E25-T1): who is signed in, and the matrix
+   * row that goes with them. The page never invents this.
+   *
+   * Signed out, the row says what the routes actually allow an unsigned
+   * terminal, which is everything. That is an uncomfortable row to serve and
+   * it is the honest one: a nav that hid screens the server would still serve
+   * would be a lie in the safer-looking direction.
+   *
+   * `ownerActs` is a different kind of answer, and false when signed out on
+   * purpose. The owner-only acts are gated on a PRESENTED owner PIN, not on a
+   * session, so this field means "the person signed in here can do them
+   * without going to find anybody", and with nobody signed in the honest
+   * answer is no: the act's own PIN prompt is the door.
+   */
+  session(deviceId?: string) {
+    const employee = deviceId ? this.who(deviceId) : null;
+    return {
+      employee,
+      visibility: visibilityRow(employee ? employee.role : "owner"),
+      ownerActs: employee ? atLeast(employee.role, "owner") : false,
+    };
   }
 
   private async remember(envelope: Envelope, outcome: CommandOutcome, aggregateType: string, aggregateId: string): Promise<CommandOutcome> {
@@ -2017,6 +2122,14 @@ export class Engine {
    * NOTE: `serviceDateOf` buckets the business day on SERVER-LOCAL time, so
    * changing the stored timezone here does NOT change day bucketing. Wiring
    * the service date to the venue timezone is its own ticket.
+   *
+   * IDENTITY IS THE OWNER'S (D33, E25-T1). Name, address, timezone and pay
+   * period are what the restaurant IS: they print on every receipt and they
+   * decide when payday falls, and a manager changing them is a manager
+   * changing the business. The two reservation windows are not identity, they
+   * are how the book behaves tonight, so they stay a manager's to tune. One
+   * command, two floors, and the higher one applies the moment an identity
+   * field is present in the body.
    */
   async updateVenue(
     envelope: Envelope,
@@ -2028,6 +2141,10 @@ export class Engine {
     const refuse = (reason: string) => this.remember(envelope, { kind: "rejected", reason }, "venue", "venue");
 
     if (!(await this.manager(input.managerPin))) return refuse(this.managerRefusal(input.managerPin, "editing the venue"));
+    const identity = (["name", "address", "timezone", "payPeriod", "payPeriodAnchor"] as const).some((k) => input[k] !== undefined);
+    if (identity && !(await this.owner(input.managerPin))) {
+      return refuse(this.ownerRefusal(input.managerPin, OWNER_ONLY_ACTS.venueIdentity));
+    }
     const venue = { ...(await this.store.getVenue()) };
 
     if (input.name !== undefined) {
@@ -2596,12 +2713,19 @@ export class Engine {
   /**
    * Hire somebody.
    *
-   * `role` is the PERMISSION level and stays the two-value enum it has always
-   * been: it gates sign-in, approvals, and the last-manager guard. A kitchen
-   * hire who never touches the POS is role "server" with no expectation of
-   * ever signing in, and their `title` says "Line cook", which is the thing
-   * the room actually calls them. Widening the permission enum is a different
-   * ticket, and a promotion deserves its own flow.
+   * `role` is the PERMISSION level, and since E25-T1 it is the four-value
+   * enum D33 asked for: it gates sign-in, approvals, the screens the person
+   * can reach, and the last-approver guard. The line cook who never touches
+   * the POS is role "kitchen" now rather than a "server" who was never meant
+   * to serve, and their `title` still says "Line cook", because the room's
+   * word for somebody and the system's authority over them are two fields.
+   *
+   * Hiring stays a manager's act, exactly as it has been, with ONE addition
+   * the new enum forces: hiring somebody in at OWNER level needs an owner's
+   * PIN. A manager who could hire an owner could hire one with a PIN of their
+   * own choosing and then be an owner, which would make every owner-only gate
+   * in this file decorative. Hiring a manager is unchanged, because a manager
+   * could already do that before this ticket existed.
    */
   async addEmployee(
     envelope: Envelope,
@@ -2617,7 +2741,10 @@ export class Engine {
     if (!(await this.manager(input.managerPin))) return refuse(this.managerRefusal(input.managerPin, "adding an employee"));
     const name = (input.name ?? "").trim();
     if (!name) return refuse("an employee needs a name");
-    if (input.role !== "server" && input.role !== "manager") return refuse("role must be server or manager");
+    if (!isRole(input.role)) return refuse(`role must be one of ${ROLES.join(", ")}`);
+    if (input.role === "owner" && !(await this.owner(input.managerPin))) {
+      return refuse(this.ownerRefusal(input.managerPin, "hiring somebody in as an owner"));
+    }
     const bad = await this.pinError(input.pin);
     if (bad) return refuse(bad);
 
@@ -2637,8 +2764,8 @@ export class Engine {
    * Edit the record: the job title, the contact details, and the name.
    *
    * NOT the role, and not `active`: a promotion changes what a PIN can
-   * approve and deserves its own thought, and letting somebody go already has
-   * its own command with the last-manager guard on it.
+   * approve and has its own command below, and letting somebody go already
+   * has its own command with the last-approver guard on it.
    */
   async updateEmployee(
     envelope: Envelope,
@@ -2670,8 +2797,95 @@ export class Engine {
     return this.remember(envelope, { kind: "applied", employee: { ...updated, title: updated.title ?? defaultTitle(updated.role) } }, "employee", employee.id);
   }
 
+  /**
+   * Promote or demote (E25-T1, D33). Its own command because it is its own
+   * act: nothing else in the roster changes what a PIN may approve.
+   *
+   * THE FLOOR IS THE HIGHER OF THE TWO ROLES INVOLVED. D33 says changing the
+   * role of a manager or an owner is the owner's to do; the same PIN also
+   * has to be an owner's to promote anybody INTO those levels, for the reason
+   * spelled out on the hire above. So a manager may move people between
+   * server and kitchen all day, and everything that touches an approver goes
+   * up to the owner.
+   *
+   * The last-approver guard applies here too: demoting the only person who
+   * can approve a void strands the venue exactly as deactivating them would.
+   */
+  async setEmployeeRole(envelope: Envelope, input: { managerPin?: string; employeeId?: string; role?: string }): Promise<CommandOutcome> {
+    const replay = await this.store.opResult(envelope.operationId);
+    if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
+    const id = String(input.employeeId ?? "");
+    const refuse = (reason: string) => this.remember(envelope, { kind: "rejected", reason }, "employee", id);
+
+    if (!(await this.manager(input.managerPin))) return refuse(this.managerRefusal(input.managerPin, "changing a role"));
+    if (!isRole(input.role)) return refuse(`role must be one of ${ROLES.join(", ")}`);
+    const roster = await this.store.listEmployees();
+    const employee = roster.find((e) => e.id === id);
+    if (!employee) return refuse(`no employee ${id}`);
+    if (employee.role === input.role) return refuse(`${employee.name} is already ${input.role}`);
+
+    const touchesAnApprover = atLeast(employee.role, "manager") || atLeast(input.role, "manager");
+    if (touchesAnApprover && !(await this.owner(input.managerPin))) {
+      return refuse(this.ownerRefusal(input.managerPin, OWNER_ONLY_ACTS.approverRole));
+    }
+    // owner to manager still leaves somebody who can approve, so only the
+    // second guard has anything to say about that one
+    if (!atLeast(input.role, "manager")) {
+      const stranded = this.lastApproverRefusal(roster, employee);
+      if (stranded) return refuse(stranded);
+    }
+    if (input.role !== "owner") {
+      const orphaned = this.lastOwnerRefusal(roster, employee);
+      if (orphaned) return refuse(orphaned);
+    }
+
+    await this.store.setEmployeeRole(employee.id, input.role);
+    // a demotion must not leave a wider session open behind it: the terminal
+    // they are signed in on has to re-read who they are now
+    for (const [device, who] of this.sessions) {
+      if (who.id === employee.id) this.sessions.set(device, { ...who, role: input.role });
+    }
+    return this.remember(envelope, { kind: "applied", employee: { ...employee, role: input.role, title: employee.title ?? defaultTitle(input.role) } }, "employee", employee.id);
+  }
+
+  /** The venue can never lose its last person who can approve (E21-T1, widened
+   *  by D33 from the last MANAGER to the last owner-or-manager). Returns the
+   *  sentence to refuse with, or undefined when somebody else can still say
+   *  yes to a void at two in the morning. */
+  private lastApproverRefusal(roster: RosterEntry[], employee: RosterEntry): string | undefined {
+    if (!atLeast(employee.role, "manager")) return undefined;
+    const approvers = roster.filter((e) => e.active && atLeast(e.role, "manager"));
+    if (approvers.length > 1) return undefined;
+    return `${employee.name} is the only active manager or owner; promote someone else first`;
+  }
+
+  /**
+   * And the second half of the same idea, which the ticket did not spell out
+   * and a shipped venue would have found the hard way: the last active OWNER
+   * cannot stop being one.
+   *
+   * Only an owner can make another owner. So a venue that loses its last one
+   * keeps running service perfectly and can never change its own name, its
+   * timezone or its pay period again, and there is no door back in: the act
+   * that would fix it is itself owner-only. Every other guard in this file
+   * protects tonight; this one protects the year.
+   *
+   * It sits UNDER the approver guard above rather than replacing it. With two
+   * approvers and one owner, this is the one that speaks; with one of each,
+   * the approver guard gets there first, which is the more urgent sentence.
+   */
+  private lastOwnerRefusal(roster: RosterEntry[], employee: RosterEntry): string | undefined {
+    if (employee.role !== "owner") return undefined;
+    if (roster.filter((e) => e.active && e.role === "owner").length > 1) return undefined;
+    return `${employee.name} is the only active owner; make somebody else an owner first`;
+  }
+
   /** Change somebody's PIN. Nobody's old PIN survives this, which is the
-   *  point: it is what a manager does the morning after one is overheard. */
+   *  point: it is what a manager does the morning after one is overheard.
+   *
+   *  Resetting an APPROVER's PIN is the owner's (D33): a PIN reset hands the
+   *  new PIN to whoever typed it, so a manager who could reset another
+   *  manager's PIN could approve as them. */
   async resetPin(envelope: Envelope, input: { managerPin?: string; employeeId?: string; pin?: string }): Promise<CommandOutcome> {
     const replay = await this.store.opResult(envelope.operationId);
     if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
@@ -2681,6 +2895,9 @@ export class Engine {
     if (!(await this.manager(input.managerPin))) return refuse(this.managerRefusal(input.managerPin, "resetting a PIN"));
     const employee = await this.store.getEmployee(id);
     if (!employee) return refuse(`no employee ${id}`);
+    if (atLeast(employee.role, "manager") && !(await this.owner(input.managerPin))) {
+      return refuse(this.ownerRefusal(input.managerPin, `resetting ${employee.name}'s PIN`));
+    }
     const bad = await this.pinError(input.pin, employee.id);
     if (bad) return refuse(bad);
 
@@ -2689,9 +2906,13 @@ export class Engine {
   }
 
   /** Let somebody go. SOFT, always: checks.server_id still points at them and
-   *  every report they earned still names them. The last active manager
+   *  every report they earned still names them. The last active approver
    *  cannot be deactivated, because a restaurant that cannot approve a void
-   *  is a restaurant that cannot open. */
+   *  is a restaurant that cannot open.
+   *
+   *  Letting an APPROVER go is the owner's (D33), for the reason the PIN
+   *  reset gives: a manager who can deactivate the other manager is a manager
+   *  who can make themselves the only one. */
   async deactivateEmployee(envelope: Envelope, input: { managerPin?: string; employeeId?: string }): Promise<CommandOutcome> {
     const replay = await this.store.opResult(envelope.operationId);
     if (replay !== undefined) return { kind: "replay", result: replay as CommandOutcome };
@@ -2703,9 +2924,13 @@ export class Engine {
     const employee = roster.find((e) => e.id === id);
     if (!employee) return refuse(`no employee ${id}`);
     if (!employee.active) return refuse(`${employee.name} is already deactivated`);
-    if (employee.role === "manager" && roster.filter((e) => e.active && e.role === "manager").length === 1) {
-      return refuse(`${employee.name} is the only active manager; promote someone else first`);
+    if (atLeast(employee.role, "manager") && !(await this.owner(input.managerPin))) {
+      return refuse(this.ownerRefusal(input.managerPin, `letting ${employee.name} go`));
     }
+    const stranded = this.lastApproverRefusal(roster, employee);
+    if (stranded) return refuse(stranded);
+    const orphaned = this.lastOwnerRefusal(roster, employee);
+    if (orphaned) return refuse(orphaned);
 
     await this.store.setEmployeeActive(employee.id, false);
     // their session dies with the PIN: a signed-in terminal must not keep

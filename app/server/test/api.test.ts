@@ -621,8 +621,10 @@ describe("drawing the room (E6-T2)", () => {
 
 describe("the venue is data now (E21-T1)", () => {
   const MGR = "1122";
+  // E25-T1, D33: the venue's IDENTITY is the owner's. Elena V. is the padrona.
+  const OWNER = "1379";
 
-  it("reads without a session, and a manager can rename, move, and re-zone it", async () => {
+  it("reads without a session, and the owner can rename, move, and re-zone it", async () => {
     const app = buildServer();
     const seeded = (await app.inject({ method: "GET", url: "/v1/venue" })).json();
     expect(seeded).toEqual({
@@ -640,7 +642,7 @@ describe("the venue is data now (E21-T1)", () => {
     });
 
     const res = await app.inject({ method: "POST", url: "/v1/venue",
-      payload: { ...ENV(1), managerPin: MGR, name: "Trattoria Sedici", address: "16 Elm St, Austin", timezone: "America/Chicago" } });
+      payload: { ...ENV(1), managerPin: OWNER, name: "Trattoria Sedici", address: "16 Elm St, Austin", timezone: "America/Chicago" } });
     expect(res.statusCode).toBe(200);
     expect(res.json().venue).toEqual({ name: "Trattoria Sedici", address: "16 Elm St, Austin", timezone: "America/Chicago", payPeriod: "biweekly", payPeriodAnchor: "2026-01-05", reservationLeadMinutes: 45, reservationHoldMinutes: 15 });
     expect((await app.inject({ method: "GET", url: "/v1/venue" })).json().name).toBe("Trattoria Sedici");
@@ -648,8 +650,15 @@ describe("the venue is data now (E21-T1)", () => {
     // an omitted field is left alone; a blank address is a real edit, because
     // a kitchen with no street frontage is a real thing
     const partial = await app.inject({ method: "POST", url: "/v1/venue",
-      payload: { ...ENV(2), managerPin: MGR, address: "" } });
+      payload: { ...ENV(2), managerPin: OWNER, address: "" } });
     expect(partial.json().venue).toEqual({ name: "Trattoria Sedici", address: "", timezone: "America/Chicago", payPeriod: "biweekly", payPeriodAnchor: "2026-01-05", reservationLeadMinutes: 45, reservationHoldMinutes: 15 });
+
+    // and the two reservation windows are NOT identity: they are how the book
+    // behaves tonight, so they stay a manager's to tune (E25-T1, D33)
+    const windows = await app.inject({ method: "POST", url: "/v1/venue",
+      payload: { ...ENV(3), managerPin: MGR, reservationLeadMinutes: 30 } });
+    expect(windows.statusCode).toBe(200);
+    expect(windows.json().venue.reservationLeadMinutes).toBe(30);
   });
 
   it("refuses the edit without a manager, and refuses a name or a timezone it cannot honor", async () => {
@@ -662,13 +671,20 @@ describe("the venue is data now (E21-T1)", () => {
       payload: { ...ENV(2), managerPin: "2468", name: "Nope" } });
     expect(asServer.json().reason).toBe("PIN not recognized as a manager");
 
+    // a manager's PIN clears the manager gate and then meets the owner's
+    // (E25-T1, D33): the name on the door is not a manager's to change
+    const asManager = await app.inject({ method: "POST", url: "/v1/venue",
+      payload: { ...ENV(5), managerPin: MGR, name: "Nope" } });
+    expect(asManager.statusCode).toBe(422);
+    expect(asManager.json().reason).toBe("changing the venue's identity is the owner's to do; this PIN is not an owner's");
+
     const blank = await app.inject({ method: "POST", url: "/v1/venue",
-      payload: { ...ENV(3), managerPin: MGR, name: "   " } });
+      payload: { ...ENV(3), managerPin: OWNER, name: "   " } });
     expect(blank.statusCode).toBe(422);
     expect(blank.json().reason).toBe("a restaurant needs a name");
 
     const zone = await app.inject({ method: "POST", url: "/v1/venue",
-      payload: { ...ENV(4), managerPin: MGR, timezone: "America/Atlantis" } });
+      payload: { ...ENV(4), managerPin: OWNER, timezone: "America/Atlantis" } });
     expect(zone.statusCode).toBe(422);
     expect(zone.json().reason).toBe("America/Atlantis is not a timezone this machine knows");
 
@@ -678,7 +694,7 @@ describe("the venue is data now (E21-T1)", () => {
 
   it("replays a venue edit exactly once", async () => {
     const app = buildServer();
-    const payload = { operationId: "venue-op-0001", deviceId: "test-terminal", managerPin: MGR, name: "Trattoria Sedici" };
+    const payload = { operationId: "venue-op-0001", deviceId: "test-terminal", managerPin: OWNER, name: "Trattoria Sedici" };
     const first = await app.inject({ method: "POST", url: "/v1/venue", payload });
     const retry = await app.inject({ method: "POST", url: "/v1/venue", payload });
     expect(first.statusCode).toBe(200);
@@ -699,7 +715,11 @@ describe("hiring, PINs, and letting somebody go (E21-T1)", () => {
   it("serves the roster without a single PIN or hash on it", async () => {
     const app = buildServer();
     const staff = await roster(app);
-    expect(staff.map((s) => s.name)).toEqual(["Gia R.", "Marco B.", "Sofia T."]);
+    // five since E25-T1: D33's four permission levels each have somebody, and
+    // Nico's title says Chef while his level says kitchen (D28's two fields)
+    expect(staff.map((s) => s.name)).toEqual(["Gia R.", "Marco B.", "Sofia T.", "Elena V.", "Nico F."]);
+    expect(staff.map((s) => s.role)).toEqual(["server", "manager", "server", "owner", "kitchen"]);
+    expect(staff.find((s) => s.name === "Nico F.")).toMatchObject({ role: "kitchen", title: "Chef" });
     expect(staff.every((s) => s.active)).toBe(true);
     // E24-T2 added exactly one public field, the job title. The personal half
     // of the record has its own gated read and must never appear here.
@@ -738,7 +758,9 @@ describe("hiring, PINs, and letting somebody go (E21-T1)", () => {
 
     for (const [patch, reason] of [
       [{ name: "  " }, "an employee needs a name"],
-      [{ role: "chef" }, "role must be server or manager"],
+      // "chef" is a TITLE, never a permission level, which is the D28 rule the
+      // wider E25-T1 enum did not soften
+      [{ role: "chef" }, "role must be one of owner, manager, kitchen, server"],
       [{ pin: "12" }, "a PIN is 4 to 6 digits"],
       [{ pin: "1234567" }, "a PIN is 4 to 6 digits"],
       [{ pin: "12a4" }, "a PIN is 4 to 6 digits"],
@@ -748,7 +770,7 @@ describe("hiring, PINs, and letting somebody go (E21-T1)", () => {
       expect(res.statusCode, reason).toBe(422);
       expect(res.json().reason).toBe(reason);
     }
-    expect(await roster(app)).toHaveLength(3);
+    expect(await roster(app)).toHaveLength(5);
   });
 
   it("resets a PIN: the old one stops working the moment the new one starts", async () => {
@@ -806,32 +828,47 @@ describe("hiring, PINs, and letting somebody go (E21-T1)", () => {
     expect(twice.json().reason).toBe("Gia R. is already deactivated");
   });
 
-  it("a deactivated manager cannot approve, and the last one cannot be deactivated", async () => {
+  it("a deactivated manager cannot approve, letting an approver go is the owner's, and the last approver stays", async () => {
     const app = buildServer();
-    // a second manager, so Marco is not the last one
+    const OWNER = "1379";
+    // a second manager. Hiring one is still a manager's act (unchanged by D33)
     const nina = (await hire(app, 1, { name: "Nina V.", role: "manager", pin: "7788" })).json().employee;
 
-    const out = await app.inject({ method: "POST", url: `/v1/staff/${nina.id}/deactivate`,
+    // but letting one go is not: a manager who could deactivate the other
+    // manager is a manager who could make themselves the only one (E25-T1)
+    const byManager = await app.inject({ method: "POST", url: `/v1/staff/${nina.id}/deactivate`,
       payload: { ...ENV(2), managerPin: MGR } });
+    expect(byManager.statusCode).toBe(422);
+    expect(byManager.json().reason).toBe("letting Nina V. go is the owner's to do; this PIN is not an owner's");
+
+    const out = await app.inject({ method: "POST", url: `/v1/staff/${nina.id}/deactivate`,
+      payload: { ...ENV(3), managerPin: OWNER } });
     expect(out.statusCode).toBe(200);
 
     // her PIN no longer approves anything
     const check = await openCheck(app);
     await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items`,
-      payload: { ...ENV(3), itemId: "acqua", quantity: 1, seatNo: 1 } });
+      payload: { ...ENV(4), itemId: "acqua", quantity: 1, seatNo: 1 } });
     const state = (await app.inject({ method: "GET", url: `/v1/checks/${check.id}` })).json().check;
     const refused = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items/${state.lines[0].id}/void`,
-      payload: { ...ENV(4), reason: "guest changed mind", managerPin: "7788" } });
+      payload: { ...ENV(5), reason: "guest changed mind", managerPin: "7788" } });
     expect(refused.statusCode).toBe(422);
     expect(refused.json().reason).toBe("PIN not recognized as a manager");
 
-    // and now Marco is the last active manager, so he stays
+    // Marco can go, because Elena can still approve: the guard counts owners
+    // AND managers now, not managers alone (E25-T1 widening E21-T1)
     const marco = (await roster(app)).find((s) => s.name === "Marco B.")!;
-    const last = await app.inject({ method: "POST", url: `/v1/staff/${marco.id}/deactivate`,
-      payload: { ...ENV(5), managerPin: MGR } });
+    expect((await app.inject({ method: "POST", url: `/v1/staff/${marco.id}/deactivate`,
+      payload: { ...ENV(6), managerPin: OWNER } })).statusCode).toBe(200);
+
+    // and now Elena is the only person left who can say yes to a void at two
+    // in the morning, so not even her own PIN can walk her out
+    const elena = (await roster(app)).find((s) => s.name === "Elena V.")!;
+    const last = await app.inject({ method: "POST", url: `/v1/staff/${elena.id}/deactivate`,
+      payload: { ...ENV(7), managerPin: OWNER } });
     expect(last.statusCode).toBe(422);
-    expect(last.json().reason).toBe("Marco B. is the only active manager; promote someone else first");
-    expect((await roster(app)).find((s) => s.name === "Marco B.")!.active).toBe(true);
+    expect(last.json().reason).toBe("Elena V. is the only active manager or owner; promote someone else first");
+    expect((await roster(app)).find((s) => s.name === "Elena V.")!.active).toBe(true);
   });
 
   it("the unsigned-device opener falls to the roster, never to nobody", async () => {
@@ -3551,8 +3588,11 @@ describe("the payroll hours export (E24-T3)", () => {
     return buildServer(store);
   };
 
+  /** The owner's PIN, because WHEN the venue pays is part of its identity and
+   *  D33 made identity the owner's (E25-T1). Exporting the file is still a
+   *  manager's, which is the split the export tests below lean on. */
   const setPeriod = (app: ReturnType<typeof buildServer>, n: number, body: Record<string, unknown>) =>
-    app.inject({ method: "POST", url: "/v1/venue", payload: { ...ENV(n), managerPin: MGR, ...body } });
+    app.inject({ method: "POST", url: "/v1/venue", payload: { ...ENV(n), managerPin: "1379", ...body } });
 
   // null means "send no PIN at all": passing undefined would take the default
   const csvFor = async (app: ReturnType<typeof buildServer>, periodEnd?: string, pin: string | null = MGR) => {
@@ -4957,5 +4997,373 @@ describe("the schedule screen (E24-T5)", () => {
     // the page formats and never computes: no hour is summed here
     expect(body).not.toContain("reduce((a,s)=>a+s.minutes");
     expect(body).not.toContain("/3600000");
+  });
+});
+
+/* ------------- four permission levels, enforced (E25-T1, D33) -------------
+ * The enum grew from server|manager to owner|manager|kitchen|server, and the
+ * point of the ticket is not the enum: it is that the SERVER refuses. Nav
+ * hiding is E25-T2 and it is a courtesy. Everything below goes through HTTP,
+ * because that is where the rule has to hold.
+ *
+ * Two shapes of refusal, and they mean different things:
+ *   403 FORBIDDEN  the matrix stopped this caller at the door of a screen.
+ *   422 REJECTED   the command considered it and said no (a PIN gate).
+ * Which one a route produces is itself worth asserting: it says whether the
+ * screen or the act did the refusing. */
+
+describe("roles and visibility (E25-T1)", () => {
+  const PIN = { owner: "1379", manager: "1122", kitchen: "2580", server: "2468" } as const;
+
+  /** sign a device in as one of the four, and hand back its deviceId */
+  const signIn = async (app: ReturnType<typeof buildServer>, role: keyof typeof PIN) => {
+    const deviceId = `term-${role}`;
+    const res = await app.inject({ method: "POST", url: "/v1/session", payload: { deviceId, pin: PIN[role] } });
+    expect(res.statusCode, `${role} could not sign in`).toBe(200);
+    expect(res.json().employee.role).toBe(role);
+    return deviceId;
+  };
+
+  const sessionOf = async (app: ReturnType<typeof buildServer>, deviceId: string) =>
+    (await app.inject({ method: "GET", url: `/v1/session?deviceId=${deviceId}` })).json();
+
+  const rosterOf = async (app: ReturnType<typeof buildServer>) =>
+    (await app.inject({ method: "GET", url: "/v1/staff" })).json().staff as
+      { id: string; name: string; role: string; title?: string }[];
+
+  it("serves the matrix with the session, so no page has to invent one", async () => {
+    const app = buildServer();
+
+    const server = await sessionOf(app, await signIn(app, "server"));
+    expect(server.employee.name).toBe("Gia R.");
+    expect(server.visibility).toEqual({
+      service: true, tables: true, reservations: true, schedule: true,
+      kitchen: false, reports: false, menu: false, cash: false, settings: false,
+    });
+    expect(server.ownerActs).toBe(false);
+
+    const kitchen = await sessionOf(app, await signIn(app, "kitchen"));
+    expect(kitchen.employee.name).toBe("Nico F.");
+    expect(kitchen.visibility).toEqual({
+      kitchen: true, schedule: true,
+      service: false, tables: false, reservations: false, reports: false, menu: false, cash: false, settings: false,
+    });
+
+    // a manager sees every screen: the owner-only acts are acts, not screens,
+    // so they are refused to a manager rather than hidden from one
+    const manager = await sessionOf(app, await signIn(app, "manager"));
+    expect(Object.values(manager.visibility).every(Boolean)).toBe(true);
+    expect(manager.ownerActs).toBe(false);
+
+    const owner = await sessionOf(app, await signIn(app, "owner"));
+    expect(Object.values(owner.visibility).every(Boolean)).toBe(true);
+    expect(owner.ownerActs).toBe(true);
+  });
+
+  it("refuses each role at the door of a screen that is not theirs", async () => {
+    const app = buildServer();
+    const kitchen = await signIn(app, "kitchen");
+    const server = await signIn(app, "server");
+
+    /* one representative READ per family the caller may not see */
+    for (const [deviceId, url, reason] of [
+      [kitchen, "/v1/insights/servers", "Reports is not open to a kitchen sign-in"],
+      [kitchen, "/v1/checks", "Service is not open to a kitchen sign-in"],
+      [kitchen, "/v1/day", "the cash drawer and the day is not open to a kitchen sign-in"],
+      [kitchen, "/v1/floor", "Tables is not open to a kitchen sign-in"],
+      [kitchen, "/v1/reservations", "Reservations is not open to a kitchen sign-in"],
+      [server, "/v1/kds", "Kitchen is not open to a server sign-in"],
+      [server, "/v1/menu/draft", "the Menu editor is not open to a server sign-in"],
+      [server, "/v1/insights/heatmap", "Reports is not open to a server sign-in"],
+    ] as [string, string, string][]) {
+      const res = await app.inject({ method: "GET", url: `${url}?deviceId=${deviceId}` });
+      expect(res.statusCode, url).toBe(403);
+      expect(res.json()).toEqual({ status: "FORBIDDEN", reason });
+    }
+
+    /* and one representative MUTATION each */
+    const bump = await app.inject({ method: "POST", url: "/v1/kds/toggle",
+      payload: { ...ENV(1, { deviceId: server }), ticketId: "t", orderItemId: "i" } });
+    expect(bump.statusCode).toBe(403);
+    expect(bump.json().reason).toBe("Kitchen is not open to a server sign-in");
+
+    const opened = await app.inject({ method: "POST", url: "/v1/checks",
+      payload: { ...ENV(2, { deviceId: kitchen }), tableName: "Table 14", covers: 2 } });
+    expect(opened.statusCode).toBe(403);
+    expect(opened.json().reason).toBe("Service is not open to a kitchen sign-in");
+
+    // the device header does the same job, for a read with no query string
+    const byHeader = await app.inject({ method: "GET", url: "/v1/day", headers: { "x-device-id": kitchen } });
+    expect(byHeader.statusCode).toBe(403);
+  });
+
+  it("lets a server's device SEND to the kitchen, because sending is a Service act", async () => {
+    const app = buildServer();
+    const deviceId = await signIn(app, "server");
+    const check = (await app.inject({ method: "POST", url: "/v1/checks",
+      payload: { ...ENV(1, { deviceId }), tableName: "Table 14", covers: 2 } })).json().check;
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items`,
+      payload: { ...ENV(2, { deviceId }), itemId: "acqua", quantity: 1, seatNo: 1 } });
+
+    const send = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/send`, payload: ENV(3, { deviceId }) });
+    expect(send.statusCode).toBe(200);
+    expect(send.json().tickets.length).toBeGreaterThan(0);
+
+    // but the ticket she just made is not hers to bump back
+    const serve = await app.inject({ method: "POST", url: "/v1/kds/serve",
+      payload: { ...ENV(4, { deviceId }), tableName: "Table 14" } });
+    expect(serve.statusCode).toBe(403);
+
+    // and the kitchen, who may not open a check, can work that same ticket
+    const nico = await signIn(app, "kitchen");
+    const tickets = (await app.inject({ method: "GET", url: `/v1/kds?deviceId=${nico}` })).json().tickets;
+    expect(tickets.length).toBeGreaterThan(0);
+    const toggle = await app.inject({ method: "POST", url: "/v1/kds/toggle",
+      payload: { ...ENV(5, { deviceId: nico }), ticketId: tickets[0].id, orderItemId: tickets[0].items[0].orderItemId } });
+    expect(toggle.statusCode).toBe(200);
+  });
+
+  it("a kitchen PIN cannot read the reports, whichever door it knocks on", async () => {
+    const app = buildServer();
+
+    // presented as an approval PIN, the manager gate says no
+    const byPin = await app.inject({ method: "POST", url: "/v1/insights/labor", payload: { managerPin: PIN.kitchen } });
+    expect(byPin.statusCode).toBe(422);
+    expect(byPin.json().reason).toBe("PIN not recognized as a manager");
+
+    // signed in at a terminal, the matrix says no one step earlier
+    const nico = await signIn(app, "kitchen");
+    const bySession = await app.inject({ method: "POST", url: "/v1/insights/labor",
+      payload: { deviceId: nico, managerPin: PIN.kitchen } });
+    expect(bySession.statusCode).toBe(403);
+    expect(bySession.json().reason).toBe("Reports is not open to a kitchen sign-in");
+  });
+
+  it("gives a server the schedule SCREEN and still refuses the manager's week behind it", async () => {
+    const app = buildServer();
+    const gia = await signIn(app, "server");
+
+    // her own week: no PIN, nothing to configure, and the matrix lets it past
+    const mine = await app.inject({ method: "GET", url: `/v1/schedule/mine?deviceId=${gia}` });
+    expect(mine.statusCode).toBe(200);
+    expect(mine.json().employee.name).toBe("Gia R.");
+
+    // the whole room's week is a different thing, and her own PIN does not buy it
+    const week = await app.inject({ method: "POST", url: "/v1/schedule/week",
+      payload: { deviceId: gia, managerPin: PIN.server } });
+    expect(week.statusCode).toBe(422);
+    expect(week.json().reason).toBe("PIN not recognized as a manager");
+
+    // the kitchen gets exactly the same deal: their own week, nothing else
+    const nico = await signIn(app, "kitchen");
+    expect((await app.inject({ method: "GET", url: `/v1/schedule/mine?deviceId=${nico}` })).json().employee.name).toBe("Nico F.");
+  });
+
+  it("passes an owner through every manager gate there is", async () => {
+    const app = buildServer();
+    const OWNER = PIN.owner;
+
+    // a void approval (E12)
+    const check = await openCheck(app);
+    await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items`,
+      payload: { ...ENV(1), itemId: "acqua", quantity: 1, seatNo: 1 } });
+    const line = (await app.inject({ method: "GET", url: `/v1/checks/${check.id}` })).json().check.lines[0].id;
+    const voided = await app.inject({ method: "POST", url: `/v1/checks/${check.id}/items/${line}/void`,
+      payload: { ...ENV(2), reason: "guest changed mind", managerPin: OWNER } });
+    expect(voided.statusCode).toBe(200);
+    expect(voided.json().check.lines[0].status).toBe("voided");
+
+    // the gated reads (E24-T2, E24-T3, E24-T4)
+    for (const url of ["/v1/staff/directory", "/v1/schedule/week", "/v1/insights/labor", "/v1/staff/hours-export"]) {
+      const res = await app.inject({ method: "POST", url, payload: { managerPin: OWNER } });
+      expect(res.statusCode, url).toBe(200);
+    }
+
+    // and the gated writes (E6-T2, E5-T2)
+    const table = await app.inject({ method: "POST", url: "/v1/floor/add",
+      payload: { ...ENV(3), managerPin: OWNER, name: "Dehors 9", area: "Dehors", seats: 4, shape: "round", x: 10, y: 10, w: 12, h: 16 } });
+    expect(table.statusCode).toBe(200);
+    const group = await app.inject({ method: "POST", url: "/v1/menu/draft/group",
+      payload: { ...ENV(4), managerPin: OWNER, groupId: "spice", name: "Spice level", minSelect: 1, maxSelect: 1,
+                 options: [{ id: "mild", name: "Mild", priceMinor: 0 }] } });
+    expect(group.statusCode).toBe(200);
+    const publish = await app.inject({ method: "POST", url: "/v1/menu/publish", payload: { ...ENV(5), managerPin: OWNER } });
+    expect(publish.statusCode).toBe(200);
+  });
+
+  it("makes a promotion the owner's, and leaves the lateral move a manager's", async () => {
+    const app = buildServer();
+    const setRole = (n: number, id: string, role: unknown, pin: string) =>
+      app.inject({ method: "POST", url: `/v1/staff/${id}/role`, payload: { ...ENV(n), managerPin: pin, role } });
+
+    const gia = (await rosterOf(app)).find((s) => s.name === "Gia R.")!;
+    const marco = (await rosterOf(app)).find((s) => s.name === "Marco B.")!;
+
+    // between the two lateral levels a manager decides: neither outranks
+    // anything, so nothing about who can approve has moved
+    const sideways = await setRole(1, gia.id, "kitchen", PIN.manager);
+    expect(sideways.statusCode).toBe(200);
+    expect(sideways.json().employee).toMatchObject({ name: "Gia R.", role: "kitchen" });
+    // the title follows the level only while nobody has typed one over it
+    expect(sideways.json().employee.title).toBe("Kitchen");
+
+    // promoting anybody INTO the approving half is not
+    const promote = await setRole(2, gia.id, "manager", PIN.manager);
+    expect(promote.statusCode).toBe(422);
+    expect(promote.json().reason).toBe("changing the role of a manager or an owner is the owner's to do; this PIN is not an owner's");
+    expect((await rosterOf(app)).find((s) => s.name === "Gia R.")!.role).toBe("kitchen");
+    expect((await setRole(3, gia.id, "manager", PIN.owner)).statusCode).toBe(200);
+
+    // and demoting one is not either
+    const demote = await setRole(4, marco.id, "server", PIN.manager);
+    expect(demote.statusCode).toBe(422);
+    expect(demote.json().reason).toBe("changing the role of a manager or an owner is the owner's to do; this PIN is not an owner's");
+    expect((await setRole(5, marco.id, "server", PIN.owner)).statusCode).toBe(200);
+
+    // his PIN stops approving the moment his level does
+    const nowAServer = await app.inject({ method: "POST", url: "/v1/staff/directory", payload: { managerPin: PIN.manager } });
+    expect(nowAServer.statusCode).toBe(422);
+    expect(nowAServer.json().reason).toBe("PIN not recognized as a manager");
+
+    // the malformed cases
+    expect((await setRole(6, gia.id, "chef", PIN.owner)).json().reason).toBe("role must be one of owner, manager, kitchen, server");
+    expect((await setRole(7, gia.id, "manager", PIN.owner)).json().reason).toBe("Gia R. is already manager");
+    expect((await setRole(8, "not-a-real-id", "server", PIN.owner)).json().reason).toBe("no employee not-a-real-id");
+  });
+
+  it("never lets the roster lose its last person who can approve", async () => {
+    const app = buildServer();
+    const setRole = (n: number, id: string, role: string, pin: string) =>
+      app.inject({ method: "POST", url: `/v1/staff/${id}/role`, payload: { ...ENV(n), managerPin: pin, role } });
+
+    const marco = (await rosterOf(app)).find((s) => s.name === "Marco B.")!;
+    const elena = (await rosterOf(app)).find((s) => s.name === "Elena V.")!;
+
+    // with Marco still approving, nothing is stranded tonight, and the SECOND
+    // guard is the one that speaks: only an owner can make another owner, so
+    // a venue that loses its last one can never change its own name again
+    const orphan = await setRole(1, elena.id, "manager", PIN.owner);
+    expect(orphan.statusCode).toBe(422);
+    expect(orphan.json().reason).toBe("Elena V. is the only active owner; make somebody else an owner first");
+
+    // Marco leaves the approving half; Elena is still there to say yes to a
+    // void at two in the morning, so nothing is stranded yet
+    expect((await setRole(3, marco.id, "server", PIN.owner)).statusCode).toBe(200);
+
+    // now she is the only one left, and her own PIN cannot demote her
+    const last = await setRole(4, elena.id, "server", PIN.owner);
+    expect(last.statusCode).toBe(422);
+    expect(last.json().reason).toBe("Elena V. is the only active manager or owner; promote someone else first");
+    expect((await rosterOf(app)).find((s) => s.name === "Elena V.")!.role).toBe("owner");
+
+    // and the same guard on the same person through the other door
+    const out = await app.inject({ method: "POST", url: `/v1/staff/${elena.id}/deactivate`,
+      payload: { ...ENV(5), managerPin: PIN.owner } });
+    expect(out.statusCode).toBe(422);
+    expect(out.json().reason).toBe("Elena V. is the only active manager or owner; promote someone else first");
+  });
+
+  it("resets an approver's PIN only for an owner, and anybody else's for a manager", async () => {
+    const app = buildServer();
+    const marco = (await rosterOf(app)).find((s) => s.name === "Marco B.")!;
+    const nico = (await rosterOf(app)).find((s) => s.name === "Nico F.")!;
+
+    // the kitchen and the floor are still a manager's to look after
+    expect((await app.inject({ method: "POST", url: `/v1/staff/${nico.id}/pin`,
+      payload: { ...ENV(1), managerPin: PIN.manager, pin: "6160" } })).statusCode).toBe(200);
+
+    // another manager's is not: a PIN reset hands the new PIN to whoever
+    // typed it, so a manager who could do this could approve as Marco
+    const byManager = await app.inject({ method: "POST", url: `/v1/staff/${marco.id}/pin`,
+      payload: { ...ENV(2), managerPin: PIN.manager, pin: "5150" } });
+    expect(byManager.statusCode).toBe(422);
+    expect(byManager.json().reason).toBe("resetting Marco B.'s PIN is the owner's to do; this PIN is not an owner's");
+    // his old PIN still works, so nothing half-happened
+    expect((await app.inject({ method: "POST", url: "/v1/session", payload: { deviceId: "d", pin: PIN.manager } })).statusCode).toBe(200);
+
+    expect((await app.inject({ method: "POST", url: `/v1/staff/${marco.id}/pin`,
+      payload: { ...ENV(3), managerPin: PIN.owner, pin: "5150" } })).statusCode).toBe(200);
+    expect((await app.inject({ method: "POST", url: "/v1/session", payload: { deviceId: "d2", pin: PIN.manager } })).statusCode).toBe(401);
+  });
+
+  it("hires into any level, and only an owner can hire an owner", async () => {
+    const app = buildServer();
+    const hire = (n: number, role: string, pin: string, approver: string, extra: Record<string, unknown> = {}) =>
+      app.inject({ method: "POST", url: "/v1/staff",
+        payload: { ...ENV(n), managerPin: approver, name: `New ${role}`, role, pin, ...extra } });
+
+    // a manager hires a line cook, and the default title is the level's own
+    // name until somebody types the room's word over it (D28)
+    const cook = await hire(1, "kitchen", "4111", PIN.manager);
+    expect(cook.statusCode).toBe(200);
+    expect(cook.json().employee).toMatchObject({ role: "kitchen", title: "Kitchen" });
+    const titled = await hire(2, "kitchen", "4222", PIN.manager, { name: "Bar", title: "Bartender" });
+    expect(titled.json().employee).toMatchObject({ role: "kitchen", title: "Bartender" });
+
+    // but a manager who could hire an owner could hire themselves one
+    const sneaky = await hire(3, "owner", "4333", PIN.manager);
+    expect(sneaky.statusCode).toBe(422);
+    expect(sneaky.json().reason).toBe("hiring somebody in as an owner is the owner's to do; this PIN is not an owner's");
+    expect((await hire(4, "owner", "4333", PIN.owner)).statusCode).toBe(200);
+
+    // the new cook signs in and lands on the kitchen's own matrix row
+    const session = await app.inject({ method: "POST", url: "/v1/session", payload: { deviceId: "term-new", pin: "4111" } });
+    expect(session.json().employee.role).toBe("kitchen");
+    expect((await sessionOf(app, "term-new")).visibility.service).toBe(false);
+  });
+
+  it("replays a role change exactly once", async () => {
+    const app = buildServer();
+    const gia = (await rosterOf(app)).find((s) => s.name === "Gia R.")!;
+    const payload = { operationId: "role-op-0001", deviceId: "test-terminal", managerPin: PIN.manager, role: "kitchen" };
+
+    const first = await app.inject({ method: "POST", url: `/v1/staff/${gia.id}/role`, payload });
+    const retry = await app.inject({ method: "POST", url: `/v1/staff/${gia.id}/role`, payload });
+    expect(first.statusCode).toBe(200);
+    // a naive re-run would meet "Gia R. is already kitchen"; the journal
+    // answers instead, which is what makes a dropped response safe to retry
+    expect(retry.json()).toEqual(first.json());
+  });
+
+  it("signs a demoted employee's own terminal down to their new level", async () => {
+    const app = buildServer();
+    const gia = await signIn(app, "server");
+    expect((await sessionOf(app, gia)).visibility.service).toBe(true);
+
+    const id = (await sessionOf(app, gia)).employee.id;
+    expect((await app.inject({ method: "POST", url: `/v1/staff/${id}/role`,
+      payload: { ...ENV(1), managerPin: PIN.manager, role: "kitchen" } })).statusCode).toBe(200);
+
+    // she is still signed in, and the screen she was on is no longer hers
+    const now = await sessionOf(app, gia);
+    expect(now.employee.role).toBe("kitchen");
+    expect(now.visibility).toMatchObject({ service: false, kitchen: true });
+    expect((await app.inject({ method: "GET", url: `/v1/checks?deviceId=${gia}` })).statusCode).toBe(403);
+  });
+
+  it("leaves an unidentified terminal exactly the access it had, and says so in the session", async () => {
+    const app = buildServer();
+    // THE NAMED LIMIT of this ticket: with no session and no approval PIN the
+    // matrix has nobody to check, so the unsigned terminal E15 supports keeps
+    // working. Signing OUT is therefore a way around the matrix, and closing
+    // it means making sign-in mandatory, which changes what an unsigned
+    // terminal IS and is a founder decision rather than something to smuggle
+    // in here. The session read tells the truth about it rather than drawing
+    // a nav that hides doors the server would still open.
+    for (const url of ["/v1/checks", "/v1/kds", "/v1/day", "/v1/insights/servers", "/v1/menu/draft"]) {
+      expect((await app.inject({ method: "GET", url })).statusCode, url).toBe(200);
+    }
+    const signedOut = await sessionOf(app, "nobody-here");
+    expect(signedOut.employee).toBeNull();
+    expect(Object.values(signedOut.visibility).every(Boolean)).toBe(true);
+    expect(signedOut.ownerActs).toBe(false);
+  });
+
+  it("boots only when every /v1 route has said who may call it", async () => {
+    // the onRoute/onReady pair in server.ts fails the boot when a route is
+    // registered without a row in ROUTE_SCREEN, so this one line is the whole
+    // matrix's completeness check: a route added in E26 with nobody assigned
+    // to it takes the suite down here rather than shipping open
+    await expect(buildServer().ready()).resolves.toBeTruthy();
   });
 });
