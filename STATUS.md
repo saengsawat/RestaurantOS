@@ -1,6 +1,6 @@
 # STATUS
 
-**The at-a-glance view: where the project is right now.** Updated at the end of every working session. Detail lives in [BACKLOG.md](BACKLOG.md) (tickets), [DECISIONS.md](DECISIONS.md) (decisions), and the [master plan](docs/plans/RestaurantOS_Master_Plan_v2.0.md) (the map).
+**The at-a-glance view: where the project is right now.** Updated at the end of every working session. Detail lives in [BACKLOG.md](BACKLOG.md) (tickets), [DECISIONS.md](DECISIONS.md) (decisions), and the [master plan](docs/plans/RestaurantOS_Master_Plan_v2.0.md) (the map). `Ticket_Tracking_Log.xlsx` at the repo root is the founder's spreadsheet view of every ticket (model, status, dates); the orchestrator refreshes it at each review pass.
 
 **Last updated:** 2026-09-03
 
