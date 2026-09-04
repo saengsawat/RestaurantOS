@@ -134,12 +134,15 @@ function renderDots(){
   if(go)go.disabled=buf.length<PIN_MIN;
 }
 
+/* the role reads out loud beside the name (E25-T2 item 4), so the demo shows
+   at a glance which of the four permission levels just signed in */
+const ROLE_LABEL={owner:"Owner",manager:"Manager",kitchen:"Kitchen",server:"Server"};
 async function submit(){
   const res=await fetch("/v1/session",{method:"POST",headers:{"Content-Type":"application/json"},
     body:JSON.stringify({deviceId:DEVICE,pin:buf})});
   if(res.ok){
     const emp=(await res.json()).employee;
-    $("#who").textContent="Welcome, "+emp.name;
+    $("#who").textContent=emp.name+" · "+(ROLE_LABEL[emp.role]||emp.role);
     setTimeout(()=>{location.href="/pos";},350);
     return;
   }
@@ -175,7 +178,7 @@ fetch("/v1/staff/demo-pins").then(r=>r.json()).then(d=>{
 
 /* already signed in on this device? straight to service */
 fetch("/v1/session?deviceId="+encodeURIComponent(DEVICE)).then(r=>r.json()).then(d=>{
-  if(d.employee){$("#who").textContent=d.employee.name+" is signed in here";}
+  if(d.employee){$("#who").textContent=d.employee.name+" · "+(ROLE_LABEL[d.employee.role]||d.employee.role)+" is signed in here";}
 }).catch(()=>{});
 
 renderDots();

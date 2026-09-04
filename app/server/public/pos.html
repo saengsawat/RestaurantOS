@@ -321,6 +321,24 @@ textarea.fld{min-height:72px;resize:vertical;font:inherit;color:inherit;line-hei
   box-shadow:var(--shadow-lg);max-width:min(520px,92vw);text-align:center;animation:rise .18s ease-out}
 .toast.err{background:var(--red);color:#fff}
 .toast.good{background:var(--green);color:#fff}
+/* a toast landing on a bottom sheet's action row deadens the button under it
+   for three seconds (E24-T5); toasts are informational, never tappable */
+.toasts{pointer-events:none}
+
+/* ---------- APP SHELL: role refusal (E25-T2) ----------
+   A role that types past the rail lands here instead of a half-rendered
+   page; the server route refusal is what actually protects the data, this
+   is its honest face. Identical on every screen. */
+.refusal{position:fixed;inset:0;z-index:900;background:var(--bg);display:flex;
+  align-items:center;justify-content:center;padding:24px;text-align:center}
+.refusal-card{max-width:380px}
+.refusal-card h1{font-size:19px;letter-spacing:-.01em;margin-bottom:8px}
+.refusal-card p{font-size:13.5px;color:var(--ink-2);margin-bottom:8px}
+.refusal-card .who{color:var(--ink-4);font-size:12.5px;margin-bottom:20px}
+.refusal-card .acts{display:flex;gap:10px;justify-content:center}
+.refusal-card button{min-height:44px;padding:0 18px;border-radius:12px;
+  background:var(--surface-2);color:var(--ink);font-weight:700}
+.refusal-card button.p{background:var(--brand);color:var(--brand-ink)}
 @keyframes rise{from{transform:translateY(10px);opacity:0}to{transform:none;opacity:1}}
 
 @media (max-width:900px){
@@ -603,6 +621,10 @@ const $=s=>document.querySelector(s);
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const money=n=>"$"+(n/100).toFixed(2);
 const DEVICE=(()=>{try{let d=localStorage.getItem("ros.device");if(!d){d="web-"+crypto.randomUUID().slice(0,8);localStorage.setItem("ros.device",d);}return d;}catch(_){return "web-anon";}})();
+/* every GET on this page carries x-device-id (E25-T2 item 6), so the
+   visibility gate can bite for a signed-in device on a read, not only a
+   mutation (which already carries deviceId in its envelope). */
+function dget(url){return fetch(url,{headers:{"x-device-id":DEVICE}});}
 
 /* state.split is the chosen split MODE only, and it is client-side on purpose:
    the server stays stateless about how a party decided to divide the check
@@ -619,7 +641,7 @@ document.addEventListener("click",e=>{const c=e.target.closest("[data-close]");i
 
 async function api(path,body){
   const opts=body?{method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({operationId:crypto.randomUUID(),deviceId:DEVICE,...body})}:{};
+    body:JSON.stringify({operationId:crypto.randomUUID(),deviceId:DEVICE,...body})}:{headers:{"x-device-id":DEVICE}};
   let res;
   try{res=await fetch(path,opts);}catch(_){setConn(false);throw new Error("server unreachable");}
   setConn(true);
@@ -644,9 +666,9 @@ async function refresh(){
   // byte-identical on all nine pages by UI-T1's invariant, so the check panel
   // takes its own copy of the read rather than diverging it.)
   const [menu,checks,tickets]=await Promise.all([
-    fetch("/v1/menu").then(r=>r.json()),
-    fetch("/v1/checks").then(r=>r.json()).then(d=>d.checks),
-    fetch("/v1/kds").then(r=>r.json()).then(d=>d.tickets).catch(()=>state.tickets),
+    dget("/v1/menu").then(r=>r.json()),
+    dget("/v1/checks").then(r=>r.json()).then(d=>d.checks),
+    dget("/v1/kds").then(r=>r.json()).then(d=>d.tickets).catch(()=>state.tickets),
   ]);
   state.menu=menu;
   state.tickets=tickets||[];
@@ -939,7 +961,7 @@ function pickTable(name){
 function pickCovers(n){newSel.covers=n;newSel.armed=null;renderNew();}
 
 $("#btnNew").onclick=async()=>{
-  const floor=(await fetch("/v1/floor").then(r=>r.json())).tables;
+  const floor=(await dget("/v1/floor").then(r=>r.json())).tables;
   newSel.tables=floor.filter(t=>!t.check);
   newSel.table=newSel.tables.length?newSel.tables[0].name:WALKIN;
   newSel.covers=2;
@@ -1046,15 +1068,54 @@ $("#itAdd").onclick=async()=>{
 
 /* ---------- who's signed in (E15) ---------- */
 let me=null;
+
+/* ---------- APP SHELL: role visibility (E25-T2) ----------
+   The rail renders only what the session's own matrix allows (staff.ts
+   VISIBILITY, served with GET /v1/session); this page never invents a rule
+   of its own. Hiding a rail entry is courtesy, the route refusal underneath
+   it is the rule, and a role that types past it lands on a full-screen
+   refusal rather than a half-rendered page. This block is duplicated on
+   every screen; only THIS_SCREEN differs. */
+const THIS_SCREEN="service";
+const RAIL_SCREEN={"/pos":"service","/tables":"tables","/reservations":"reservations",
+  "/kds":"kitchen","/menu":"menu","/close":"cash","/reports":"reports",
+  "/schedule":"schedule","/settings":"settings"};
+function applyVisibility(visibility){
+  if(!visibility)return;
+  document.querySelectorAll(".navrail .nav-btn[href]").forEach(a=>{
+    const scr=RAIL_SCREEN[a.getAttribute("href")];
+    a.style.display=(scr&&!visibility[scr])?"none":"";
+  });
+  if(me&&!visibility[THIS_SCREEN]){
+    document.body.insertAdjacentHTML("beforeend",`<div class="refusal"><div class="refusal-card">
+      <h1>Not for this sign-in</h1>
+      <p>This screen isn't open to a ${esc(me.role)} sign-in.</p>
+      <p class="who">You are signed in as ${esc(me.name)}, ${esc(me.role)}.</p>
+      <div class="acts"><button id="refBack">Back</button><button class="p" id="refOut">Sign out</button></div>
+    </div></div>`);
+    document.getElementById("refBack").onclick=()=>history.length>1?history.back():location.href="/pos";
+    document.getElementById("refOut").onclick=async()=>{
+      await fetch("/v1/session/signout",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({deviceId:DEVICE})});
+      location.href="/";
+    };
+  }
+}
+
 async function loadWho(){
-  try{me=(await fetch("/v1/session?deviceId="+encodeURIComponent(DEVICE)).then(r=>r.json())).employee;}catch(_){me=null;}
+  let visibility=null;
+  try{
+    const s=await dget("/v1/session?deviceId="+encodeURIComponent(DEVICE)).then(r=>r.json());
+    me=s.employee;visibility=s.visibility;
+  }catch(_){me=null;}
   $("#btnWho").textContent=me?me.name+(me.role==="manager"?" · mgr":""):"Sign in";
   $("#btnWho").style.background=me?"var(--brand-wash)":"var(--surface-2)";
+  applyVisibility(visibility);
 }
 $("#btnWho").onclick=async()=>{
   /* demo PINs off the seed constant; /v1/staff is the roster and never
      carries a PIN (E21-T1) */
-  const staff=(await fetch("/v1/staff/demo-pins").then(r=>r.json())).staff;
+  const staff=(await dget("/v1/staff/demo-pins").then(r=>r.json())).staff;
   $("#whoBody").innerHTML=
     (me?`<div class="og-h">Signed in</div><div style="font-weight:700;margin:2px 0 10px">${esc(me.name)} · ${esc(me.role)}</div>`:"")
     +`<div class="og-h">Staff (demo PINs shown, concept demo)</div>
@@ -1102,7 +1163,7 @@ $("#btnMore").onclick=async()=>{
   const c=cur();if(!c)return;
   mergeSource=null;
   $("#moreSub").textContent=c.tableName+" · check #"+c.checkNo;
-  const floor=(await fetch("/v1/floor").then(r=>r.json())).tables.filter(t=>!t.check);
+  const floor=(await dget("/v1/floor").then(r=>r.json())).tables.filter(t=>!t.check);
   const others=state.checks.filter(x=>x.id!==c.id);
   $("#moreBody").innerHTML=
     `<button class="btn btn-s" id="btnGuests" style="width:100%;margin:4px 0 8px">Guests · attach a regular</button>
@@ -1296,7 +1357,7 @@ $("#voidGo").onclick=async()=>{
       // anything else was about that line. Re-read the version the server
       // actually holds before judging the next one, so a single refusal does
       // not turn the rest of the batch into version conflicts
-      try{version=(await fetch(`/v1/checks/${c.id}`).then(r=>r.json())).check.version;}catch(_){}
+      try{version=(await dget(`/v1/checks/${c.id}`).then(r=>r.json())).check.version;}catch(_){}
     }
   }
   closeOv("ovVoid");
@@ -1345,7 +1406,7 @@ $("#btnHist").onclick=async()=>{
   openOv("ovHist");
   let h;
   try{
-    const res=await fetch(`/v1/checks/${c.id}/history`);
+    const res=await dget(`/v1/checks/${c.id}/history`);
     if(!res.ok)throw new Error("no history");
     h=await res.json();
   }catch(_){
@@ -1650,14 +1711,14 @@ function openGuests(){
 }
 
 async function loadGuestSearch(q,into){
-  const d=await fetch("/v1/guests?q="+encodeURIComponent(q)).then(r=>r.json());
+  const d=await dget("/v1/guests?q="+encodeURIComponent(q)).then(r=>r.json());
   if(into==="merge"&&gs.merge)gs.merge.results=d.guests.filter(g=>g.id!==gs.profile.guest.id);
   else{gs.results=d.guests;gs.total=d.total;}
   renderGuests();
 }
 
 async function openGuestProfile(id){
-  gs.profile=await fetch("/v1/guests/"+id).then(r=>r.json());
+  gs.profile=await dget("/v1/guests/"+id).then(r=>r.json());
   gs.pane="profile";gs.merge=null;
   renderGuests();
   if(!$("#ovGuests").classList.contains("open"))openOv("ovGuests");
@@ -1904,7 +1965,7 @@ setInterval(()=>refresh().catch(()=>{}),8000);
 let VENUE={name:"RestaurantOS",address:"",timezone:""};
 async function loadVenue(){
   try{
-    const v=await fetch("/v1/venue").then(r=>r.json());
+    const v=await dget("/v1/venue").then(r=>r.json());
     if(v&&v.name)VENUE=v;
   }catch(_){}
   document.querySelectorAll("[data-venue-name]").forEach(el=>{el.textContent=VENUE.name;});
@@ -1918,8 +1979,8 @@ const venueReady=loadVenue();
    that cannot be read must never be louder than the screen behind it. */
 async function railBadges(){
   const [checks,kds]=await Promise.all([
-    fetch("/v1/checks").then(r=>r.json()),
-    fetch("/v1/kds").then(r=>r.json()),
+    dget("/v1/checks").then(r=>r.json()),
+    dget("/v1/kds").then(r=>r.json()),
   ]);
   railBadge("navTables",(checks.checks||[]).filter(c=>c.status!=="closed"&&c.status!=="voided").length);
   railBadge("navKds",(kds.tickets||[]).filter(t=>t.status==="open").length);

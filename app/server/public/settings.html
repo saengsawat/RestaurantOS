@@ -88,6 +88,24 @@ select.fld{padding:0 8px}
 .toasts{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:200;display:flex;flex-direction:column;gap:8px;align-items:center}
 .toast{background:var(--ink);color:var(--bg);border-radius:999px;padding:9px 18px;font-size:13px;font-weight:600;max-width:92vw}
 .toast.err{background:var(--red);color:#fff}
+/* a toast landing on a bottom sheet's action row deadens the button under it
+   for three seconds (E24-T5); toasts are informational, never tappable */
+.toasts{pointer-events:none}
+
+/* ---------- APP SHELL: role refusal (E25-T2) ----------
+   A role that types past the rail lands here instead of a half-rendered
+   page; the server route refusal is what actually protects the data, this
+   is its honest face. Identical on every screen. */
+.refusal{position:fixed;inset:0;z-index:900;background:var(--bg);display:flex;
+  align-items:center;justify-content:center;padding:24px;text-align:center}
+.refusal-card{max-width:380px}
+.refusal-card h1{font-size:19px;letter-spacing:-.01em;margin-bottom:8px}
+.refusal-card p{font-size:13.5px;color:var(--ink-2);margin-bottom:8px}
+.refusal-card .who{color:var(--ink-4);font-size:12.5px;margin-bottom:20px}
+.refusal-card .acts{display:flex;gap:10px;justify-content:center}
+.refusal-card button{min-height:44px;padding:0 18px;border-radius:12px;
+  background:var(--surface-2);color:var(--ink);font-weight:700}
+.refusal-card button.p{background:var(--brand);color:var(--brand-ink)}
 
 
 /* This block is emitted AFTER the shared chrome on purpose: the responsive
@@ -336,6 +354,51 @@ textarea.fld{padding:10px 12px;min-height:76px;resize:vertical;line-height:1.5}
 <div class="toasts" id="toasts"></div>
 
 <script>
+const DEVICE=(()=>{try{let d=localStorage.getItem("ros.device");if(!d){d="web-"+crypto.randomUUID().slice(0,8);localStorage.setItem("ros.device",d);}return d;}catch(_){return "web-anon";}})();
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+/* ---------- APP SHELL: role visibility (E25-T2) ----------
+   The rail renders only what the session's own matrix allows (staff.ts
+   VISIBILITY, served with GET /v1/session); this page never invents a rule
+   of its own. Hiding a rail entry is courtesy, the route refusal underneath
+   it is the rule, so every GET here now carries x-device-id (item 6) and a
+   role that types past the rail lands on a full-screen refusal rather than
+   a half-rendered page. This block is duplicated verbatim on every screen;
+   only THIS_SCREEN differs. Declared first on this page so the venue read
+   right below can use it too. */
+function dget(url){return fetch(url,{headers:{"x-device-id":DEVICE}});}
+const THIS_SCREEN="settings";
+const RAIL_SCREEN={"/pos":"service","/tables":"tables","/reservations":"reservations",
+  "/kds":"kitchen","/menu":"menu","/close":"cash","/reports":"reports",
+  "/schedule":"schedule","/settings":"settings"};
+async function applyVisibility(){
+  let employee=null,visibility=null;
+  try{
+    const s=await dget("/v1/session?deviceId="+encodeURIComponent(DEVICE)).then(r=>r.json());
+    employee=s.employee;visibility=s.visibility;
+  }catch(_){}
+  if(visibility)document.querySelectorAll(".navrail .nav-btn[href]").forEach(a=>{
+    const scr=RAIL_SCREEN[a.getAttribute("href")];
+    a.style.display=(scr&&!visibility[scr])?"none":"";
+  });
+  if(employee&&visibility&&!visibility[THIS_SCREEN]){
+    document.body.insertAdjacentHTML("beforeend",`<div class="refusal"><div class="refusal-card">
+      <h1>Not for this sign-in</h1>
+      <p>This screen isn't open to a ${esc(employee.role)} sign-in.</p>
+      <p class="who">You are signed in as ${esc(employee.name)}, ${esc(employee.role)}.</p>
+      <div class="acts"><button id="refBack">Back</button><button class="p" id="refOut">Sign out</button></div>
+    </div></div>`);
+    document.getElementById("refBack").onclick=()=>history.length>1?history.back():location.href="/pos";
+    document.getElementById("refOut").onclick=async()=>{
+      await fetch("/v1/session/signout",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({deviceId:DEVICE})});
+      location.href="/";
+    };
+  }
+  return employee;
+}
+applyVisibility();
+
 /* ---------- the venue's own name (E21-T2) ----------
    The markup ships "RestaurantOS" and this replaces it with whatever the
    restaurant is actually called. The demo's name is never in the markup: a
@@ -345,7 +408,7 @@ textarea.fld{padding:10px 12px;min-height:76px;resize:vertical;line-height:1.5}
 let VENUE={name:"RestaurantOS",address:"",timezone:""};
 async function loadVenue(){
   try{
-    const v=await fetch("/v1/venue").then(r=>r.json());
+    const v=await dget("/v1/venue").then(r=>r.json());
     if(v&&v.name)VENUE=v;
   }catch(_){}
   document.querySelectorAll("[data-venue-name]").forEach(el=>{el.textContent=VENUE.name;});
@@ -358,8 +421,6 @@ const venueReady=loadVenue();
    endpoints and posts four commands, and every refusal it shows is the
    engine's own sentence. */
 const $=s=>document.querySelector(s);
-const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const DEVICE="settings-"+(localStorage.getItem("ros.settings")||(()=>{const d=crypto.randomUUID().slice(0,8);localStorage.setItem("ros.settings",d);return d;})());
 
 function toast(m,k){const el=document.createElement("div");el.className="toast"+(k?" "+k:"");el.textContent=m;
   $("#toasts").appendChild(el);setTimeout(()=>el.remove(),3400);}
@@ -523,7 +584,7 @@ $("#vSave").onclick=()=>gated(async()=>{
 
 async function loadPeriod(){
   try{
-    const p=(await fetch("/v1/payroll/period").then(r=>r.json())).period;
+    const p=(await dget("/v1/payroll/period").then(r=>r.json())).period;
     $("#pPeriod").textContent=p.start+" through "+p.end;
     return p;
   }catch(_){$("#pPeriod").textContent="Cannot reach the server";return null;}
@@ -555,7 +616,7 @@ $("#pGo").onclick=()=>gated(async()=>{
 /* ---------------------------- the team ---------------------------- */
 
 async function loadStaff(){
-  staff=(await fetch("/v1/staff").then(r=>r.json())).staff;
+  staff=(await dget("/v1/staff").then(r=>r.json())).staff;
   // only worth a round trip when a row is open AND we have a PIN to send
   if(open.size&&mgrPin)await loadDirectory();
   renderStaff();
@@ -606,7 +667,7 @@ function renderStaff(){
     const shown=open.has(s.id);
     return `<div class="row ${s.active?"":"off"}">
     <div class="nm">${esc(s.name)}<small>${esc(s.title||"")} · ${s.active?"Signs in with their own PIN":"Deactivated; history kept"}</small></div>
-    <span class="chip ${s.role==="manager"?"info":"mut"}">${s.role}</span>
+    <span class="chip ${s.role==="owner"||s.role==="manager"?"info":"mut"}">${s.role}</span>
     ${s.active?"":'<span class="chip red">Inactive</span>'}
     <button class="btn btn-s" data-more="${esc(s.id)}" aria-expanded="${shown}">${shown?"Hide details":"Details"}</button>
     ${s.active?`<button class="btn btn-s" data-pin="${esc(s.id)}">Reset PIN</button>
@@ -700,10 +761,20 @@ $("#addBtn").onclick=()=>gated(()=>{
      <input class="fld" id="aName" maxlength="60" autocomplete="off" placeholder="As the check header should read">
      <div class="fl">Role</div>
      <div class="opts" id="aRole">
-       <button class="opt on" data-r="server">Server</button>
+       <button class="opt" data-r="owner">Owner</button>
        <button class="opt" data-r="manager">Manager</button>
+       <button class="opt" data-r="kitchen">Kitchen</button>
+       <button class="opt on" data-r="server">Server</button>
      </div>
-     <p class="note">Role is what they may DO: a manager can approve a void, close the day, and change these settings. It is not their job title. A line cook who never touches a terminal is a server here, and their title says what the room calls them.</p>
+     <p class="note"><b>Owner</b> · every screen, plus the venue's identity and promoting anybody into management.</p>
+     <p class="note"><b>Manager</b> · every screen except the venue's identity and promoting anybody into management.</p>
+     <p class="note"><b>Kitchen</b> · Kitchen, and their own schedule.</p>
+     <p class="note"><b>Server</b> · Service, Tables, Bookings, and their own schedule.</p>
+     <p class="note">Role is what they may DO. It is not their job title: a line cook who never touches a terminal is a server here, and their title says what the room calls them.</p>
+     <div class="fold" id="aOwnerGate">
+       <div class="fl">Owner PIN — hiring somebody in as an owner is the owner's call</div>
+       <input class="fld" id="aOwnPin" inputmode="numeric" maxlength="6" placeholder="••••" autocomplete="off">
+     </div>
      ${pinPair("aPin","aPin2")}
      <div class="acts"><button class="btn btn-s" id="aMore" aria-expanded="false">+ More details</button></div>
      <div class="fold" id="aFold">${detailFields("a")}</div>`,
@@ -711,13 +782,16 @@ $("#addBtn").onclick=()=>gated(()=>{
     async()=>{
       const p=readPair("#aPin","#aPin2");
       if(p.err)return p.err;
-      const r=await cmd("/v1/staff",{name:$("#aName").value,role,pin:p.pin,...readDetails("a")});
+      const owner=role==="owner"?{managerPin:$("#aOwnPin").value.trim()}:{};
+      const r=await cmd("/v1/staff",{name:$("#aName").value,role,pin:p.pin,...readDetails("a"),...owner});
       if(!r.ok)return r.reason;
       toast($("#aName").value.trim()+" added to the team");
     });
   document.querySelectorAll("#aRole .opt").forEach(b=>b.onclick=()=>{
     role=b.dataset.r;
-    document.querySelectorAll("#aRole .opt").forEach(x=>x.classList.toggle("on",x===b));});
+    document.querySelectorAll("#aRole .opt").forEach(x=>x.classList.toggle("on",x===b));
+    $("#aOwnerGate").classList.toggle("on",role==="owner");
+  });
   $("#aMore").onclick=()=>{
     const on=$("#aFold").classList.toggle("on");
     $("#aMore").setAttribute("aria-expanded",String(on));
@@ -783,8 +857,8 @@ addEventListener("resize",setViewportH);setViewportH();
    that cannot be read must never be louder than the screen behind it. */
 async function railBadges(){
   const [checks,kds]=await Promise.all([
-    fetch("/v1/checks").then(r=>r.json()),
-    fetch("/v1/kds").then(r=>r.json()),
+    dget("/v1/checks").then(r=>r.json()),
+    dget("/v1/kds").then(r=>r.json()),
   ]);
   railBadge("navTables",(checks.checks||[]).filter(c=>c.status!=="closed"&&c.status!=="voided").length);
   railBadge("navKds",(kds.tickets||[]).filter(t=>t.status==="open").length);

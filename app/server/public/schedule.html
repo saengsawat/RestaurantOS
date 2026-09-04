@@ -98,6 +98,21 @@ select.fld{padding:0 8px}
    button dead for the three seconds the toast was up. Visible, never
    clickable: the message is for reading, not for tapping. */
 .toasts{pointer-events:none}
+
+/* ---------- APP SHELL: role refusal (E25-T2) ----------
+   A role that types past the rail lands here instead of a half-rendered
+   page; the server route refusal is what actually protects the data, this
+   is its honest face. Identical on every screen. */
+.refusal{position:fixed;inset:0;z-index:900;background:var(--bg);display:flex;
+  align-items:center;justify-content:center;padding:24px;text-align:center}
+.refusal-card{max-width:380px}
+.refusal-card h1{font-size:19px;letter-spacing:-.01em;margin-bottom:8px}
+.refusal-card p{font-size:13.5px;color:var(--ink-2);margin-bottom:8px}
+.refusal-card .who{color:var(--ink-4);font-size:12.5px;margin-bottom:20px}
+.refusal-card .acts{display:flex;gap:10px;justify-content:center}
+.refusal-card button{min-height:44px;padding:0 18px;border-radius:12px;
+  background:var(--surface-2);color:var(--ink);font-weight:700}
+.refusal-card button.p{background:var(--brand);color:var(--brand-ink)}
 .wrap{flex:1;overflow-y:auto;padding:16px 18px;max-width:1080px;width:100%;margin:0 auto}
 .note{font-size:12px;color:var(--ink-4);margin:8px 2px 0;line-height:1.5}
 .hint{font-size:11.5px;color:var(--ink-4);margin-top:7px;line-height:1.45}
@@ -478,11 +493,52 @@ let view="mine",weekOf=todayYmd(),hoursOn=todayYmd();
 let mgrPin=null,pinThen=null;
 let myWeek=null,week=null,hours=null,me=null,sh=null,warning="";
 
+/* ---------- APP SHELL: role visibility (E25-T2) ----------
+   The rail renders only what the session's own matrix allows (staff.ts
+   VISIBILITY, served with GET /v1/session); this page never invents a rule
+   of its own. Hiding a rail entry is courtesy, the route refusal underneath
+   it is the rule, so every GET here now carries x-device-id (item 6) and a
+   role that types past the rail lands on a full-screen refusal rather than
+   a half-rendered page. This block is duplicated on every screen; schedule
+   is the one screen every role can see, so the refusal never fires here,
+   but the rail filtering still has to. */
+function dget(url){return fetch(url,{headers:{"x-device-id":DEVICE}});}
+const THIS_SCREEN="schedule";
+const RAIL_SCREEN={"/pos":"service","/tables":"tables","/reservations":"reservations",
+  "/kds":"kitchen","/menu":"menu","/close":"cash","/reports":"reports",
+  "/schedule":"schedule","/settings":"settings"};
+function applyVisibility(visibility){
+  if(!visibility)return;
+  document.querySelectorAll(".navrail .nav-btn[href]").forEach(a=>{
+    const scr=RAIL_SCREEN[a.getAttribute("href")];
+    a.style.display=(scr&&!visibility[scr])?"none":"";
+  });
+  if(me&&!visibility[THIS_SCREEN]){
+    document.body.insertAdjacentHTML("beforeend",`<div class="refusal"><div class="refusal-card">
+      <h1>Not for this sign-in</h1>
+      <p>This screen isn't open to a ${esc(me.role)} sign-in.</p>
+      <p class="who">You are signed in as ${esc(me.name)}, ${esc(me.role)}.</p>
+      <div class="acts"><button id="refBack">Back</button><button class="p" id="refOut">Sign out</button></div>
+    </div></div>`);
+    document.getElementById("refBack").onclick=()=>history.length>1?history.back():location.href="/pos";
+    document.getElementById("refOut").onclick=async()=>{
+      await fetch("/v1/session/signout",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({deviceId:DEVICE})});
+      location.href="/";
+    };
+  }
+}
+
 async function loadWho(){
-  try{me=(await fetch("/v1/session?deviceId="+encodeURIComponent(DEVICE)).then(r=>r.json())).employee;}catch(_){me=null;}
+  let visibility=null;
+  try{
+    const s=await dget("/v1/session?deviceId="+encodeURIComponent(DEVICE)).then(r=>r.json());
+    me=s.employee;visibility=s.visibility;
+  }catch(_){me=null;}
   const chip=$("#whoChip");
   chip.textContent=me?me.name+(me.role==="manager"?" · manager":""):"Not signed in";
   chip.className="chip "+(me?"green":"mut");
+  applyVisibility(visibility);
 }
 
 /* every gated call carries the PIN, in the BODY and never in a URL: a manager
@@ -518,7 +574,7 @@ $("#pinFld").onkeydown=e=>{if(e.key==="Enter")$("#pinGo").click();};
 async function refresh(){
   if(view==="mine"){
     try{
-      myWeek=await fetch("/v1/schedule/mine?deviceId="+encodeURIComponent(DEVICE)
+      myWeek=await dget("/v1/schedule/mine?deviceId="+encodeURIComponent(DEVICE)
         +"&weekOf="+encodeURIComponent(weekOf)).then(r=>r.json());
     }catch(_){myWeek=null;}
     if(myWeek&&myWeek.weekOf)adoptWeek(myWeek.weekOf);
@@ -866,7 +922,7 @@ setInterval(()=>{if(!document.querySelector(".ov.open"))refresh().catch(()=>{});
 let VENUE={name:"RestaurantOS",address:"",timezone:""};
 async function loadVenue(){
   try{
-    const v=await fetch("/v1/venue").then(r=>r.json());
+    const v=await dget("/v1/venue").then(r=>r.json());
     if(v&&v.name)VENUE=v;
   }catch(_){}
   document.querySelectorAll("[data-venue-name]").forEach(el=>{el.textContent=VENUE.name;});
@@ -880,8 +936,8 @@ const venueReady=loadVenue();
    that cannot be read must never be louder than the screen behind it. */
 async function railBadges(){
   const [checks,kds]=await Promise.all([
-    fetch("/v1/checks").then(r=>r.json()),
-    fetch("/v1/kds").then(r=>r.json()),
+    dget("/v1/checks").then(r=>r.json()),
+    dget("/v1/kds").then(r=>r.json()),
   ]);
   railBadge("navTables",(checks.checks||[]).filter(c=>c.status!=="closed"&&c.status!=="voided").length);
   railBadge("navKds",(kds.tickets||[]).filter(t=>t.status==="open").length);

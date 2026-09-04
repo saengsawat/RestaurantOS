@@ -1981,7 +1981,11 @@ describe("reads", () => {
       const body = (await app.inject({ method: "GET", url })).body;
       expect(body, `${url} still names the demo venue`).not.toContain("<b>Osteria Nove</b>");
       expect(body, `${url} still names the demo venue`).not.toContain("<h1>Osteria Nove</h1>");
-      expect(body, `${url} does not read the venue`).toContain('fetch("/v1/venue")');
+      // E25-T2 item 6: every page but the lock screen reads the venue through
+      // dget(), which carries x-device-id so a signed-in device identifies a
+      // read the same way it identifies a mutation; the lock screen has no
+      // session yet, so it still reads with a bare fetch
+      expect(body, `${url} does not read the venue`).toContain(url === "/" ? 'fetch("/v1/venue")' : 'dget("/v1/venue")');
       expect(body).toContain("data-venue-name");
       // the fallback is the product's name, never a guess at the restaurant's
       expect(body).toContain('let VENUE={name:"RestaurantOS"');
@@ -2047,7 +2051,8 @@ describe("reads", () => {
 
     // team: the roster read plus the three commands
     expect(body).toContain(">Team<");
-    expect(body).toContain('fetch("/v1/staff")');
+    // E25-T2 item 6: the roster read carries x-device-id like every other GET
+    expect(body).toContain('dget("/v1/staff")');
     expect(body).toContain('cmd("/v1/staff"');
     expect(body).toContain('/pin"');
     expect(body).toContain('/deactivate"');
@@ -3789,7 +3794,7 @@ describe("the payroll hours export (E24-T3)", () => {
     expect(body).toContain('id="vAnchor"');
     expect(body).toContain(">Payroll export<");
     expect(body).toContain('fetch("/v1/staff/hours-export"');
-    expect(body).toContain('fetch("/v1/payroll/period")');
+    expect(body).toContain('dget("/v1/payroll/period")');
     expect(body).toContain('id="pGo"');
     // the posture, on the screen, in one sentence
     expect(body).toContain("Your payroll provider applies wage and overtime rules; this system never calculates pay.");
@@ -4472,8 +4477,8 @@ describe("the reservations screen and the floor badge (E23-T3)", () => {
     const body = res.body;
 
     // two reads and no third question
-    expect(body).toContain('fetch("/v1/reservations?date="+encodeURIComponent(day))');
-    expect(body).toContain('fetch("/v1/floor")');
+    expect(body).toContain('dget("/v1/reservations?date="+encodeURIComponent(day))');
+    expect(body).toContain('dget("/v1/floor")');
 
     // one day at a time, Today by default
     expect(body).toContain('id="dPrev"');
@@ -4944,7 +4949,7 @@ describe("the schedule screen (E24-T5)", () => {
     // SHARED device key the lock screen signs in with (a per-page id would be
     // a device nobody has ever signed in on)
     expect(body).toContain('localStorage.getItem("ros.device")');
-    expect(body).toContain('fetch("/v1/schedule/mine?deviceId="+encodeURIComponent(DEVICE)');
+    expect(body).toContain('dget("/v1/schedule/mine?deviceId="+encodeURIComponent(DEVICE)');
     expect(body).toContain("Sign in on this device and your shifts appear here");
     // and it says out loud why a draft is not there
     expect(body).toContain("Published shifts only");
@@ -5365,5 +5370,77 @@ describe("roles and visibility (E25-T1)", () => {
     // matrix's completeness check: a route added in E26 with nobody assigned
     // to it takes the suite down here rather than shipping open
     await expect(buildServer().ready()).resolves.toBeTruthy();
+  });
+});
+
+/* -------------- each role sees its own app, on the pages (E25-T2) --------------
+ * No engine or route under test here (E25-T1 owns that): page-serve
+ * assertions only, over the client-side hooks that consume the session's own
+ * matrix. The rail hides a screen as a courtesy; these assertions exist so a
+ * later edit cannot quietly drop the hook that does the hiding, or the
+ * refusal a role hits when it types past the rail. */
+describe("each role sees its own app (E25-T2)", () => {
+  const SCREENS = [
+    { url: "/pos", screen: "service" },
+    { url: "/tables", screen: "tables" },
+    { url: "/reservations", screen: "reservations" },
+    { url: "/kds", screen: "kitchen" },
+    { url: "/menu", screen: "menu" },
+    { url: "/close", screen: "cash" },
+    { url: "/reports", screen: "reports" },
+    { url: "/schedule", screen: "schedule" },
+    { url: "/settings", screen: "settings" },
+  ];
+
+  it("carries the visibility hook, the refusal notice, and a device-identified read on all nine pages", async () => {
+    const app = buildServer();
+    for (const { url, screen } of SCREENS) {
+      const body = (await app.inject({ method: "GET", url })).body;
+      expect(body, `${url} misses THIS_SCREEN`).toContain(`const THIS_SCREEN="${screen}"`);
+      expect(body, `${url} misses the rail filter map`).toContain("const RAIL_SCREEN=");
+      // hidden with display, never removed: a role switch on the same page
+      // (sign in as somebody else without a reload) has to be able to show a
+      // rail entry back, not just take it away once
+      expect(body, `${url} removes rather than hides a rail entry`).toContain('a.style.display=(scr&&!visibility[scr])?"none":"";');
+      expect(body, `${url} misses the refusal card`).toContain('class="refusal"');
+      expect(body, `${url} misses the refusal card class`).toContain('class="refusal-card"');
+      expect(body, `${url} does not name who is signed in on a refusal`).toContain("You are signed in as");
+      expect(body, `${url} offers no way back from a refusal`).toContain('id="refBack"');
+      expect(body, `${url} offers no way to sign out from a refusal`).toContain('id="refOut"');
+      // item 6: every GET on this page carries x-device-id, so the visibility
+      // gate can bite for a signed-in device on a read, not only a mutation
+      expect(body, `${url} does not identify its GET reads`)
+        .toContain('function dget(url){return fetch(url,{headers:{"x-device-id":DEVICE}});}');
+      // the shared device id, never a per-page one: a per-page id is a device
+      // nobody has ever signed in on, and the gate cannot bite for it
+      expect(body, `${url} keeps a per-page device id instead of the shared one`)
+        .toContain('localStorage.getItem("ros.device")');
+      // E24-T5's toast fix, item 5: landing on a bottom sheet's action row
+      // must never deaden the button under it
+      expect(body, `${url} lets a toast eat taps`).toContain(".toasts{pointer-events:none}");
+    }
+  });
+
+  it("shows the role under the name on the lock screen", async () => {
+    const body = (await buildServer().inject({ method: "GET", url: "/" })).body;
+    expect(body).toContain('const ROLE_LABEL={owner:"Owner",manager:"Manager",kitchen:"Kitchen",server:"Server"}');
+    expect(body).toContain('emp.name+" · "+(ROLE_LABEL[emp.role]||emp.role)');
+  });
+
+  it("gives Settings' hire form all four roles, plainly labeled, with an owner PIN gate on Owner", async () => {
+    const body = (await buildServer().inject({ method: "GET", url: "/settings" })).body;
+    expect(body).toContain('data-r="owner">Owner<');
+    expect(body).toContain('data-r="manager">Manager<');
+    expect(body).toContain('data-r="kitchen">Kitchen<');
+    expect(body).toContain('data-r="server">Server<');
+    // one line each on what a role sees
+    expect(body).toContain("<b>Owner</b>");
+    expect(body).toContain("<b>Manager</b>");
+    expect(body).toContain("<b>Kitchen</b>");
+    expect(body).toContain("<b>Server</b>");
+    // picking Owner routes the hire through the owner-PIN path the core built
+    expect(body).toContain('id="aOwnerGate"');
+    expect(body).toContain('id="aOwnPin"');
+    expect(body).toContain('role==="owner"?{managerPin:$("#aOwnPin").value.trim()}:{}');
   });
 });
