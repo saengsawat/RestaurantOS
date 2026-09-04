@@ -13,6 +13,7 @@ Read `CLAUDE.md`, `design/restaurantos/DESIGN.md`, `docs/tickets/E25-T1-roles-co
 2. **A refusal that respects the person**: navigating directly to a screen outside the role (typed URL, stale bookmark) shows a calm full-screen notice on that page ("This screen needs a manager. You are signed in as Gia R., server."), with Sign out and Back actions; never a broken half-rendered page. The server-side refusal (E25-T1) is what actually protects the data; this is the honest face on it.
 3. **Settings' Team section** gains the two new roles in its role picker, labeled plainly (Owner, Manager, Kitchen, Server) with one line each on what they see; picking owner/manager routes through the owner-PIN path the core built. Titles stay the free-text field they are.
 4. **The lock screen** shows the role under the name on successful sign-in ("Nico F. · Kitchen") so the demo reads instantly.
+5. **One CSS line on every page while you are in them**: `.toasts{pointer-events:none}` (schedule.html already has it; E24-T5 found toasts landing exactly on a bottom sheet's action row on phones and deadening the button for three seconds).
 
 ## Invariants
 
