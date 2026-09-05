@@ -113,6 +113,46 @@ select.fld{padding:0 8px}
 .refusal-card button{min-height:44px;padding:0 18px;border-radius:12px;
   background:var(--surface-2);color:var(--ink);font-weight:700}
 .refusal-card button.p{background:var(--brand);color:var(--brand-ink)}
+
+/* ---------- APP SHELL: terminal sheet (E25-T3) ----------
+   "Who's on this terminal?" belongs on every page, not just /pos: a role
+   that cannot reach Service (kitchen) must still be able to sign out
+   without first trespassing onto a screen it cannot see. Self-contained
+   (who-* classes) so it never depends on what a page's own sheets look
+   like; identical on every screen. Replaces the read-only chip this page
+   already had with the same tappable one every other screen now carries. */
+.who-chip{min-height:44px;display:inline-flex;align-items:center;gap:4px;padding:0 14px;border-radius:999px;
+  background:var(--surface-2);color:var(--ink-2);font-size:13px;font-weight:600;white-space:nowrap;transition:transform .1s}
+.who-chip:active{transform:scale(.96)}
+.who-chip.on{background:var(--brand-wash);color:var(--ink)}
+.who-ov{position:fixed;inset:0;z-index:400;background:rgba(0,0,0,.45);display:none;
+  align-items:flex-end;justify-content:center}
+.who-ov.open{display:flex}
+.who-modal{width:100%;max-width:440px;background:var(--panel);border-radius:20px 20px 0 0;
+  box-shadow:0 -8px 30px rgba(0,0,0,.3);max-height:86vh;display:flex;flex-direction:column;
+  animation:whoRise .18s ease-out}
+@keyframes whoRise{from{transform:translateY(16px);opacity:.7}to{transform:none;opacity:1}}
+@media (min-width:640px){.who-ov{align-items:center}.who-modal{border-radius:20px}}
+.who-h{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:18px 20px 6px}
+.who-h h3{font-size:17px}
+.who-h .sub{font-size:12.5px;color:var(--ink-3);margin-top:2px}
+.who-x{width:32px;height:32px;flex-shrink:0;border-radius:999px;background:var(--surface-2);
+  font-size:16px;display:flex;align-items:center;justify-content:center}
+.who-b{padding:6px 20px 4px;overflow-y:auto}
+.who-f{display:flex;gap:8px;padding:14px 20px calc(14px + env(safe-area-inset-bottom,0px))}
+.who-lbl{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);margin:10px 0 6px}
+.who-lbl:first-child{margin-top:0}
+.who-name{font-weight:700;margin:2px 0 4px}
+.who-list{display:flex;flex-wrap:wrap;gap:8px}
+.who-opt{min-height:44px;border-radius:999px;padding:0 14px;background:var(--surface-2);color:var(--ink-2);
+  font-size:13px;font-weight:600;transition:transform .1s}
+.who-opt:active{transform:scale(.96)}
+.who-fld{width:100%;min-height:44px;border-radius:10px;border:1px solid var(--line);background:var(--panel);
+  color:var(--ink);font:inherit;padding:0 12px}
+.who-go{min-height:44px;flex:1;border-radius:999px;background:var(--brand);color:var(--brand-ink);font-weight:700;transition:transform .1s}
+.who-go:active{transform:scale(.97)}
+.who-out{min-height:44px;border-radius:999px;padding:0 16px;background:var(--surface-2);color:var(--ink-2);font-weight:600;transition:transform .1s}
+.who-out:active{transform:scale(.96)}
 .wrap{flex:1;overflow-y:auto;padding:16px 18px;max-width:1080px;width:100%;margin:0 auto}
 .note{font-size:12px;color:var(--ink-4);margin:8px 2px 0;line-height:1.5}
 .hint{font-size:11.5px;color:var(--ink-4);margin-top:7px;line-height:1.45}
@@ -387,7 +427,7 @@ select.fld{padding:0 8px}
     <div class="venue"><b data-venue-name>RestaurantOS</b><small>RestaurantOS shifts · live from the server</small></div>
     <div class="screen-title">Schedule</div>
     <div class="top-meta">
-      <span class="chip mut" id="whoChip">Not signed in</span>
+      <button class="who-chip" id="whoChip">Not signed in</button>
     </div>
   </header>
   <div class="shellbody">
@@ -432,6 +472,12 @@ select.fld{padding:0 8px}
     <div class="err" id="pubErr"></div>
   </div>
   <div class="m-f"><button class="btn btn-p btn-lg" id="pubGo">Publish the week</button></div>
+</div></div>
+
+<div class="who-ov" id="whoOv"><div class="who-modal">
+  <div class="who-h"><div><h3>Who's on this terminal?</h3><div class="sub">Sign in with your PIN. Approvals still ask for a manager.</div></div><button class="who-x" id="whoX">✕</button></div>
+  <div class="who-b" id="whoBody"></div>
+  <div class="who-f" id="whoFoot"></div>
 </div></div>
 
 <div class="toasts" id="toasts"></div>
@@ -537,11 +583,70 @@ async function loadWho(){
     const s=await dget("/v1/session?deviceId="+encodeURIComponent(DEVICE)).then(r=>r.json());
     me=s.employee;visibility=s.visibility;
   }catch(_){me=null;}
-  const chip=$("#whoChip");
-  chip.textContent=me?me.name+(me.role==="manager"?" · manager":""):"Not signed in";
-  chip.className="chip "+(me?"green":"mut");
+  renderWhoChip();
   applyVisibility(visibility);
 }
+
+/* ---------- APP SHELL: terminal sheet (E25-T3) ----------
+   "Who's on this terminal?" belongs on every page, not just /pos: a role
+   that cannot reach Service (kitchen) must still be able to sign out
+   without first trespassing onto a screen it cannot see. Same three acts,
+   same server calls, as the sheet /pos defined first; this page already
+   had `me` and a read-only chip, so the chip becomes tappable rather than
+   being rebuilt. */
+const ROLE_LABEL={owner:"Owner",manager:"Manager",kitchen:"Kitchen",server:"Server"};
+function renderWhoChip(){
+  const chip=$("#whoChip");
+  if(!chip)return;
+  chip.textContent=me?me.name+" · "+(ROLE_LABEL[me.role]||me.role):"Not signed in";
+  chip.classList.toggle("on",!!me);
+}
+function whoClose(){const ov=$("#whoOv");if(ov)ov.classList.remove("open");}
+$("#whoX").onclick=whoClose;
+$("#whoOv").onclick=e=>{if(e.target.id==="whoOv")whoClose();};
+$("#whoChip").onclick=async()=>{
+  const demoStaff=(await dget("/v1/staff/demo-pins").then(r=>r.json())).staff;
+  $("#whoBody").innerHTML=
+    (me?`<div class="who-lbl">Signed in</div><div class="who-name">${esc(me.name)} · ${esc(ROLE_LABEL[me.role]||me.role)}</div>`:"")
+    +`<div class="who-lbl">Staff (demo PINs shown, concept demo)</div>
+     <div class="who-list">${demoStaff.map(s=>`<button class="who-opt" data-pin="${esc(s.demoPin)}">${esc(s.name)} · ${esc(s.role)} · ${esc(s.demoPin)}</button>`).join("")}</div>
+     <div class="who-lbl">PIN</div>
+     <input class="who-fld" id="whoPin" inputmode="numeric" maxlength="6" placeholder="••••">`;
+  $("#whoFoot").innerHTML=`<button class="who-go" id="whoGo">Sign in</button>`
+    +(me?`<button class="who-out" id="whoClock">Clock out…</button><button class="who-out" id="whoOut">Sign out</button>`:"");
+  document.querySelectorAll("[data-pin]").forEach(b=>b.onclick=()=>{$("#whoPin").value=b.dataset.pin;});
+  $("#whoGo").onclick=async()=>{
+    const res=await fetch("/v1/session",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({deviceId:DEVICE,pin:$("#whoPin").value})});
+    const data=await res.json().catch(()=>({}));
+    if(!res.ok){toast(data.reason||"PIN not recognized",true);return;}
+    whoClose();toast("Hi "+data.employee.name);await loadWho();
+  };
+  const outBtn=$("#whoOut");
+  if(outBtn)outBtn.onclick=async()=>{
+    await fetch("/v1/session/signout",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({deviceId:DEVICE})});
+    location.href="/";
+  };
+  const clockBtn=$("#whoClock");
+  if(clockBtn)clockBtn.onclick=()=>{
+    $("#whoBody").innerHTML=
+      `<div class="who-lbl">Declared cash tips ($) for ${esc(me.name)}</div>
+       <input class="who-fld" id="ckTips" inputmode="decimal" placeholder="0.00">
+       <div class="who-lbl">Your PIN confirms the declaration</div>
+       <input class="who-fld" id="ckPin" inputmode="numeric" maxlength="6" placeholder="••••">`;
+    $("#whoFoot").innerHTML=`<button class="who-go" id="ckGo">Clock out</button>`;
+    $("#ckGo").onclick=async()=>{
+      const tips=Math.round(parseFloat($("#ckTips").value||"0")*100);
+      await fetch("/v1/shifts/clockout",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({operationId:crypto.randomUUID(),deviceId:DEVICE,pin:$("#ckPin").value,declaredTipsMinor:Math.max(0,tips)})});
+      await fetch("/v1/session/signout",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({deviceId:DEVICE})});
+      location.href="/";
+    };
+  };
+  $("#whoOv").classList.add("open");
+};
 
 /* every gated call carries the PIN, in the BODY and never in a URL: a manager
    PIN in a query string lands in a log and a history list (E24-T2's rule, and

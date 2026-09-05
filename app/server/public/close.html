@@ -128,6 +128,45 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--brand);outline-
 .refusal-card button{min-height:44px;padding:0 18px;border-radius:12px;
   background:var(--surface-2);color:var(--ink);font-weight:700}
 .refusal-card button.p{background:var(--brand);color:var(--brand-ink)}
+
+/* ---------- APP SHELL: terminal sheet (E25-T3) ----------
+   "Who's on this terminal?" belongs on every page, not just /pos: a role
+   that cannot reach Service (kitchen) must still be able to sign out
+   without first trespassing onto a screen it cannot see. Self-contained
+   (who-* classes) so it never depends on what a page's own sheets look
+   like; identical on every screen. */
+.who-chip{min-height:44px;display:inline-flex;align-items:center;gap:4px;padding:0 14px;border-radius:999px;
+  background:var(--surface-2);color:var(--ink-2);font-size:13px;font-weight:600;white-space:nowrap;transition:transform .1s}
+.who-chip:active{transform:scale(.96)}
+.who-chip.on{background:var(--brand-wash);color:var(--ink)}
+.who-ov{position:fixed;inset:0;z-index:400;background:rgba(0,0,0,.45);display:none;
+  align-items:flex-end;justify-content:center}
+.who-ov.open{display:flex}
+.who-modal{width:100%;max-width:440px;background:var(--panel);border-radius:20px 20px 0 0;
+  box-shadow:0 -8px 30px rgba(0,0,0,.3);max-height:86vh;display:flex;flex-direction:column;
+  animation:whoRise .18s ease-out}
+@keyframes whoRise{from{transform:translateY(16px);opacity:.7}to{transform:none;opacity:1}}
+@media (min-width:640px){.who-ov{align-items:center}.who-modal{border-radius:20px}}
+.who-h{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:18px 20px 6px}
+.who-h h3{font-size:17px}
+.who-h .sub{font-size:12.5px;color:var(--ink-3);margin-top:2px}
+.who-x{width:32px;height:32px;flex-shrink:0;border-radius:999px;background:var(--surface-2);
+  font-size:16px;display:flex;align-items:center;justify-content:center}
+.who-b{padding:6px 20px 4px;overflow-y:auto}
+.who-f{display:flex;gap:8px;padding:14px 20px calc(14px + env(safe-area-inset-bottom,0px))}
+.who-lbl{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);margin:10px 0 6px}
+.who-lbl:first-child{margin-top:0}
+.who-name{font-weight:700;margin:2px 0 4px}
+.who-list{display:flex;flex-wrap:wrap;gap:8px}
+.who-opt{min-height:44px;border-radius:999px;padding:0 14px;background:var(--surface-2);color:var(--ink-2);
+  font-size:13px;font-weight:600;transition:transform .1s}
+.who-opt:active{transform:scale(.96)}
+.who-fld{width:100%;min-height:44px;border-radius:10px;border:1px solid var(--line);background:var(--panel);
+  color:var(--ink);font:inherit;padding:0 12px}
+.who-go{min-height:44px;flex:1;border-radius:999px;background:var(--brand);color:var(--brand-ink);font-weight:700;transition:transform .1s}
+.who-go:active{transform:scale(.97)}
+.who-out{min-height:44px;border-radius:999px;padding:0 16px;background:var(--surface-2);color:var(--ink-2);font-weight:600;transition:transform .1s}
+.who-out:active{transform:scale(.96)}
 /* ============================================================
    APP SHELL (UI-T1, DESIGN.md section 5 "App shell")
    Navigation is a place you go, so it lives in the left icon rail with
@@ -228,7 +267,7 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--brand);outline-
   <header class="topbar">
     <div class="venue"><b data-venue-name>RestaurantOS</b><small>RestaurantOS end of day · live from the server</small></div>
     <div class="screen-title">Close day</div>
-    <div class="top-meta"></div>
+    <div class="top-meta"><button class="who-chip" id="whoChip">Not signed in</button></div>
   </header>
   <div class="shellbody">
 <div class="wrap">
@@ -259,6 +298,12 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--brand);outline-
   <div class="m-f"><button class="btn btn-p" id="fGo"></button></div>
 </div></div>
 
+<div class="who-ov" id="whoOv"><div class="who-modal">
+  <div class="who-h"><div><h3>Who's on this terminal?</h3><div class="sub">Sign in with your PIN. Approvals still ask for a manager.</div></div><button class="who-x" id="whoX">✕</button></div>
+  <div class="who-b" id="whoBody"></div>
+  <div class="who-f" id="whoFoot"></div>
+</div></div>
+
 <div class="toasts" id="toasts"></div>
 
 <script>
@@ -270,6 +315,7 @@ const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"
 const money=n=>"$"+(n/100).toFixed(2);
 const DEVICE=(()=>{try{let d=localStorage.getItem("ros.device");if(!d){d="web-"+crypto.randomUUID().slice(0,8);localStorage.setItem("ros.device",d);}return d;}catch(_){return "web-anon";}})();
 let day=null;
+let me=null;
 
 /* ---------- APP SHELL: role visibility (E25-T2) ----------
    The rail renders only what the session's own matrix allows (staff.ts
@@ -293,6 +339,7 @@ async function applyVisibility(){
     const s=await dget("/v1/session?deviceId="+encodeURIComponent(DEVICE)).then(r=>r.json());
     employee=s.employee;visibility=s.visibility;
   }catch(_){}
+  me=employee;renderWhoChip();
   if(visibility)document.querySelectorAll(".navrail .nav-btn[href]").forEach(a=>{
     const href=a.getAttribute("href");
     const vis=href==="/office"?OFFICE_FAMILY.some(s=>visibility[s]):visibility[RAIL_SCREEN[href]];
@@ -314,6 +361,67 @@ async function applyVisibility(){
   }
   return employee;
 }
+
+/* ---------- APP SHELL: terminal sheet (E25-T3) ----------
+   "Who's on this terminal?" belongs on every page, not just /pos: a role
+   that cannot reach Service (kitchen) must still be able to sign out
+   without first trespassing onto a screen it cannot see. Same three acts,
+   same server calls, as the sheet /pos defined first. Identical on every
+   screen except which visibility function it re-runs after a switch. */
+const ROLE_LABEL={owner:"Owner",manager:"Manager",kitchen:"Kitchen",server:"Server"};
+function renderWhoChip(){
+  const chip=document.getElementById("whoChip");
+  if(!chip)return;
+  chip.textContent=me?me.name+" · "+(ROLE_LABEL[me.role]||me.role):"Not signed in";
+  chip.classList.toggle("on",!!me);
+}
+function whoClose(){const ov=document.getElementById("whoOv");if(ov)ov.classList.remove("open");}
+document.getElementById("whoX").onclick=whoClose;
+document.getElementById("whoOv").onclick=e=>{if(e.target.id==="whoOv")whoClose();};
+document.getElementById("whoChip").onclick=async()=>{
+  const demoStaff=(await dget("/v1/staff/demo-pins").then(r=>r.json())).staff;
+  document.getElementById("whoBody").innerHTML=
+    (me?`<div class="who-lbl">Signed in</div><div class="who-name">${esc(me.name)} · ${esc(ROLE_LABEL[me.role]||me.role)}</div>`:"")
+    +`<div class="who-lbl">Staff (demo PINs shown, concept demo)</div>
+     <div class="who-list">${demoStaff.map(s=>`<button class="who-opt" data-pin="${esc(s.demoPin)}">${esc(s.name)} · ${esc(s.role)} · ${esc(s.demoPin)}</button>`).join("")}</div>
+     <div class="who-lbl">PIN</div>
+     <input class="who-fld" id="whoPin" inputmode="numeric" maxlength="6" placeholder="••••">`;
+  document.getElementById("whoFoot").innerHTML=`<button class="who-go" id="whoGo">Sign in</button>`
+    +(me?`<button class="who-out" id="whoClock">Clock out…</button><button class="who-out" id="whoOut">Sign out</button>`:"");
+  document.querySelectorAll("[data-pin]").forEach(b=>b.onclick=()=>{document.getElementById("whoPin").value=b.dataset.pin;});
+  document.getElementById("whoGo").onclick=async()=>{
+    const res=await fetch("/v1/session",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({deviceId:DEVICE,pin:document.getElementById("whoPin").value})});
+    const data=await res.json().catch(()=>({}));
+    if(!res.ok){toast(data.reason||"PIN not recognized","err");return;}
+    whoClose();toast("Hi "+data.employee.name);await applyVisibility();
+  };
+  const outBtn=document.getElementById("whoOut");
+  if(outBtn)outBtn.onclick=async()=>{
+    await fetch("/v1/session/signout",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({deviceId:DEVICE})});
+    location.href="/";
+  };
+  const clockBtn=document.getElementById("whoClock");
+  if(clockBtn)clockBtn.onclick=()=>{
+    document.getElementById("whoBody").innerHTML=
+      `<div class="who-lbl">Declared cash tips ($) for ${esc(me.name)}</div>
+       <input class="who-fld" id="ckTips" inputmode="decimal" placeholder="0.00">
+       <div class="who-lbl">Your PIN confirms the declaration</div>
+       <input class="who-fld" id="ckPin" inputmode="numeric" maxlength="6" placeholder="••••">`;
+    document.getElementById("whoFoot").innerHTML=`<button class="who-go" id="ckGo">Clock out</button>`;
+    document.getElementById("ckGo").onclick=async()=>{
+      const tips=Math.round(parseFloat(document.getElementById("ckTips").value||"0")*100);
+      await fetch("/v1/shifts/clockout",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({operationId:crypto.randomUUID(),deviceId:DEVICE,pin:document.getElementById("ckPin").value,declaredTipsMinor:Math.max(0,tips)})});
+      await fetch("/v1/session/signout",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({deviceId:DEVICE})});
+      location.href="/";
+    };
+  };
+  document.getElementById("whoOv").classList.add("open");
+};
+
 applyVisibility();
 
 function toast(m,k){const el=document.createElement("div");el.className="toast"+(k?" "+k:"");el.textContent=m;

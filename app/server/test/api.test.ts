@@ -2075,8 +2075,13 @@ describe("reads", () => {
     // an initial PIN typed twice, checked here, everything else left to the engine
     expect(body).toContain('pinPair("aPin","aPin2")');
     expect(body).toContain("Those two PINs are not the same");
-    // a PIN is never rendered, and deactivation says what survives it
-    expect(body).not.toContain("demoPin");
+    // a PIN is never rendered on the roster, and deactivation says what
+    // survives it. Scoped to renderStaff() itself (not the whole page):
+    // E25-T3's terminal sheet legitimately reads demoPin off the SEPARATE
+    // /v1/staff/demo-pins endpoint every page now carries, same as pos.html
+    // always has, so the substring appears elsewhere in this script on purpose
+    const rosterFn = body.slice(body.indexOf("function renderStaff()"), body.indexOf("function toggleDetail"));
+    expect(rosterFn).not.toContain("demoPin");
     expect(body).toContain("Every check they opened keeps their name on it");
 
     // manager territory: gated on the first mutation, held for the visit
@@ -5533,5 +5538,71 @@ describe("the back office hub (UI-T5)", () => {
     const schedule = (await app.inject({ method: "GET", url: "/schedule" })).body;
     expect(schedule).toContain('new URLSearchParams(location.search).get("view")');
     expect(schedule).toContain('.view[data-view="${wantView}"]');
+  });
+});
+
+/* ------------- the terminal sheet goes everywhere (E25-T3) -------------
+ * Founder-reported defect: kitchen could not reach /pos, and the only Sign
+ * out sat on the sheet that lived there, so a kitchen sign-in was trapped in
+ * its own app. Page-serve assertions only: every page gets the same chip and
+ * sheet pos.html already had, kds.html (which had neither before this
+ * ticket) and schedule.html (which had a read-only chip) get the closest
+ * look because the ticket names them explicitly. */
+describe("everyone can leave: the terminal sheet goes everywhere (E25-T3)", () => {
+  // /pos is the reference implementation this ticket replicates rather than
+  // touches: it already had the chip and sheet, under its own older ids
+  // (#btnWho/#ovWho), so it is left out of the generic sweep below
+  const PAGES = ["/tables", "/kds", "/close", "/reports", "/reservations", "/menu", "/schedule", "/settings", "/office"];
+
+  it("kds.html gains the identity chip and sheet it had none of before", async () => {
+    const body = (await buildServer().inject({ method: "GET", url: "/kds" })).body;
+    // the chip: no session reads "Not signed in", tapping it opens the sheet
+    expect(body).toContain('<button class="who-chip" id="whoChip">Not signed in</button>');
+    expect(body).toContain('const ROLE_LABEL={owner:"Owner",manager:"Manager",kitchen:"Kitchen",server:"Server"}');
+    expect(body).toContain('document.getElementById("whoChip").onclick=async()=>{');
+    // the sheet itself, and the KDS's own always-dark tokens style it (no
+    // separate light/dark branch needed since this page has none either)
+    expect(body).toContain('<div class="who-ov" id="whoOv">');
+    expect(body).toContain('id="whoBody"');
+    expect(body).toContain('id="whoFoot"');
+    // the same three acts, the same server calls /pos already makes
+    expect(body).toContain('fetch("/v1/session",{method:"POST"');
+    expect(body).toContain('fetch("/v1/session/signout",{method:"POST"');
+    expect(body).toContain('fetch("/v1/shifts/clockout",{method:"POST"');
+    // demo-PIN helper list, off the same public endpoint pos.html reads
+    expect(body).toContain('dget("/v1/staff/demo-pins")');
+    // signing out lands on the lock screen
+    expect(body).toContain('location.href="/";');
+  });
+
+  it("schedule.html's chip becomes tappable and always shows the role, not just for a manager", async () => {
+    const body = (await buildServer().inject({ method: "GET", url: "/schedule" })).body;
+    // the chip is a button now, not a read-only span
+    expect(body).toContain('<button class="who-chip" id="whoChip">Not signed in</button>');
+    expect(body).not.toContain('<span class="chip mut" id="whoChip">');
+    // every role shows under the name (lock screen's pattern), not just "manager"
+    expect(body).toContain('me?me.name+" · "+(ROLE_LABEL[me.role]||me.role):"Not signed in"');
+    expect(body).not.toContain('me.role==="manager"?" · manager":""');
+    // tapping it opens the same sheet, and a successful switch re-runs THIS
+    // page's own visibility function (loadWho), not a generic one
+    expect(body).toContain('$("#whoChip").onclick=async()=>{');
+    expect(body).toContain('whoClose();toast("Hi "+data.employee.name);await loadWho();');
+  });
+
+  it("gives every page the chip and the sheet's three acts, kitchen included", async () => {
+    const app = buildServer();
+    for (const url of PAGES) {
+      const body = (await app.inject({ method: "GET", url })).body;
+      expect(body, `${url} missing the who-chip`).toContain('id="whoChip"');
+      expect(body, `${url} missing the sheet`).toContain('id="whoOv"');
+      expect(body, `${url} missing sign-in`).toContain('fetch("/v1/session",{method:"POST"');
+      expect(body, `${url} missing sign-out`).toContain('fetch("/v1/session/signout",{method:"POST"');
+      expect(body, `${url} missing clock-out`).toContain('fetch("/v1/shifts/clockout",{method:"POST"');
+      expect(body, `${url} missing the demo-PIN helper`).toContain('/v1/staff/demo-pins');
+      // touch and press feedback are non-negotiable (DESIGN.md section 8)
+      expect(body, `${url} chip under 44px`).toContain(".who-chip{min-height:44px");
+      expect(body, `${url} option rows under 44px`).toContain(".who-opt{min-height:44px");
+      expect(body, `${url} sign-in button under 44px`).toContain(".who-go{min-height:44px");
+    }
   });
 });
